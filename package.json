@@ -29,7 +29,7 @@
     "@hono/vite-dev-server": "^0.23.0",
     "@preact/preset-vite": "^2.9.4",
     "@substrate-system/debug": "^0.9.38",
-    "@substrate-system/tapout": "^0.0.33",
+    "@substrate-system/tapout": "^0.0.34",
     "@substrate-system/tapzero": "^0.10.16",
     "@typescript-eslint/eslint-plugin": "^8.18.2",
     "@typescript-eslint/parser": "^8.19.1",
