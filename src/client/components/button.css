@@ -1,0 +1,63 @@
+@keyframes spinner {
+    to { transform: rotate(360deg); }
+}
+
+a.btn, button.btn {
+    min-width: 6rem;
+    text-decoration: none;
+    background: none;
+    font-size: 1rem;
+    color: black;
+    border: 1px solid;
+    outline: 1px solid transparent;
+    padding: 0.5rem 2rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    transform: translateY(1px);
+
+    &:hover {
+        outline: 1px solid;
+        transform: translateY(0);
+    }
+
+    &:active {
+        transform: translateY(2px);
+    }
+
+    &:disabled {
+        cursor: not-allowed;
+        opacity: 0.6;
+
+        &:hover {
+            transform: translateY(1px);
+            outline-color: transparent;
+        }
+    }
+
+    &.spinning {
+        opacity: 0.6;
+
+        & .btn-content {
+            visibility: hidden;
+        }
+
+        &:hover {
+            cursor: initial;
+        }
+
+        &::after {
+            content: "";
+            background: transparent;
+            box-sizing: border-box;
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            inset: 0;
+            margin: auto;
+            border-radius: 50%;
+            border-top: 2px solid black;
+            border-right: 2px solid transparent;
+            animation: spinner 0.6s linear infinite;
+        }
+    }
+}

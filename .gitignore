@@ -1,0 +1,9 @@
+node_modules
+bundle.js
+.DS_Store
+test/*.js
+dist
+.env
+public
+.wrangler
+.dev.vars

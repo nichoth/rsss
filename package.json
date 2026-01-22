@@ -1,0 +1,50 @@
+{
+  "type": "module",
+  "private": "true",
+  "version": "0.0.0",
+  "main": "public/index.js",
+  "scripts": {
+    "lint": "eslint \"./**/*.{ts,js}\"",
+    "build-tests": "esbuild test/index.ts --bundle --format=cjs --keep-names > test/test-bundle.js",
+    "test": "esbuild ./test/index.ts --bundle | tapout",
+    "build": "mkdir -p ./public && rm -rf ./public/* && vite build",
+    "start": "vite",
+    "preversion": "npm run lint",
+    "version": "auto-changelog --template keepachangelog --breaking-pattern 'BREAKING CHANGE' && git add CHANGELOG.md",
+    "postversion": "git push --follow-tags",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@preact/signals": "^2.5.1",
+    "@substrate-system/routes": "^5.0.0",
+    "hono": "^4.11.3",
+    "htm": "^3.1.1",
+    "ky": "^1.14.1",
+    "preact": "^10.28.0",
+    "route-event": "^7.4.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.19.0",
+    "@cloudflare/workers-types": "^4.20250109.0",
+    "@hono/vite-dev-server": "^0.23.0",
+    "@preact/preset-vite": "^2.9.4",
+    "@substrate-system/debug": "^0.9.38",
+    "@substrate-system/tapout": "^0.0.33",
+    "@substrate-system/tapzero": "^0.10.16",
+    "@typescript-eslint/eslint-plugin": "^8.18.2",
+    "@typescript-eslint/parser": "^8.19.1",
+    "auto-changelog": "^2.4.0",
+    "concurrently": "^9.1.2",
+    "esbuild": "^0.27.2",
+    "eslint": "^8.57.1",
+    "eslint-config-standard": "^17.1.0",
+    "lightningcss": "^1.30.2",
+    "stylelint": "^16.12.0",
+    "stylelint-config-standard": "^39.0.1",
+    "tap-spec": "^5.0.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.0",
+    "wrangler": "^4.56.0"
+  },
+  "author": "nichoth <nichoth@nichoth.com> (https://nichoth.com)"
+}
