@@ -1,81 +1,71 @@
 import { html } from 'htm/preact'
 import { FunctionComponent, render } from 'preact'
+import { useEffect } from 'preact/hooks'
 import { useComputed } from '@preact/signals'
-import Debug from '@substrate-system/debug'
-import ky from 'ky'
-import { State } from './state.js'
-import { Button } from './components/button.js'
-import Router from './routes/index.js'
+import {
+    State,
+    checkAuth,
+    loadFeeds,
+    loadItems,
+    loadCounts,
+    type AppState
+} from './state.js'
+import { LoginPage } from './routes/login.js'
+import { FeedReader } from './routes/feed-reader.js'
 import './style.css'
 
-const router = Router()
 const state = State()
-const debug = Debug('template')
 
 if (import.meta.env.DEV || import.meta.env.MODE === 'staging') {
     // @ts-expect-error DEV env
     window.state = state
 }
 
-// example of calling our API
-const json = await ky.get('/api/helloworld').json()
+export const App: FunctionComponent<{ state: AppState }> = function App({ state }) {
+    const route = useComputed(() => state.route.value)
+    const isAuthenticated = useComputed(() => state.isAuthenticated.value)
+    const authLoading = useComputed(() => state.authLoading.value)
 
-export const Example:FunctionComponent = function Example () {
-    debug('rendering example...')
-    const match = useComputed(() => router.match(state.route.value))
+    // Check auth on mount
+    useEffect(() => {
+        checkAuth(state)
+    }, [])
 
-    if (!match.value) {
-        return html`<div class="404">
-            <h1>404</h1>
-        </div>`
+    // Load data when authenticated
+    useEffect(() => {
+        if (isAuthenticated.value) {
+            loadFeeds(state)
+            loadItems(state)
+            loadCounts(state)
+        }
+    }, [isAuthenticated.value])
+
+    // Redirect to login if not authenticated
+    useEffect(() => {
+        if (!authLoading.value && !isAuthenticated.value) {
+            if (!route.value.startsWith('/login')) {
+                state._setRoute('/login')
+            }
+        }
+    }, [authLoading.value, isAuthenticated.value, route.value])
+
+    // Loading state
+    if (authLoading.value) {
+        return html`
+            <div class="loading-screen">
+                <div class="loading-spinner"></div>
+                <p>Loading...</p>
+            </div>
+        `
     }
 
-    const ChildNode = match.value.action(match, state.route)
-
-    function plus (ev) {
-        ev.preventDefault()
-        State.Increase(state)
+    // Login page
+    if (route.value.startsWith('/login') || !isAuthenticated.value) {
+        return html`<${LoginPage} state=${state} />`
     }
 
-    function minus (ev) {
-        ev.preventDefault()
-        State.Decrease(state)
-    }
-
-    return html`<div>
-        <h1>example</h1>
-
-        <h2>the API response</h2>
-        <pre>
-            ${JSON.stringify(json, null, 2)}
-        </pre>
-
-        <h2>routes</h2>
-        <ul>
-            <li><a href="/aaa">aaa</a></li>
-            <li><a href="/bbb">bbb</a></li>
-            <li><a href="/ccc">ccc</a></li>
-        </ul>
-
-        <h2>counter</h2>
-        <div>
-            <div>count: ${state.count.value}</div>
-            <ul class="count-controls">
-                <li>
-                    <${Button} class="btn" onClick=${plus}>
-                        plus
-                    <//>
-                </li>
-                <li>
-                    <${Button} class="btn" onClick=${minus}>
-                        minus
-                    <//>
-                </li>
-            </ul>
-        </div>
-
-        <${ChildNode} />
-    </div>`
+    // Main app
+    return html`<${FeedReader} state=${state} />`
 }
 
-render(html`<${Example} />`, document.getElementById('root')!)
+render(html`<${App} state=${state} />`, document.getElementById('root')!)

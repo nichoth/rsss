@@ -1,67 +1,77 @@
-# template cloudflare worker
+# Cloud Collie
 
-A template for applications using [preact](https://preactjs.com/), [htm](https://github.com/developit/htm/tree/master), [typescript](https://www.typescriptlang.org/), and [cloudflare](https://www.cloudflare.com/) as host. Use
-[tapout](https://github.com/substrate-system/tapout)
-for tests in a browser environment.
+Collie RSS reader + Bluesky OAuth.
 
-See
-[template-ts-preact-htm-app](https://github.com/nichoth/template-ts-preact-htm-app)
-for the same thing, but not using cloudflare.
-
-See [template-ts-preact-htm](https://github.com/nichoth/template-ts-preact-htm)
-for something similar, but for dependency modules.
-
-## Use
-
-1. Use the template button in github. Or clone this then
-   `rm -rf .git && git init`. 
-2. Then `npm i && npm init`.
-3. Edit the source code in `src/`.
-4. Setup the environment variables:
-   ```sh
-   mv .dev.vars.example .dev.vars
-   ```
-5. Write docs &mdash; `mv README.example.md README.md` + edit the readme file
-
-## _Featuring_
-
-* `preversion` npm hook -- lint.
-* `postversion` npm hook -- `git push && git push --tags`
-* eslint via [eslint-config-standard](https://github.com/standard/eslint-config-standard) -- `npm run lint`
-* test in a browser environment via `tape-run` -- see `npm test`.
-  Includes `tap` testing tools &mdash;
-  [tapzero](https://github.com/substrate-system/tapzero) and
-  [tap-spec](https://www.npmjs.com/package/tap-spec)
-* CI via github actions
-* routing via
-  [route-event](https://github.com/nichoth/route-event) and
-  [@substrate-system/routes](https://github.com/substrate-system/routes)
-
-## Develop
-
-Use the vite Cloudflare plugin to start a local dev environment.
+## develop
 
 ```sh
 npm start
 ```
 
-## Cloudflare
+## Architecture                                                                  
+                                                                                
+### Worker (Hono) - Main entry point
 
-Use the Cloudflare GUI to import your repo.
+* Bluesky OAuth authentication (AT Protocol)                                  
+* Session management with encrypted cookies                                   
+* Routes requests to user-specific Durable Objects                            
+* Static asset serving for the Preact frontend                                
+                                                                              
+### Durable Object per user (CollieUserDO)
 
-Deploy from the CLI with `npx wrangler deploy`.
+* Uses SQLite storage for feeds and items                                     
+* Uses the Hibernation API (extends DurableObject)                            
+* Alarms for periodic feed refreshing (every 10 minutes)                      
+* Complete RSS/Atom feed parser                                               
+                                                                              
+### Frontend
 
-## Frontend Architecture
+* Login page with Bluesky OAuth                                               
+* Feed management (add/delete/refresh)                                        
+* Item list with filtering (unread/starred/by feed)                           
+* Item reader with read/star toggles                                          
+* Responsive design                                                           
 
-See
-[this article](https://gomakethings.com/easier-state-management-with-preact-signals/)
-for more details about application architecture.
 
-We create application state and logic in the file
-[./src/state.ts](./src/state.ts). This exports static functions, creates a
-state object, and sets up URL routing.
+## Files                                                                     
 
-In the view code, you would call the functions exposed in
-[state](./src/state.ts) with a state instance in response to application events.
+```
+src/                                                                          
+├── server/                                                                   
+│   ├── index.ts                    # Main Hono worker                        
+│   ├── auth/oauth.ts               # Bluesky OAuth implementation            
+│   └── durable-objects/                                                      
+│       └── collie-user.ts          # Per-user DO with SQLite                 
+└── client/                                                                   
+    ├── index.ts                    # Main Preact entry                       
+    ├── state.ts                    # State management & API client           
+    ├── style.css                   # All styles                              
+    └── routes/                                                               
+        ├── login.ts                # Login page component                    
+        └── feed-reader.ts          # Main feed reader UI                     
+```
+                                                                              
+## Running Locally                                                               
 
-## Notes
+```sh
+npm run start           # Start dev server
+```
+                                                                              
+Then access `http://localhost:8888` and use the "Dev Login" button in           
+development mode.
+                                                                              
+## Deploy
+                                                                              
+1. Create a KV namespace for sessions:
+```sh
+wrangler kv:namespace create SESSIONS                                         
+```
+2. Update wrangler.jsonc with the KV ID                                       
+3. Set secrets:                                                               
+```sh
+wrangler secret put SESSION_SECRET                                            
+```
+4. Deploy:                                                                    
+```sh
+wrangler deploy                      
+```

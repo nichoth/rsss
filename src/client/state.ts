@@ -1,46 +1,399 @@
-import { Signal, signal } from '@preact/signals'
+import { signal, computed } from '@preact/signals'
 import Route from 'route-event'
+import ky from 'ky'
 
-/**
- * Setup any state
- *   - routes
- */
-export function State ():{
-    route:Signal<string>;
-    count:Signal<number>;
-    _setRoute:(path:string)=>void;
-} {  // eslint-disable-line indent
+export interface User {
+    did: string
+    handle: string
+}
+
+export interface Feed {
+    id: number
+    url: string
+    title: string | null
+    description: string | null
+    site_url: string | null
+    last_fetched: string | null
+    created_at: string
+}
+
+export interface Item {
+    id: number
+    feed_id: number
+    guid: string
+    title: string | null
+    link: string | null
+    description: string | null
+    content: string | null
+    author: string | null
+    pub_date: string | null
+    is_read: number
+    is_starred: number
+    created_at: string
+    feed_title?: string
+}
+
+export interface ItemsResponse {
+    items: Item[]
+    total: number
+    limit: number
+    offset: number
+}
+
+export interface CountsResponse {
+    unread: number
+    starred: number
+    total: number
+}
+
+export function State() {
     const onRoute = Route()
 
-    const state = {
-        _setRoute: onRoute.setRoute.bind(onRoute),
-        count: signal<number>(0),
-        route: signal<string>(location.pathname + location.search)
-    }
+    // Route state
+    const route = signal(location.pathname + location.search)
 
-    /**
-     * set the app state to match the browser URL
-     */
-    onRoute((path:string, data) => {
-        // for github pages
-        const newPath = path.replace('/template-ts-preact-htm/', '/')
-        state.route.value = newPath
-        // handle scroll state like a web browser
-        // (restore scroll position on back/forward)
+    // Auth state
+    const user = signal<User | null>(null)
+    const authLoading = signal(true)
+    const authError = signal<string | null>(null)
+
+    // Feeds state
+    const feeds = signal<Feed[]>([])
+    const feedsLoading = signal(false)
+
+    // Items state
+    const items = signal<Item[]>([])
+    const itemsLoading = signal(false)
+    const itemsTotal = signal(0)
+    const itemsOffset = signal(0)
+
+    // Counts
+    const counts = signal<CountsResponse>({ unread: 0, starred: 0, total: 0 })
+
+    // Selected feed filter
+    const selectedFeedId = signal<number | null>(null)
+    const showUnreadOnly = signal(false)
+    const showStarredOnly = signal(false)
+
+    // Selected item for reading
+    const selectedItem = signal<Item | null>(null)
+
+    // Computed: is authenticated
+    const isAuthenticated = computed(() => user.value !== null)
+
+    // Set up route listener
+    onRoute((path: string, data) => {
+        route.value = path
         if (data.popstate) {
-            return window.scrollTo(data.scrollX, data.scrollY)
+            window.scrollTo(data.scrollX, data.scrollY)
+        } else {
+            window.scrollTo(0, 0)
         }
-        // if this was a link click (not back button), then scroll to top
-        window.scrollTo(0, 0)
     })
 
-    return state
+    return {
+        _setRoute: onRoute.setRoute.bind(onRoute),
+        route,
+        user,
+        authLoading,
+        authError,
+        feeds,
+        feedsLoading,
+        items,
+        itemsLoading,
+        itemsTotal,
+        itemsOffset,
+        counts,
+        selectedFeedId,
+        showUnreadOnly,
+        showStarredOnly,
+        selectedItem,
+        isAuthenticated
+    }
 }
 
-State.Increase = function (state:ReturnType<typeof State>) {
-    state.count.value++
+export type AppState = ReturnType<typeof State>
+
+/**
+ * API client for Collie endpoints
+ */
+const api = ky.create({
+    prefixUrl: '/api',
+    throwHttpErrors: false
+})
+
+/**
+ * Check authentication status
+ */
+export async function checkAuth(state: AppState): Promise<void> {
+    state.authLoading.value = true
+    state.authError.value = null
+
+    try {
+        const response = await api.get('me')
+
+        if (response.ok) {
+            const data = await response.json<{ authenticated: boolean; did: string; handle: string }>()
+            if (data.authenticated) {
+                state.user.value = { did: data.did, handle: data.handle }
+            } else {
+                state.user.value = null
+            }
+        } else {
+            state.user.value = null
+        }
+    } catch {
+        state.user.value = null
+    } finally {
+        state.authLoading.value = false
+    }
 }
 
-State.Decrease = function (state:ReturnType<typeof State>) {
-    state.count.value--
+/**
+ * Start OAuth login flow
+ */
+export async function login(state: AppState, handle: string): Promise<void> {
+    state.authLoading.value = true
+    state.authError.value = null
+
+    try {
+        const response = await api.post('auth/login', { json: { handle } })
+
+        if (!response.ok) {
+            const error = await response.json<{ error: string }>()
+            throw new Error(error.error || 'Login failed')
+        }
+
+        const data = await response.json<{ authUrl: string }>()
+
+        // Redirect to OAuth provider
+        window.location.href = data.authUrl
+    } catch (err) {
+        state.authError.value = err instanceof Error ? err.message : 'Login failed'
+        state.authLoading.value = false
+    }
+}
+
+/**
+ * Dev mode login (for testing)
+ */
+export async function devLogin(state: AppState): Promise<void> {
+    state.authLoading.value = true
+
+    try {
+        const response = await api.post('auth/dev-login', {
+            json: { handle: 'test.bsky.social' }
+        })
+
+        if (response.ok) {
+            await checkAuth(state)
+        }
+    } finally {
+        state.authLoading.value = false
+    }
+}
+
+/**
+ * Logout
+ */
+export async function logout(state: AppState): Promise<void> {
+    await api.post('auth/logout')
+    state.user.value = null
+    state.feeds.value = []
+    state.items.value = []
+    window.location.href = '/login'
+}
+
+/**
+ * Load feeds
+ */
+export async function loadFeeds(state: AppState): Promise<void> {
+    state.feedsLoading.value = true
+
+    try {
+        const response = await api.get('collie/feeds')
+
+        if (response.ok) {
+            const data = await response.json<{ feeds: Feed[] }>()
+            state.feeds.value = data.feeds
+        }
+    } finally {
+        state.feedsLoading.value = false
+    }
+}
+
+/**
+ * Add a new feed
+ */
+export async function addFeed(state: AppState, url: string): Promise<{ success: boolean; error?: string }> {
+    try {
+        const response = await api.post('collie/feeds', { json: { url } })
+
+        if (response.ok) {
+            await loadFeeds(state)
+            await loadCounts(state)
+            return { success: true }
+        } else {
+            const error = await response.json<{ error: string }>()
+            return { success: false, error: error.error }
+        }
+    } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : 'Failed to add feed' }
+    }
+}
+
+/**
+ * Delete a feed
+ */
+export async function deleteFeed(state: AppState, feedId: number): Promise<void> {
+    const response = await api.delete(`collie/feeds/${feedId}`)
+
+    if (response.ok) {
+        await loadFeeds(state)
+        await loadItems(state)
+        await loadCounts(state)
+    }
+}
+
+/**
+ * Refresh all feeds
+ */
+export async function refreshFeeds(state: AppState): Promise<void> {
+    state.feedsLoading.value = true
+
+    try {
+        await api.post('collie/feeds/refresh')
+        await loadFeeds(state)
+        await loadItems(state)
+        await loadCounts(state)
+    } finally {
+        state.feedsLoading.value = false
+    }
+}
+
+/**
+ * Load items with current filters
+ */
+export async function loadItems(state: AppState): Promise<void> {
+    state.itemsLoading.value = true
+
+    try {
+        const params = new URLSearchParams()
+        params.set('limit', '50')
+        params.set('offset', state.itemsOffset.value.toString())
+
+        if (state.selectedFeedId.value) {
+            params.set('feed_id', state.selectedFeedId.value.toString())
+        }
+
+        if (state.showUnreadOnly.value) {
+            params.set('is_read', 'false')
+        }
+
+        if (state.showStarredOnly.value) {
+            params.set('is_starred', 'true')
+        }
+
+        const response = await api.get(`collie/items?${params.toString()}`)
+
+        if (response.ok) {
+            const data = await response.json<ItemsResponse>()
+            state.items.value = data.items
+            state.itemsTotal.value = data.total
+        }
+    } finally {
+        state.itemsLoading.value = false
+    }
+}
+
+/**
+ * Load counts
+ */
+export async function loadCounts(state: AppState): Promise<void> {
+    try {
+        const response = await api.get('collie/items/count')
+
+        if (response.ok) {
+            const data = await response.json<CountsResponse>()
+            state.counts.value = data
+        }
+    } catch {
+        // Ignore count errors
+    }
+}
+
+/**
+ * Mark item as read/unread
+ */
+export async function toggleItemRead(state: AppState, itemId: number, isRead: boolean): Promise<void> {
+    const response = await api.patch(`collie/items/${itemId}`, {
+        json: { is_read: isRead }
+    })
+
+    if (response.ok) {
+        // Update local state
+        state.items.value = state.items.value.map(item =>
+            item.id === itemId ? { ...item, is_read: isRead ? 1 : 0 } : item
+        )
+
+        if (state.selectedItem.value?.id === itemId) {
+            state.selectedItem.value = { ...state.selectedItem.value, is_read: isRead ? 1 : 0 }
+        }
+
+        await loadCounts(state)
+    }
+}
+
+/**
+ * Toggle item starred
+ */
+export async function toggleItemStarred(state: AppState, itemId: number, isStarred: boolean): Promise<void> {
+    const response = await api.patch(`collie/items/${itemId}`, {
+        json: { is_starred: isStarred }
+    })
+
+    if (response.ok) {
+        // Update local state
+        state.items.value = state.items.value.map(item =>
+            item.id === itemId ? { ...item, is_starred: isStarred ? 1 : 0 } : item
+        )
+
+        if (state.selectedItem.value?.id === itemId) {
+            state.selectedItem.value = { ...state.selectedItem.value, is_starred: isStarred ? 1 : 0 }
+        }
+
+        await loadCounts(state)
+    }
+}
+
+/**
+ * Mark all items as read
+ */
+export async function markAllRead(state: AppState, feedId?: number): Promise<void> {
+    const body = feedId ? { feed_id: feedId } : {}
+    const response = await api.post('collie/items/mark-all-read', { json: body })
+
+    if (response.ok) {
+        await loadItems(state)
+        await loadCounts(state)
+    }
+}
+
+/**
+ * Select an item for reading
+ */
+export async function selectItem(state: AppState, item: Item): Promise<void> {
+    state.selectedItem.value = item
+
+    // Mark as read if not already
+    if (!item.is_read) {
+        await toggleItemRead(state, item.id, true)
+    }
+}
+
+/**
+ * Clear selected item
+ */
+export function clearSelectedItem(state: AppState): void {
+    state.selectedItem.value = null
 }

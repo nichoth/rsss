@@ -1,0 +1,89 @@
+import { html } from 'htm/preact'
+import { FunctionComponent } from 'preact'
+import { useState } from 'preact/hooks'
+import { useComputed } from '@preact/signals'
+import { login, devLogin, type AppState } from '../state.js'
+
+export const LoginPage: FunctionComponent<{ state: AppState }> = function LoginPage({ state }) {
+    const [handle, setHandle] = useState('')
+    const authLoading = useComputed(() => state.authLoading.value)
+    const authError = useComputed(() => state.authError.value)
+
+    // Check for error in URL params
+    const urlParams = new URLSearchParams(window.location.search)
+    const urlError = urlParams.get('error')
+
+    async function handleSubmit(e: Event) {
+        e.preventDefault()
+        if (!handle.trim()) return
+        await login(state, handle.trim())
+    }
+
+    async function handleDevLogin(e: Event) {
+        e.preventDefault()
+        await devLogin(state)
+        state._setRoute('/')
+    }
+
+    return html`
+        <div class="login-page">
+            <div class="login-container">
+                <div class="login-header">
+                    <h1>CloudCollie</h1>
+                    <p>Your personal RSS reader in the cloud</p>
+                </div>
+
+                ${(authError.value || urlError) && html`
+                    <div class="error-message">
+                        ${authError.value || urlError}
+                    </div>
+                `}
+
+                <form onSubmit=${handleSubmit} class="login-form">
+                    <div class="form-group">
+                        <label for="handle">Bluesky Handle</label>
+                        <input
+                            type="text"
+                            id="handle"
+                            name="handle"
+                            placeholder="yourname.bsky.social"
+                            value=${handle}
+                            onInput=${(e: Event) => setHandle((e.target as HTMLInputElement).value)}
+                            disabled=${authLoading.value}
+                            required
+                        />
+                    </div>
+
+                    <button
+                        type="submit"
+                        class="btn btn-primary"
+                        disabled=${authLoading.value || !handle.trim()}
+                    >
+                        ${authLoading.value ? 'Signing in...' : 'Sign in with Bluesky'}
+                    </button>
+                </form>
+
+                ${import.meta.env.DEV && html`
+                    <div class="dev-login">
+                        <hr />
+                        <p>Development mode:</p>
+                        <button
+                            type="button"
+                            class="btn btn-secondary"
+                            onClick=${handleDevLogin}
+                        >
+                            Dev Login (skip OAuth)
+                        </button>
+                    </div>
+                `}
+
+                <div class="login-footer">
+                    <p>
+                        Sign in with your Bluesky account to access your personal
+                        feed reader. Each user gets their own isolated instance.
+                    </p>
+                </div>
+            </div>
+        </div>
+    `
+}
