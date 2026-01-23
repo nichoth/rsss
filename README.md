@@ -1,8 +1,26 @@
 # Cloud Collie
 
-Collie RSS reader + Bluesky OAuth.
+[Collie RSS reader](https://github.com/collie-reader/collied) + Bluesky OAuth.
 
-## develop
+<details><summary><h2>Contents</h2></summary>
+
+<!-- toc -->
+
+- [Develop](#develop)
+- [Architecture](#architecture)
+  * [Worker (Hono) - Main entry point](#worker-hono---main-entry-point)
+  * [Durable Object per user (CollieUserDO)](#durable-object-per-user-collieuserdo)
+  * [Frontend](#frontend)
+- [Files](#files)
+- [Running Locally](#running-locally)
+- [Deploy](#deploy)
+
+<!-- tocstop -->
+
+</details>
+
+
+## Develop
 
 ```sh
 npm start
@@ -12,17 +30,17 @@ npm start
                                                                                 
 ### Worker (Hono) - Main entry point
 
-* Bluesky OAuth authentication (AT Protocol)                                  
-* Session management with encrypted cookies                                   
-* Routes requests to user-specific Durable Objects                            
-* Static asset serving for the Preact frontend                                
+* Bluesky OAuth authentication (AT Protocol)
+* Session management with encrypted cookies
+* Routes requests to user-specific Durable Objects
+* Static asset serving for the Preact frontend
                                                                               
 ### Durable Object per user (CollieUserDO)
 
-* Uses SQLite storage for feeds and items                                     
-* Uses the Hibernation API (extends DurableObject)                            
-* Alarms for periodic feed refreshing (every 10 minutes)                      
-* Complete RSS/Atom feed parser                                               
+* Uses SQLite storage for feeds and items
+* Uses the Hibernation API (extends DurableObject)
+* Alarms for periodic feed refreshing (every 10 minutes)
+* Complete RSS/Atom feed parser
                                                                               
 ### Frontend
 
