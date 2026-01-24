@@ -16,6 +16,8 @@ import {
     type Item,
     type Feed
 } from '../state.js'
+import { Button } from '../components/button.js'
+import { ButtonIcon } from '../components/button-icon.js'
 import { ELLIPSIS } from '../constants.js'
 
 export const FeedReader: FunctionComponent<{ state: AppState }> = function FeedReader ({ state }) {
@@ -145,13 +147,13 @@ export const FeedReader: FunctionComponent<{ state: AppState }> = function FeedR
                     <div class="sidebar-section">
                         <div class="sidebar-header">
                             <h3>Feeds</h3>
-                            <button
+                            <${ButtonIcon}
                                 class="btn btn-icon"
                                 onClick=${() => setShowAddFeed(!showAddFeed)}
                                 title="Add feed"
                             >
                                 +
-                            </button>
+                            <//>
                         </div>
 
                         ${showAddFeed && html`
@@ -163,10 +165,17 @@ export const FeedReader: FunctionComponent<{ state: AppState }> = function FeedR
                                     onInput=${(e: Event) => setNewFeedUrl((e.target as HTMLInputElement).value)}
                                     disabled=${addingFeed}
                                 />
-                                <button type="submit" disabled=${addingFeed || !newFeedUrl.trim()}>
+                                <${Button}
+                                    type="submit"
+                                    disabled=${addingFeed || !newFeedUrl.trim()}
+                                >
                                     ${addingFeed ? '...' : 'Add'}
-                                </button>
-                                ${addFeedError && html`<div class="form-error">${addFeedError}</div>`}
+                                <//>
+                                ${addFeedError && html`<div
+                                    class="form-error"
+                                >
+                                    ${addFeedError}
+                                </div>`}
                             </form>
                         `}
 
