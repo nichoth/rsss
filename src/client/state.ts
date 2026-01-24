@@ -56,33 +56,26 @@ export function State () {
         // Auth state
         user: signal<User|null>(null),
         authLoading: signal(true),
-        const authError = signal<string | null>(null)
-
+        authError: signal<string | null>(null),
         // Feeds state
-        const feeds = signal<Feed[]>([])
-        const feedsLoading = signal(false)
-
+        feeds: signal<Feed[]>([]),
+        feedsLoading: signal(false),
         // Items state
-        const items = signal<Item[]>([])
-        const itemsLoading = signal(false)
-        const itemsTotal = signal(0)
-        const itemsOffset = signal(0)
-
+        items: signal<Item[]>([]),
+        itemsLoading: signal(false),
+        itemsTotal: signal(0),
+        itemsOffset: signal(0),
         // Counts
-        const counts = signal<CountsResponse>({ unread: 0, starred: 0, total: 0 })
-
+        counts: signal<CountsResponse>({ unread: 0, starred: 0, total: 0 }),
         // Selected feed filter
-        const selectedFeedId = signal<number | null>(null)
-        const showUnreadOnly = signal(false)
-        const showStarredOnly = signal(false)
-
+        selectedFeedId: signal<number | null>(null),
+        showUnreadOnly: signal(false),
+        showStarredOnly: signal(false),
         // Selected item for reading
-        const selectedItem = signal<Item | null>(null)
-
+        selectedItem: signal<Item | null>(null),
         // Computed: is authenticated
-        const isAuthenticated = computed(() => user.value !== null)
+        isAuthenticated: computed(() => state.user.value !== null)
     }
-
 
     // Set up route listener
     onRoute((path: string, data) => {
@@ -104,7 +97,6 @@ export type AppState = ReturnType<typeof State>
  */
 const api = ky.create({
     prefixUrl: '/api',
-    throwHttpErrors: false
 })
 
 /**
