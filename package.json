@@ -7,7 +7,7 @@
     "lint": "eslint \"./**/*.{ts,js}\"",
     "build-tests": "esbuild test/index.ts --bundle --format=cjs --keep-names > test/test-bundle.js",
     "test": "esbuild ./test/index.ts --bundle | tapout",
-    "build": "mkdir -p ./public && rm -rf ./public/* && vite build",
+    "build": "mkdir -p ./public && rm -rf ./public/* && npx vite build",
     "start": "vite",
     "toc": "markdown-toc --maxdepth 3 -i README.md",
     "preversion": "npm run lint",
@@ -45,7 +45,7 @@
     "stylelint-config-standard": "^39.0.1",
     "tap-spec": "^5.0.0",
     "typescript": "^5.9.3",
-    "vite": "^7.3.0",
+    "vite": "^7.3.1",
     "wrangler": "^4.56.0"
   },
   "author": "nichoth <nichoth@nichoth.com> (https://nichoth.com)"
