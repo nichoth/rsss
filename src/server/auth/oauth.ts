@@ -161,7 +161,6 @@ export async function startOAuthFlow (
     const verifier = generateRandomString(32)
     const codeChallenge = await generateCodeChallenge(verifier)
     const nonce = generateRandomString(16)
-    const stateParam = generateRandomString(16)
 
     const state: OAuthState = {
         nonce,
@@ -173,7 +172,7 @@ export async function startOAuthFlow (
         response_type: 'code',
         client_id: clientId,
         redirect_uri: redirectUri,
-        state: stateParam,
+        state: nonce,
         scope: 'atproto',
         code_challenge: codeChallenge,
         code_challenge_method: 'S256',
