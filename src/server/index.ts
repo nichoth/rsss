@@ -10,24 +10,25 @@ import {
     type OAuthState
 } from './auth/oauth.js'
 import { CollieUserDO } from './durable-objects/collie-user.js'
+import type { Context, Next } from 'hono'
 
 // Re-export the Durable Object class for Wrangler
 export { CollieUserDO }
 
 export interface Env {
-    COLLIE_USER: DurableObjectNamespace<CollieUserDO>
-    SESSIONS: KVNamespace
-    ASSETS: Fetcher
-    SESSION_SECRET: string
-    OAUTH_CLIENT_ID?: string
-    NODE_ENV: string
+    COLLIE_USER:DurableObjectNamespace<CollieUserDO>
+    SESSIONS:KVNamespace
+    ASSETS:Fetcher
+    SESSION_SECRET:string
+    OAUTH_CLIENT_ID?:string
+    NODE_ENV:string
 }
 
 type Variables = {
-    session: OAuthSession | null
+    session:OAuthSession|null
 }
 
-const app = new Hono<{ Bindings: Env; Variables: Variables }>()
+const app = new Hono<{ Bindings:Env; Variables:Variables }>()
 
 // CORS for API routes
 app.use('/api/*', cors())
@@ -37,7 +38,10 @@ app.use('*', async (c, next) => {
     const sessionCookie = getCookie(c, 'session')
 
     if (sessionCookie && c.env.SESSION_SECRET) {
-        const session = await verifySessionCookie(sessionCookie, c.env.SESSION_SECRET)
+        const session = await verifySessionCookie(
+            sessionCookie,
+            c.env.SESSION_SECRET
+        )
         c.set('session', session)
     } else {
         c.set('session', null)
@@ -111,7 +115,10 @@ app.post('/api/auth/login', async (c) => {
         }
 
         const baseUrl = new URL(c.req.url).origin
-        const clientId = c.env.OAUTH_CLIENT_ID || `${baseUrl}/oauth/client-metadata.json`
+        const clientId = (
+            c.env.OAUTH_CLIENT_ID ||
+            `${baseUrl}/oauth/client-metadata.json`
+        )
         const redirectUri = `${baseUrl}/oauth/callback`
 
         const { authUrl, state } = await startOAuthFlow(
@@ -141,7 +148,7 @@ app.post('/api/auth/login', async (c) => {
  */
 app.get('/oauth/callback', async (c) => {
     const code = c.req.query('code')
-    const stateParam = c.req.query('state')
+    const _stateParam = c.req.query('state')
     const error = c.req.query('error')
     const errorDescription = c.req.query('error_description')
 
@@ -220,12 +227,10 @@ app.get('/logout', (c) => {
     return c.redirect('/login')
 })
 
-/**
- * Auth guard middleware for protected API routes
- */
-import type { Context, Next } from 'hono'
-
-const requireAuth = async (c: Context<{ Bindings: Env; Variables: Variables }>, next: Next) => {
+const requireAuth = async (c:Context<{
+    Bindings:Env;
+    Variables:Variables
+}>, next:Next) => {
     const session = c.get('session')
 
     if (!session) {
@@ -238,7 +243,7 @@ const requireAuth = async (c: Context<{ Bindings: Env; Variables: Variables }>, 
 /**
  * Get the user's Durable Object
  */
-function getUserDO(env: Env, did: string): DurableObjectStub<CollieUserDO> {
+function getUserDO (env:Env, did:string):DurableObjectStub<CollieUserDO> {
     // Use the DID as the DO name for consistent routing
     const id = env.COLLIE_USER.idFromName(did)
     return env.COLLIE_USER.get(id)
