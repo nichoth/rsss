@@ -1,7 +1,9 @@
 @import url("@substrate-system/css-normalize");
 @import url("@substrate-system/a11y");
+@import url("@substrate-system/check-box/css");
 @import url("./components/button.css");
 @import url("./components/button-icon.css");
+@import url("./routes/feed-reader.css");
 
 :root {
     --color-bg: #fafafa;
@@ -245,29 +247,6 @@ button {
         text-transform: uppercase;
         letter-spacing: 0.05em;
         color: var(--color-text-secondary);
-    }
-}
-
-.sidebar-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    width: 100%;
-    padding: 0.5rem 0.75rem;
-    border: none;
-    background: none;
-    text-align: left;
-    font-size: 0.875rem;
-    cursor: pointer;
-    transition: background-color 0.15s ease;
-
-    &:hover {
-        background: var(--color-bg);
-    }
-
-    &.active {
-        background: #2563eb1a;
-        color: var(--color-primary);
     }
 }
 

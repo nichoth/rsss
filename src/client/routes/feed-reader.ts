@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { type FunctionComponent } from 'preact'
 import { useState } from 'preact/hooks'
+import '@substrate-system/check-box'
 import {
     State,
     type AppState,
@@ -25,7 +26,6 @@ export const FeedReader: FunctionComponent<{
         feedsLoading,
         itemsLoading,
         showUnreadOnly,
-        showStarredOnly
     } = state
 
     const [newFeedUrl, setNewFeedUrl] = useState('')
@@ -75,20 +75,6 @@ export const FeedReader: FunctionComponent<{
         State.loadItems(state)
     }
 
-    function handleShowStarred () {
-        state.showStarredOnly.value = true
-        state.selectedFeedId.value = null
-        state.itemsOffset.value = 0
-        State.loadItems(state)
-    }
-
-    function handleShowAll () {
-        state.showStarredOnly.value = false
-        state.selectedFeedId.value = null
-        state.itemsOffset.value = 0
-        State.loadItems(state)
-    }
-
     async function handleMarkAllRead () {
         await State.markAllRead(state, state.selectedFeedId.value || undefined)
     }
@@ -107,7 +93,7 @@ export const FeedReader: FunctionComponent<{
     }
 
     return html`
-        <div class="feed-reader">
+        <div class="route feed-reader">
             <header class="app-header">
                 <div class="header header-left">
                     <h1>RSSS</h1>
@@ -213,14 +199,14 @@ export const FeedReader: FunctionComponent<{
                 <main class="content">
                     <div class="items-header">
                         <div class="items-filters">
-                            <label class="filter-checkbox">
-                                <input
-                                    type="checkbox"
-                                    checked=${showUnreadOnly.value}
-                                    onChange=${handleToggleUnread}
-                                />
+                            <check-box
+                                name="unread"
+                                class="filter-checkbox"
+                                checked=${showUnreadOnly.value}
+                                onChange=${handleToggleUnread}
+                            >
                                 Unread only
-                            </label>
+                            </check-box>
                         </div>
                         <button
                             class="btn btn-small"
