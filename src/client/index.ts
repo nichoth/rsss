@@ -4,10 +4,6 @@ import { useEffect } from 'preact/hooks'
 import { useComputed } from '@preact/signals'
 import {
     State,
-    checkAuth,
-    loadFeeds,
-    loadItems,
-    loadCounts,
     type AppState
 } from './state.js'
 import { LoginPage } from './routes/login.js'
@@ -30,15 +26,15 @@ export const App: FunctionComponent<{
 
     // Check auth on mount
     useEffect(() => {
-        checkAuth(state)
+        State.checkAuth(state)
     }, [])
 
     // Load data when authenticated
     useEffect(() => {
         if (isAuthenticated.value) {
-            loadFeeds(state)
-            loadItems(state)
-            loadCounts(state)
+            State.loadFeeds(state)
+            State.loadItems(state)
+            State.loadCounts(state)
         }
     }, [isAuthenticated.value])
 

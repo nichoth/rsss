@@ -1,26 +1,20 @@
 import { html } from 'htm/preact'
-import { FunctionComponent } from 'preact'
+import { type FunctionComponent } from 'preact'
 import { useState } from 'preact/hooks'
 import {
-    logout,
-    loadItems,
-    addFeed,
-    deleteFeed,
-    refreshFeeds,
-    selectItem,
-    clearSelectedItem,
-    toggleItemRead,
-    toggleItemStarred,
-    markAllRead,
+    State,
     type AppState,
     type Item,
     type Feed
 } from '../state.js'
+import { SidebarItem } from '../components/sidebar-item.js'
 import { Button } from '../components/button.js'
 import { ButtonIcon } from '../components/button-icon.js'
 import { ELLIPSIS } from '../constants.js'
 
-export const FeedReader: FunctionComponent<{ state: AppState }> = function FeedReader ({ state }) {
+export const FeedReader: FunctionComponent<{
+    state: AppState
+}> = function FeedReader ({ state }) {
     const {
         user,
         feeds,
@@ -46,7 +40,7 @@ export const FeedReader: FunctionComponent<{ state: AppState }> = function FeedR
         setAddingFeed(true)
         setAddFeedError(null)
 
-        const result = await addFeed(state, newFeedUrl.trim())
+        const result = await State.addFeed(state, newFeedUrl.trim())
 
         if (result.success) {
             setNewFeedUrl('')
@@ -60,47 +54,47 @@ export const FeedReader: FunctionComponent<{ state: AppState }> = function FeedR
 
     async function handleDeleteFeed (feed: Feed) {
         if (confirm(`Delete "${feed.title || feed.url}"?`)) {
-            await deleteFeed(state, feed.id)
+            await State.deleteFeed(state, feed.id)
         }
     }
 
     async function handleRefresh () {
-        await refreshFeeds(state)
+        await State.refreshFeeds(state)
     }
 
     function handleSelectFeed (feedId: number | null) {
         state.selectedFeedId.value = feedId
         state.showStarredOnly.value = false
         state.itemsOffset.value = 0
-        loadItems(state)
+        State.loadItems(state)
     }
 
     function handleToggleUnread () {
         state.showUnreadOnly.value = !state.showUnreadOnly.value
         state.itemsOffset.value = 0
-        loadItems(state)
+        State.loadItems(state)
     }
 
     function handleShowStarred () {
         state.showStarredOnly.value = true
         state.selectedFeedId.value = null
         state.itemsOffset.value = 0
-        loadItems(state)
+        State.loadItems(state)
     }
 
     function handleShowAll () {
         state.showStarredOnly.value = false
         state.selectedFeedId.value = null
         state.itemsOffset.value = 0
-        loadItems(state)
+        State.loadItems(state)
     }
 
     async function handleMarkAllRead () {
-        await markAllRead(state, state.selectedFeedId.value || undefined)
+        await State.markAllRead(state, state.selectedFeedId.value || undefined)
     }
 
     async function handleLogout () {
-        await logout(state)
+        await State.logout(state)
     }
 
     // If an item is selected, show the reader view
@@ -108,7 +102,7 @@ export const FeedReader: FunctionComponent<{ state: AppState }> = function FeedR
         return html`<${ItemReader}
             item=${selectedItem.value}
             state=${state}
-            onClose=${() => clearSelectedItem(state)}
+            onClose=${() => State.clearSelectedItem(state)}
         />`
     }
 
@@ -128,20 +122,12 @@ export const FeedReader: FunctionComponent<{ state: AppState }> = function FeedR
             <div class="app-body">
                 <aside class="sidebar">
                     <div class="sidebar-section">
-                        <button
-                            class="sidebar-item ${!selectedFeedId.value && !showStarredOnly.value ? 'active' : ''}"
-                            onClick=${() => handleShowAll()}
-                        >
-                            <span>All Items</span>
-                            <span class="badge">${counts.value.unread}</span>
-                        </button>
-                        <button
-                            class="sidebar-item ${showStarredOnly.value ? 'active' : ''}"
-                            onClick=${handleShowStarred}
-                        >
-                            <span>Starred</span>
-                            <span class="badge">${counts.value.starred}</span>
-                        </button>
+                        <${SidebarItem} state=${state} starred=${false}>
+                            All Items
+                        <//>
+                        <${SidebarItem} state=${state} starred=${true}>
+                            Starred
+                        <//>
                     </div>
 
                     <div class="sidebar-section">
@@ -255,7 +241,7 @@ export const FeedReader: FunctionComponent<{ state: AppState }> = function FeedR
                                 key=${item.id}
                                 item=${item}
                                 state=${state}
-                                onClick=${() => selectItem(state, item)}
+                                onClick=${() => State.selectItem(state, item)}
                             />
                         `)}
 
@@ -283,7 +269,7 @@ const ItemRow: FunctionComponent<{
 
     async function handleStar (e: Event) {
         e.stopPropagation()
-        await toggleItemStarred(state, item.id, !isStarred)
+        await State.toggleItemStarred(state, item.id, !isStarred)
     }
 
     function formatDate (dateStr: string | null): string {
@@ -339,11 +325,11 @@ const ItemReader: FunctionComponent<{
     const isRead = !!item.is_read
 
     async function handleStar () {
-        await toggleItemStarred(state, item.id, !isStarred)
+        await State.toggleItemStarred(state, item.id, !isStarred)
     }
 
     async function handleToggleRead () {
-        await toggleItemRead(state, item.id, !isRead)
+        await State.toggleItemRead(state, item.id, !isRead)
     }
 
     function formatDate (dateStr: string | null): string {
