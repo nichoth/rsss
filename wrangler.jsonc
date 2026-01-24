@@ -35,7 +35,7 @@
 	 */
 	"kv_namespaces": [
 		{
-			"binding": "KV",
+			"binding": "SESSIONS",
 			"id": "43728a08638d483d80bfb830d2cd4dc5",
 			
 			// Optional: preview_id used for `wrangler dev` / local dev
