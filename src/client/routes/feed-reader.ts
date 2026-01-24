@@ -1,7 +1,6 @@
 import { html } from 'htm/preact'
 import { FunctionComponent } from 'preact'
 import { useState } from 'preact/hooks'
-import { useComputed } from '@preact/signals'
 import {
     logout,
     loadItems,
@@ -17,18 +16,21 @@ import {
     type Item,
     type Feed
 } from '../state.js'
+import { ELLIPSIS } from '../constants.js'
 
 export const FeedReader: FunctionComponent<{ state: AppState }> = function FeedReader ({ state }) {
-    const user = useComputed(() => state.user.value)
-    const feeds = useComputed(() => state.feeds.value)
-    const items = useComputed(() => state.items.value)
-    const counts = useComputed(() => state.counts.value)
-    const selectedItem = useComputed(() => state.selectedItem.value)
-    const feedsLoading = useComputed(() => state.feedsLoading.value)
-    const itemsLoading = useComputed(() => state.itemsLoading.value)
-    const selectedFeedId = useComputed(() => state.selectedFeedId.value)
-    const showUnreadOnly = useComputed(() => state.showUnreadOnly.value)
-    const showStarredOnly = useComputed(() => state.showStarredOnly.value)
+    const {
+        user,
+        feeds,
+        items,
+        counts,
+        selectedItem,
+        selectedFeedId,
+        feedsLoading,
+        itemsLoading,
+        showUnreadOnly,
+        showStarredOnly
+    } = state
 
     const [newFeedUrl, setNewFeedUrl] = useState('')
     const [addingFeed, setAddingFeed] = useState(false)
@@ -111,10 +113,11 @@ export const FeedReader: FunctionComponent<{ state: AppState }> = function FeedR
     return html`
         <div class="feed-reader">
             <header class="app-header">
-                <div class="header-left">
+                <div class="header header-left">
                     <h1>RSSS</h1>
+                    <div>Really Simple Syndication Service</div>
                 </div>
-                <div class="header-right">
+                <div class="header header-right">
                     <span class="user-handle">@${user.value?.handle}</span>
                     <button class="btn btn-small" onClick=${handleLogout}>Logout</button>
                 </div>
@@ -195,7 +198,7 @@ export const FeedReader: FunctionComponent<{ state: AppState }> = function FeedR
 
                             ${!feedsLoading.value && feeds.value.length === 0 && html`
                                 <div class="empty-state">
-                                    No feeds yet. Add one to get started!
+                                    No feeds yet${ELLIPSIS}
                                 </div>
                             `}
                         </div>
@@ -250,7 +253,7 @@ export const FeedReader: FunctionComponent<{ state: AppState }> = function FeedR
                         ${!itemsLoading.value && items.value.length === 0 && html`
                             <div class="empty-state">
                                 ${feeds.value.length === 0
-                                    ? 'Add some feeds to start reading!'
+                                    ? 'Maybe some feeds to start reading.'
                                     : 'No items to show.'}
                             </div>
                         `}
