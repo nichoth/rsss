@@ -316,12 +316,6 @@ button {
     color: var(--color-error);
 }
 
-.sidebar-footer {
-    margin-top: auto;
-    padding: 1rem;
-    border-top: 1px solid var(--color-border);
-}
-
 .empty-state {
     padding: 2rem;
     text-align: center;

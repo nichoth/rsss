@@ -10,6 +10,7 @@ import {
     type Feed
 } from '../state.js'
 import { SidebarItem } from '../components/sidebar-item.js'
+import { SidebarFooter } from '../components/sidebar-footer.js'
 import { Button } from '../components/button.js'
 import { ButtonIcon } from '../components/button-icon.js'
 import { ELLIPSIS } from '../constants.js'
@@ -58,12 +59,6 @@ export const FeedReader: FunctionComponent<{
         if (confirm(`Delete "${feed.title || feed.url}"?`)) {
             await State.deleteFeed(state, feed.id)
         }
-    }
-
-    async function handleRefresh () {
-        debug('refresh')
-        await State.refreshFeeds(state)
-        debug('done refreshing')
     }
 
     function handleSelectFeed (feedId: number | null) {
@@ -191,14 +186,7 @@ export const FeedReader: FunctionComponent<{
                         </div>
                     </div>
 
-                    <div class="sidebar-footer">
-                        <${Button}
-                            onClick=${handleRefresh}
-                            isSpinning=${feedsLoading}
-                        >
-                            Refresh Feeds
-                        <//>
-                    </div>
+                    <${SidebarFooter} state=${state} />
                 </aside>
 
                 <main class="content">
