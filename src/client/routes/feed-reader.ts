@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { Button } from '../components/button.js'
 import { FunctionComponent } from 'preact'
 import { useState } from 'preact/hooks'
 import { useComputed } from '@preact/signals'
@@ -116,20 +117,22 @@ export const FeedReader: FunctionComponent<{ state: AppState }> = function FeedR
                 </div>
                 <div class="header-right">
                     <span class="user-handle">@${user.value?.handle}</span>
-                    <button class="btn btn-small" onClick=${handleLogout}>Logout</button>
+                    <${Button} class="btn-small" onClick=${handleLogout}>
+                        Logout
+                    <//>
                 </div>
             </header>
 
             <div class="app-body">
                 <aside class="sidebar">
                     <div class="sidebar-section">
-                        <button
+                        <${Button}
                             class="sidebar-item ${!selectedFeedId.value && !showStarredOnly.value ? 'active' : ''}"
                             onClick=${() => handleShowAll()}
                         >
                             <span>All Items</span>
                             <span class="badge">${counts.value.unread}</span>
-                        </button>
+                        <//>
                         <button
                             class="sidebar-item ${showStarredOnly.value ? 'active' : ''}"
                             onClick=${handleShowStarred}

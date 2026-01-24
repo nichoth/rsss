@@ -17,6 +17,8 @@
   },
   "dependencies": {
     "@preact/signals": "^2.5.1",
+    "@substrate-system/a11y": "^0.0.17",
+    "@substrate-system/css-normalize": "^0.0.13",
     "@substrate-system/routes": "^5.0.0",
     "hono": "^4.11.3",
     "htm": "^3.1.1",

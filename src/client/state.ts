@@ -3,87 +3,90 @@ import Route from 'route-event'
 import ky from 'ky'
 
 export interface User {
-    did: string
-    handle: string
+    did:string
+    handle:string
 }
 
 export interface Feed {
-    id: number
-    url: string
-    title: string | null
-    description: string | null
-    site_url: string | null
-    last_fetched: string | null
-    created_at: string
+    id:number
+    url:string
+    title:string|null
+    description:string|null
+    site_url:string|null
+    last_fetched:string|null
+    created_at:string
 }
 
 export interface Item {
-    id: number
-    feed_id: number
-    guid: string
-    title: string | null
-    link: string | null
-    description: string | null
-    content: string | null
-    author: string | null
-    pub_date: string | null
-    is_read: number
-    is_starred: number
-    created_at: string
-    feed_title?: string
+    id:number
+    feed_id:number
+    guid:string
+    title:string|null
+    link:string|null
+    description:string|null
+    content:string|null
+    author:string|null
+    pub_date:string|null
+    is_read:number
+    is_starred:number
+    created_at:string
+    feed_title?:string
 }
 
 export interface ItemsResponse {
-    items: Item[]
-    total: number
-    limit: number
-    offset: number
+    items:Item[]
+    total:number
+    limit:number
+    offset:number
 }
 
 export interface CountsResponse {
-    unread: number
-    starred: number
-    total: number
+    unread:number
+    starred:number
+    total:number
 }
 
 export function State () {
     const onRoute = Route()
 
     // Route state
-    const route = signal(location.pathname + location.search)
+    const state = {
+        _setRoute: onRoute.setRoute.bind(onRoute),
+        route: signal(location.pathname),
+        // Auth state
+        user: signal<User|null>(null),
+        authLoading: signal(true),
+        const authError = signal<string | null>(null)
 
-    // Auth state
-    const user = signal<User | null>(null)
-    const authLoading = signal(true)
-    const authError = signal<string | null>(null)
+        // Feeds state
+        const feeds = signal<Feed[]>([])
+        const feedsLoading = signal(false)
 
-    // Feeds state
-    const feeds = signal<Feed[]>([])
-    const feedsLoading = signal(false)
+        // Items state
+        const items = signal<Item[]>([])
+        const itemsLoading = signal(false)
+        const itemsTotal = signal(0)
+        const itemsOffset = signal(0)
 
-    // Items state
-    const items = signal<Item[]>([])
-    const itemsLoading = signal(false)
-    const itemsTotal = signal(0)
-    const itemsOffset = signal(0)
+        // Counts
+        const counts = signal<CountsResponse>({ unread: 0, starred: 0, total: 0 })
 
-    // Counts
-    const counts = signal<CountsResponse>({ unread: 0, starred: 0, total: 0 })
+        // Selected feed filter
+        const selectedFeedId = signal<number | null>(null)
+        const showUnreadOnly = signal(false)
+        const showStarredOnly = signal(false)
 
-    // Selected feed filter
-    const selectedFeedId = signal<number | null>(null)
-    const showUnreadOnly = signal(false)
-    const showStarredOnly = signal(false)
+        // Selected item for reading
+        const selectedItem = signal<Item | null>(null)
 
-    // Selected item for reading
-    const selectedItem = signal<Item | null>(null)
+        // Computed: is authenticated
+        const isAuthenticated = computed(() => user.value !== null)
+    }
 
-    // Computed: is authenticated
-    const isAuthenticated = computed(() => user.value !== null)
 
     // Set up route listener
     onRoute((path: string, data) => {
-        route.value = path
+        state.route.value = path
         if (data.popstate) {
             window.scrollTo(data.scrollX, data.scrollY)
         } else {
@@ -91,25 +94,7 @@ export function State () {
         }
     })
 
-    return {
-        _setRoute: onRoute.setRoute.bind(onRoute),
-        route,
-        user,
-        authLoading,
-        authError,
-        feeds,
-        feedsLoading,
-        items,
-        itemsLoading,
-        itemsTotal,
-        itemsOffset,
-        counts,
-        selectedFeedId,
-        showUnreadOnly,
-        showStarredOnly,
-        selectedItem,
-        isAuthenticated
-    }
+    return state
 }
 
 export type AppState = ReturnType<typeof State>

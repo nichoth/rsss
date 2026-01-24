@@ -14,6 +14,8 @@ export interface OAuthState {
     nonce: string
     verifier: string
     returnTo: string
+    dpopPrivateKey: JsonWebKey
+    dpopPublicKey: JsonWebKey
 }
 
 // PKCE helpers
@@ -40,6 +42,94 @@ async function sha256 (plain: string): Promise<ArrayBuffer> {
 async function generateCodeChallenge (verifier: string): Promise<string> {
     const hashed = await sha256(verifier)
     return base64UrlEncode(new Uint8Array(hashed))
+}
+
+/**
+ * Generate a DPoP key pair for proof-of-possession
+ */
+async function generateDPoPKeyPair (): Promise<{
+    privateKey: CryptoKey
+    publicKey: CryptoKey
+    privateJwk: JsonWebKey
+    publicJwk: JsonWebKey
+}> {
+    const keyPair = await crypto.subtle.generateKey(
+        { name: 'ECDSA', namedCurve: 'P-256' },
+        true,
+        ['sign', 'verify']
+    )
+
+    const privateJwk = await crypto.subtle.exportKey('jwk', keyPair.privateKey)
+    const publicJwk = await crypto.subtle.exportKey('jwk', keyPair.publicKey)
+
+    return {
+        privateKey: keyPair.privateKey,
+        publicKey: keyPair.publicKey,
+        privateJwk,
+        publicJwk
+    }
+}
+
+/**
+ * Import a DPoP private key from JWK
+ */
+async function importDPoPPrivateKey (jwk: JsonWebKey): Promise<CryptoKey> {
+    return crypto.subtle.importKey(
+        'jwk',
+        jwk,
+        { name: 'ECDSA', namedCurve: 'P-256' },
+        false,
+        ['sign']
+    )
+}
+
+/**
+ * Create a DPoP proof JWT
+ */
+async function createDPoPProof (
+    privateKey: CryptoKey,
+    publicJwk: JsonWebKey,
+    httpMethod: string,
+    httpUri: string,
+    nonce?: string
+): Promise<string> {
+    const header = {
+        alg: 'ES256',
+        typ: 'dpop+jwt',
+        jwk: {
+            kty: publicJwk.kty,
+            crv: publicJwk.crv,
+            x: publicJwk.x,
+            y: publicJwk.y
+        }
+    }
+
+    const payload: Record<string, string | number> = {
+        jti: generateRandomString(16),
+        htm: httpMethod,
+        htu: httpUri,
+        iat: Math.floor(Date.now() / 1000)
+    }
+
+    if (nonce) {
+        payload.nonce = nonce
+    }
+
+    const encoder = new TextEncoder()
+    const headerB64 = base64UrlEncode(encoder.encode(JSON.stringify(header)))
+    const payloadB64 = base64UrlEncode(encoder.encode(JSON.stringify(payload)))
+    const signingInput = `${headerB64}.${payloadB64}`
+
+    const signature = await crypto.subtle.sign(
+        { name: 'ECDSA', hash: 'SHA-256' },
+        privateKey,
+        encoder.encode(signingInput)
+    )
+
+    // Convert from DER to raw format (r || s)
+    const signatureB64 = base64UrlEncode(new Uint8Array(signature))
+
+    return `${headerB64}.${payloadB64}.${signatureB64}`
 }
 
 /**
@@ -163,10 +253,15 @@ export async function startOAuthFlow (
     const nonce = generateRandomString(16)
     const stateParam = generateRandomString(16)
 
+    // Generate DPoP key pair
+    const dpopKeyPair = await generateDPoPKeyPair()
+
     const state: OAuthState = {
         nonce,
         verifier,
-        returnTo
+        returnTo,
+        dpopPrivateKey: dpopKeyPair.privateJwk,
+        dpopPublicKey: dpopKeyPair.publicJwk
     }
 
     const params = new URLSearchParams({
@@ -180,12 +275,21 @@ export async function startOAuthFlow (
         login_hint: did
     })
 
-    // Use PAR if available
+    // Use PAR if available (required for AT Protocol OAuth)
     if (metadata.pushed_authorization_request_endpoint) {
+        // Create DPoP proof for PAR endpoint
+        const dpopProof = await createDPoPProof(
+            dpopKeyPair.privateKey,
+            dpopKeyPair.publicJwk,
+            'POST',
+            metadata.pushed_authorization_request_endpoint
+        )
+
         const parResponse = await fetch(metadata.pushed_authorization_request_endpoint, {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/x-www-form-urlencoded'
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'DPoP': dpopProof
             },
             body: params.toString()
         })
@@ -194,6 +298,36 @@ export async function startOAuthFlow (
             const parData = await parResponse.json() as { request_uri: string }
             const authUrl = `${metadata.authorization_endpoint}?client_id=${encodeURIComponent(clientId)}&request_uri=${encodeURIComponent(parData.request_uri)}`
             return { authUrl, state }
+        }
+
+        // If PAR fails, check if it's a DPoP nonce error
+        if (parResponse.status === 400) {
+            const dpopNonce = parResponse.headers.get('DPoP-Nonce')
+            if (dpopNonce) {
+                // Retry with the provided nonce
+                const retryProof = await createDPoPProof(
+                    dpopKeyPair.privateKey,
+                    dpopKeyPair.publicJwk,
+                    'POST',
+                    metadata.pushed_authorization_request_endpoint,
+                    dpopNonce
+                )
+
+                const retryResponse = await fetch(metadata.pushed_authorization_request_endpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'DPoP': retryProof
+                    },
+                    body: params.toString()
+                })
+
+                if (retryResponse.ok) {
+                    const parData = await retryResponse.json() as { request_uri: string }
+                    const authUrl = `${metadata.authorization_endpoint}?client_id=${encodeURIComponent(clientId)}&request_uri=${encodeURIComponent(parData.request_uri)}`
+                    return { authUrl, state }
+                }
+            }
         }
     }
 
@@ -214,10 +348,22 @@ export async function exchangeCode (
 ): Promise<OAuthSession> {
     const metadata = await getAuthServerMetadata(authServer)
 
+    // Import DPoP private key from stored JWK
+    const dpopPrivateKey = await importDPoPPrivateKey(state.dpopPrivateKey)
+
+    // Create DPoP proof for token endpoint
+    const dpopProof = await createDPoPProof(
+        dpopPrivateKey,
+        state.dpopPublicKey,
+        'POST',
+        metadata.token_endpoint
+    )
+
     const response = await fetch(metadata.token_endpoint, {
         method: 'POST',
         headers: {
-            'Content-Type': 'application/x-www-form-urlencoded'
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'DPoP': dpopProof
         },
         body: new URLSearchParams({
             grant_type: 'authorization_code',
@@ -227,6 +373,50 @@ export async function exchangeCode (
             code_verifier: state.verifier
         }).toString()
     })
+
+    // Handle DPoP nonce requirement
+    if (!response.ok && response.status === 400) {
+        const dpopNonce = response.headers.get('DPoP-Nonce')
+        if (dpopNonce) {
+            // Retry with the provided nonce
+            const retryProof = await createDPoPProof(
+                dpopPrivateKey,
+                state.dpopPublicKey,
+                'POST',
+                metadata.token_endpoint,
+                dpopNonce
+            )
+
+            const retryResponse = await fetch(metadata.token_endpoint, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'DPoP': retryProof
+                },
+                body: new URLSearchParams({
+                    grant_type: 'authorization_code',
+                    code,
+                    redirect_uri: redirectUri,
+                    client_id: clientId,
+                    code_verifier: state.verifier
+                }).toString()
+            })
+
+            if (!retryResponse.ok) {
+                const error = await retryResponse.text()
+                throw new Error(`Token exchange failed: ${error}`)
+            }
+
+            const tokens = await retryResponse.json() as {
+                access_token: string
+                refresh_token?: string
+                expires_in?: number
+                sub: string
+            }
+
+            return await buildSession(tokens)
+        }
+    }
 
     if (!response.ok) {
         const error = await response.text()
@@ -240,6 +430,15 @@ export async function exchangeCode (
         sub: string
     }
 
+    return await buildSession(tokens)
+}
+
+async function buildSession (tokens: {
+    access_token: string
+    refresh_token?: string
+    expires_in?: number
+    sub: string
+}): Promise<OAuthSession> {
     // Get handle from DID
     let handle = tokens.sub
     try {
