@@ -1,9 +1,11 @@
 :root {
     --color-bg: #fafafa;
-    --color-surface: #ffffff;
+    --color-surface: #fff;
     --color-text: #1a1a1a;
-    --color-text-secondary: #666666;
-    --color-border: #e0e0e0;
+    /* --color-text-secondary: #666; */
+    --color-text-secondary: black;
+    --color-border: #7e7d7d;
+    /* --color-border: #e0e0e0; */
     --color-primary: #2563eb;
     --color-primary-hover: #1d4ed8;
     --color-accent: #f59e0b;
@@ -39,15 +41,16 @@ button {
     justify-content: center;
     padding: 0.5rem 1rem;
     border: 1px solid var(--color-border);
-    border-radius: 6px;
     background: var(--color-surface);
     color: var(--color-text);
     font-size: 0.875rem;
     text-decoration: none;
     transition: all 0.15s ease;
 
-    &:hover {
-        background: var(--color-bg);
+    &:not(:disabled) {
+        &:hover {
+            background: var(--color-bg);
+        }
     }
 
     &:disabled {
@@ -61,8 +64,10 @@ button {
     border-color: var(--color-primary);
     color: white;
 
-    &:hover {
-        background: var(--color-primary-hover);
+    &:not(:disabled) {
+        &:hover {
+            background: var(--color-primary-hover);
+        }
     }
 }
 
@@ -128,9 +133,8 @@ button {
     width: 100%;
     max-width: 400px;
     background: var(--color-surface);
-    border-radius: 12px;
     padding: 2rem;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 4px 6px -1px #0000001a;
 }
 
 .login-header {
@@ -166,13 +170,12 @@ button {
     & input {
         padding: 0.75rem;
         border: 1px solid var(--color-border);
-        border-radius: 6px;
         font-size: 1rem;
 
         &:focus {
             outline: none;
             border-color: var(--color-primary);
-            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+            box-shadow: 0 0 0 3px #2563eb1a;
         }
 
         &:disabled {
@@ -186,7 +189,6 @@ button {
     padding: 0.75rem 1rem;
     background: #fef2f2;
     border: 1px solid #fecaca;
-    border-radius: 6px;
     color: var(--color-error);
     font-size: 0.875rem;
     margin-bottom: 1rem;
@@ -301,16 +303,15 @@ button {
     background: none;
     text-align: left;
     font-size: 0.875rem;
-    border-radius: 6px;
     cursor: pointer;
-    transition: background 0.15s ease;
+    transition: background-color 0.15s ease;
 
     &:hover {
         background: var(--color-bg);
     }
 
     &.active {
-        background: rgba(37, 99, 235, 0.1);
+        background: #2563eb1a;
         color: var(--color-primary);
     }
 }
@@ -639,7 +640,7 @@ button {
 }
 
 /* Responsive */
-@media (max-width: 768px) {
+@media (width < 768px) {
     .sidebar {
         display: none;
     }

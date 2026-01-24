@@ -17,13 +17,13 @@ export interface OAuthState {
 }
 
 // PKCE helpers
-function generateRandomString(length: number): string {
+function generateRandomString (length: number): string {
     const array = new Uint8Array(length)
     crypto.getRandomValues(array)
     return base64UrlEncode(array)
 }
 
-function base64UrlEncode(buffer: Uint8Array): string {
+function base64UrlEncode (buffer: Uint8Array): string {
     const base64 = btoa(String.fromCharCode(...buffer))
     return base64
         .replace(/\+/g, '-')
@@ -31,13 +31,13 @@ function base64UrlEncode(buffer: Uint8Array): string {
         .replace(/=+$/, '')
 }
 
-async function sha256(plain: string): Promise<ArrayBuffer> {
+async function sha256 (plain: string): Promise<ArrayBuffer> {
     const encoder = new TextEncoder()
     const data = encoder.encode(plain)
     return crypto.subtle.digest('SHA-256', data)
 }
 
-async function generateCodeChallenge(verifier: string): Promise<string> {
+async function generateCodeChallenge (verifier: string): Promise<string> {
     const hashed = await sha256(verifier)
     return base64UrlEncode(new Uint8Array(hashed))
 }
@@ -45,7 +45,7 @@ async function generateCodeChallenge(verifier: string): Promise<string> {
 /**
  * Resolve a Bluesky handle to authorization server metadata
  */
-async function resolveHandle(handle: string): Promise<{
+async function resolveHandle (handle: string): Promise<{
     did: string
     pds: string
     authServer: string
@@ -130,7 +130,7 @@ async function resolveHandle(handle: string): Promise<{
 /**
  * Get OAuth server metadata
  */
-async function getAuthServerMetadata(authServer: string): Promise<{
+async function getAuthServerMetadata (authServer: string): Promise<{
     issuer: string
     authorization_endpoint: string
     token_endpoint: string
@@ -146,7 +146,7 @@ async function getAuthServerMetadata(authServer: string): Promise<{
 /**
  * Start OAuth flow - returns authorization URL and state to store
  */
-export async function startOAuthFlow(
+export async function startOAuthFlow (
     handle: string,
     clientId: string,
     redirectUri: string,
@@ -205,7 +205,7 @@ export async function startOAuthFlow(
 /**
  * Exchange authorization code for tokens
  */
-export async function exchangeCode(
+export async function exchangeCode (
     code: string,
     state: OAuthState,
     clientId: string,
@@ -264,14 +264,14 @@ export async function exchangeCode(
 /**
  * Generate a simple session token
  */
-export async function generateSessionToken(): Promise<string> {
+export async function generateSessionToken (): Promise<string> {
     return generateRandomString(32)
 }
 
 /**
  * Create a signed session cookie value
  */
-export async function createSessionCookie(
+export async function createSessionCookie (
     session: OAuthSession,
     secret: string
 ): Promise<string> {
@@ -302,7 +302,7 @@ export async function createSessionCookie(
 /**
  * Verify and decode a session cookie
  */
-export async function verifySessionCookie(
+export async function verifySessionCookie (
     cookie: string,
     secret: string
 ): Promise<OAuthSession | null> {

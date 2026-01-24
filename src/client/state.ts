@@ -46,7 +46,7 @@ export interface CountsResponse {
     total: number
 }
 
-export function State() {
+export function State () {
     const onRoute = Route()
 
     // Route state
@@ -125,7 +125,7 @@ const api = ky.create({
 /**
  * Check authentication status
  */
-export async function checkAuth(state: AppState): Promise<void> {
+export async function checkAuth (state: AppState): Promise<void> {
     state.authLoading.value = true
     state.authError.value = null
 
@@ -152,7 +152,7 @@ export async function checkAuth(state: AppState): Promise<void> {
 /**
  * Start OAuth login flow
  */
-export async function login(state: AppState, handle: string): Promise<void> {
+export async function login (state: AppState, handle: string): Promise<void> {
     state.authLoading.value = true
     state.authError.value = null
 
@@ -177,7 +177,7 @@ export async function login(state: AppState, handle: string): Promise<void> {
 /**
  * Dev mode login (for testing)
  */
-export async function devLogin(state: AppState): Promise<void> {
+export async function devLogin (state: AppState): Promise<void> {
     state.authLoading.value = true
 
     try {
@@ -196,7 +196,7 @@ export async function devLogin(state: AppState): Promise<void> {
 /**
  * Logout
  */
-export async function logout(state: AppState): Promise<void> {
+export async function logout (state: AppState): Promise<void> {
     await api.post('auth/logout')
     state.user.value = null
     state.feeds.value = []
@@ -207,7 +207,7 @@ export async function logout(state: AppState): Promise<void> {
 /**
  * Load feeds
  */
-export async function loadFeeds(state: AppState): Promise<void> {
+export async function loadFeeds (state: AppState): Promise<void> {
     state.feedsLoading.value = true
 
     try {
@@ -225,7 +225,7 @@ export async function loadFeeds(state: AppState): Promise<void> {
 /**
  * Add a new feed
  */
-export async function addFeed(state: AppState, url: string): Promise<{ success: boolean; error?: string }> {
+export async function addFeed (state: AppState, url: string): Promise<{ success: boolean; error?: string }> {
     try {
         const response = await api.post('collie/feeds', { json: { url } })
 
@@ -245,7 +245,7 @@ export async function addFeed(state: AppState, url: string): Promise<{ success: 
 /**
  * Delete a feed
  */
-export async function deleteFeed(state: AppState, feedId: number): Promise<void> {
+export async function deleteFeed (state: AppState, feedId: number): Promise<void> {
     const response = await api.delete(`collie/feeds/${feedId}`)
 
     if (response.ok) {
@@ -258,7 +258,7 @@ export async function deleteFeed(state: AppState, feedId: number): Promise<void>
 /**
  * Refresh all feeds
  */
-export async function refreshFeeds(state: AppState): Promise<void> {
+export async function refreshFeeds (state: AppState): Promise<void> {
     state.feedsLoading.value = true
 
     try {
@@ -274,7 +274,7 @@ export async function refreshFeeds(state: AppState): Promise<void> {
 /**
  * Load items with current filters
  */
-export async function loadItems(state: AppState): Promise<void> {
+export async function loadItems (state: AppState): Promise<void> {
     state.itemsLoading.value = true
 
     try {
@@ -309,7 +309,7 @@ export async function loadItems(state: AppState): Promise<void> {
 /**
  * Load counts
  */
-export async function loadCounts(state: AppState): Promise<void> {
+export async function loadCounts (state: AppState): Promise<void> {
     try {
         const response = await api.get('collie/items/count')
 
@@ -325,7 +325,7 @@ export async function loadCounts(state: AppState): Promise<void> {
 /**
  * Mark item as read/unread
  */
-export async function toggleItemRead(state: AppState, itemId: number, isRead: boolean): Promise<void> {
+export async function toggleItemRead (state: AppState, itemId: number, isRead: boolean): Promise<void> {
     const response = await api.patch(`collie/items/${itemId}`, {
         json: { is_read: isRead }
     })
@@ -347,7 +347,7 @@ export async function toggleItemRead(state: AppState, itemId: number, isRead: bo
 /**
  * Toggle item starred
  */
-export async function toggleItemStarred(state: AppState, itemId: number, isStarred: boolean): Promise<void> {
+export async function toggleItemStarred (state: AppState, itemId: number, isStarred: boolean): Promise<void> {
     const response = await api.patch(`collie/items/${itemId}`, {
         json: { is_starred: isStarred }
     })
@@ -369,7 +369,7 @@ export async function toggleItemStarred(state: AppState, itemId: number, isStarr
 /**
  * Mark all items as read
  */
-export async function markAllRead(state: AppState, feedId?: number): Promise<void> {
+export async function markAllRead (state: AppState, feedId?: number): Promise<void> {
     const body = feedId ? { feed_id: feedId } : {}
     const response = await api.post('collie/items/mark-all-read', { json: body })
 
@@ -382,7 +382,7 @@ export async function markAllRead(state: AppState, feedId?: number): Promise<voi
 /**
  * Select an item for reading
  */
-export async function selectItem(state: AppState, item: Item): Promise<void> {
+export async function selectItem (state: AppState, item: Item): Promise<void> {
     state.selectedItem.value = item
 
     // Mark as read if not already
@@ -394,6 +394,6 @@ export async function selectItem(state: AppState, item: Item): Promise<void> {
 /**
  * Clear selected item
  */
-export function clearSelectedItem(state: AppState): void {
+export function clearSelectedItem (state: AppState): void {
     state.selectedItem.value = null
 }

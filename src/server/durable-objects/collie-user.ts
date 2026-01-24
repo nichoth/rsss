@@ -3,35 +3,35 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 
 export interface Env {
-    COLLIE_USER: DurableObjectNamespace<CollieUserDO>
-    SESSIONS: KVNamespace
-    ASSETS: Fetcher
+    COLLIE_USER:DurableObjectNamespace<CollieUserDO>
+    SESSIONS:KVNamespace
+    ASSETS:Fetcher
 }
 
 interface Feed {
-    id: number
-    url: string
-    title: string | null
-    description: string | null
-    site_url: string | null
-    last_fetched: string | null
-    created_at: string
+    id:number
+    url:string
+    title:string|null
+    description:string|null
+    site_url:string|null
+    last_fetched:string|null
+    created_at:string
 }
 
-interface Item {
-    id: number
-    feed_id: number
-    guid: string
-    title: string | null
-    link: string | null
-    description: string | null
-    content: string | null
-    author: string | null
-    pub_date: string | null
-    is_read: number
-    is_starred: number
-    created_at: string
-}
+// interface Item {
+//     id: number
+//     feed_id: number
+//     guid: string
+//     title: string | null
+//     link: string | null
+//     description: string | null
+//     content: string | null
+//     author: string | null
+//     pub_date: string | null
+//     is_read: number
+//     is_starred: number
+//     created_at: string
+// }
 
 /**
  * CollieUserDO - A Durable Object that stores feeds and items for a single user.
@@ -46,7 +46,7 @@ export class CollieUserDO extends DurableObject<Env> {
     private app: Hono
     private sql: SqlStorage
 
-    constructor(ctx: DurableObjectState, env: Env) {
+    constructor (ctx: DurableObjectState, env: Env) {
         super(ctx, env)
         this.sql = ctx.storage.sql
         this.initDatabase()
@@ -63,7 +63,7 @@ export class CollieUserDO extends DurableObject<Env> {
         })
     }
 
-    private initDatabase() {
+    private initDatabase () {
         // Create feeds table
         this.sql.exec(`
             CREATE TABLE IF NOT EXISTS feeds (
@@ -106,7 +106,7 @@ export class CollieUserDO extends DurableObject<Env> {
         `)
     }
 
-    private createRouter(): Hono {
+    private createRouter (): Hono {
         const app = new Hono()
 
         app.use('*', cors())
@@ -155,7 +155,9 @@ export class CollieUserDO extends DurableObject<Env> {
                 this.ctx.waitUntil(this.fetchFeed(feed as unknown as Feed))
 
                 return c.json({ feed }, 201)
-            } catch (err) {
+            } catch (_err) {
+                const err = _err as Error
+                console.log('**error**', err.message)
                 return c.json({ error: 'Failed to add feed' }, 500)
             }
         })
@@ -319,7 +321,7 @@ export class CollieUserDO extends DurableObject<Env> {
     /**
      * Fetch and parse an RSS/Atom feed
      */
-    private async fetchFeed(feed: Feed): Promise<void> {
+    private async fetchFeed (feed: Feed): Promise<void> {
         try {
             const response = await fetch(feed.url, {
                 headers: {
@@ -370,7 +372,7 @@ export class CollieUserDO extends DurableObject<Env> {
                         item.author,
                         item.pubDate
                     )
-                } catch (err) {
+                } catch (_err) {
                     // Ignore duplicate key errors
                 }
             }
@@ -382,7 +384,7 @@ export class CollieUserDO extends DurableObject<Env> {
     /**
      * Parse RSS or Atom feed XML
      */
-    private parseFeed(xml: string): {
+    private parseFeed (xml: string): {
         title: string | null
         description: string | null
         link: string | null
@@ -405,7 +407,7 @@ export class CollieUserDO extends DurableObject<Env> {
         }
     }
 
-    private parseRss(xml: string) {
+    private parseRss (xml: string) {
         const getTagContent = (str: string, tag: string): string | null => {
             // Handle CDATA
             const cdataRegex = new RegExp(`<${tag}[^>]*><!\\[CDATA\\[([\\s\\S]*?)\\]\\]></${tag}>`, 'i')
@@ -417,11 +419,11 @@ export class CollieUserDO extends DurableObject<Env> {
             return match ? this.decodeHtmlEntities(match[1].trim()) : null
         }
 
-        const getAttr = (str: string, tag: string, attr: string): string | null => {
-            const regex = new RegExp(`<${tag}[^>]*${attr}=["']([^"']*)["'][^>]*>`, 'i')
-            const match = str.match(regex)
-            return match ? match[1] : null
-        }
+        // const getAttr = (str: string, tag: string, attr: string): string | null => {
+        //     const regex = new RegExp(`<${tag}[^>]*${attr}=["']([^"']*)["'][^>]*>`, 'i')
+        //     const match = str.match(regex)
+        //     return match ? match[1] : null
+        // }
 
         // Get channel info
         const channelMatch = xml.match(/<channel>([\s\S]*?)<item/i)
@@ -452,7 +454,7 @@ export class CollieUserDO extends DurableObject<Env> {
         return { title, description, link, items }
     }
 
-    private parseAtom(xml: string) {
+    private parseAtom (xml: string) {
         const getTagContent = (str: string, tag: string): string | null => {
             // Handle CDATA
             const cdataRegex = new RegExp(`<${tag}[^>]*><!\\[CDATA\\[([\\s\\S]*?)\\]\\]></${tag}>`, 'i')
@@ -502,7 +504,7 @@ export class CollieUserDO extends DurableObject<Env> {
         return { title, description, link, items }
     }
 
-    private decodeHtmlEntities(str: string): string {
+    private decodeHtmlEntities (str: string): string {
         return str
             .replace(/&lt;/g, '<')
             .replace(/&gt;/g, '>')
@@ -512,7 +514,7 @@ export class CollieUserDO extends DurableObject<Env> {
             .replace(/&apos;/g, "'")
     }
 
-    private parseDate(dateStr: string | null): string | null {
+    private parseDate (dateStr: string | null): string | null {
         if (!dateStr) return null
 
         try {
@@ -527,14 +529,14 @@ export class CollieUserDO extends DurableObject<Env> {
     /**
      * Handle incoming requests - routes to internal Hono app
      */
-    async fetch(request: Request): Promise<Response> {
+    async fetch (request: Request): Promise<Response> {
         return this.app.fetch(request)
     }
 
     /**
      * Alarm handler for periodic feed refresh
      */
-    async alarm(): Promise<void> {
+    async alarm (): Promise<void> {
         const feeds = this.sql.exec('SELECT * FROM feeds').toArray() as unknown as Feed[]
 
         await Promise.all(feeds.map(feed => this.fetchFeed(feed)))

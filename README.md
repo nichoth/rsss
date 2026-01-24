@@ -93,3 +93,11 @@ wrangler secret put SESSION_SECRET
 ```sh
 wrangler deploy                      
 ```
+
+## Notes
+
+### Generate a Secret
+
+```sh
+openssl rand -base64 32
+```

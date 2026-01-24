@@ -18,7 +18,7 @@ import {
     type Feed
 } from '../state.js'
 
-export const FeedReader: FunctionComponent<{ state: AppState }> = function FeedReader({ state }) {
+export const FeedReader: FunctionComponent<{ state: AppState }> = function FeedReader ({ state }) {
     const user = useComputed(() => state.user.value)
     const feeds = useComputed(() => state.feeds.value)
     const items = useComputed(() => state.items.value)
@@ -35,7 +35,7 @@ export const FeedReader: FunctionComponent<{ state: AppState }> = function FeedR
     const [addFeedError, setAddFeedError] = useState<string | null>(null)
     const [showAddFeed, setShowAddFeed] = useState(false)
 
-    async function handleAddFeed(e: Event) {
+    async function handleAddFeed (e: Event) {
         e.preventDefault()
         if (!newFeedUrl.trim()) return
 
@@ -54,48 +54,48 @@ export const FeedReader: FunctionComponent<{ state: AppState }> = function FeedR
         setAddingFeed(false)
     }
 
-    async function handleDeleteFeed(feed: Feed) {
+    async function handleDeleteFeed (feed: Feed) {
         if (confirm(`Delete "${feed.title || feed.url}"?`)) {
             await deleteFeed(state, feed.id)
         }
     }
 
-    async function handleRefresh() {
+    async function handleRefresh () {
         await refreshFeeds(state)
     }
 
-    function handleSelectFeed(feedId: number | null) {
+    function handleSelectFeed (feedId: number | null) {
         state.selectedFeedId.value = feedId
         state.showStarredOnly.value = false
         state.itemsOffset.value = 0
         loadItems(state)
     }
 
-    function handleToggleUnread() {
+    function handleToggleUnread () {
         state.showUnreadOnly.value = !state.showUnreadOnly.value
         state.itemsOffset.value = 0
         loadItems(state)
     }
 
-    function handleShowStarred() {
+    function handleShowStarred () {
         state.showStarredOnly.value = true
         state.selectedFeedId.value = null
         state.itemsOffset.value = 0
         loadItems(state)
     }
 
-    function handleShowAll() {
+    function handleShowAll () {
         state.showStarredOnly.value = false
         state.selectedFeedId.value = null
         state.itemsOffset.value = 0
         loadItems(state)
     }
 
-    async function handleMarkAllRead() {
+    async function handleMarkAllRead () {
         await markAllRead(state, state.selectedFeedId.value || undefined)
     }
 
-    async function handleLogout() {
+    async function handleLogout () {
         await logout(state)
     }
 
@@ -265,16 +265,16 @@ const ItemRow: FunctionComponent<{
     item: Item
     state: AppState
     onClick: () => void
-}> = function ItemRow({ item, state, onClick }) {
+}> = function ItemRow ({ item, state, onClick }) {
     const isUnread = !item.is_read
     const isStarred = !!item.is_starred
 
-    async function handleStar(e: Event) {
+    async function handleStar (e: Event) {
         e.stopPropagation()
         await toggleItemStarred(state, item.id, !isStarred)
     }
 
-    function formatDate(dateStr: string | null): string {
+    function formatDate (dateStr: string | null): string {
         if (!dateStr) return ''
         const date = new Date(dateStr)
         const now = new Date()
@@ -322,19 +322,19 @@ const ItemReader: FunctionComponent<{
     item: Item
     state: AppState
     onClose: () => void
-}> = function ItemReader({ item, state, onClose }) {
+}> = function ItemReader ({ item, state, onClose }) {
     const isStarred = !!item.is_starred
     const isRead = !!item.is_read
 
-    async function handleStar() {
+    async function handleStar () {
         await toggleItemStarred(state, item.id, !isStarred)
     }
 
-    async function handleToggleRead() {
+    async function handleToggleRead () {
         await toggleItemRead(state, item.id, !isRead)
     }
 
-    function formatDate(dateStr: string | null): string {
+    function formatDate (dateStr: string | null): string {
         if (!dateStr) return ''
         return new Date(dateStr).toLocaleString()
     }
@@ -391,11 +391,11 @@ const ItemReader: FunctionComponent<{
     `
 }
 
-function stripHtml(html: string): string {
+function stripHtml (html: string): string {
     return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
-function sanitizeHtml(html: string): string {
+function sanitizeHtml (html: string): string {
     // Basic sanitization - remove script tags and event handlers
     return html
         .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')

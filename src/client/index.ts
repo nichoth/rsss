@@ -21,7 +21,9 @@ if (import.meta.env.DEV || import.meta.env.MODE === 'staging') {
     window.state = state
 }
 
-export const App: FunctionComponent<{ state: AppState }> = function App({ state }) {
+export const App: FunctionComponent<{
+    state:AppState
+}> = function App ({ state }) {
     const route = useComputed(() => state.route.value)
     const isAuthenticated = useComputed(() => state.isAuthenticated.value)
     const authLoading = useComputed(() => state.authLoading.value)
