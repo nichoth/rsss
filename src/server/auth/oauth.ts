@@ -322,7 +322,7 @@ export async function startOAuthFlow (
             method: 'POST',
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
-                'DPoP': parDpopProof
+                DPoP: parDpopProof
             },
             body: params.toString()
         })
@@ -343,7 +343,7 @@ export async function startOAuthFlow (
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/x-www-form-urlencoded',
-                        'DPoP': parDpopProofWithNonce
+                        DPoP: parDpopProofWithNonce
                     },
                     body: params.toString()
                 })
@@ -435,7 +435,7 @@ export async function exchangeCode (
         method: 'POST',
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
-            'DPoP': dpopProof
+            DPoP: dpopProof
         },
         body: new URLSearchParams({
             grant_type: 'authorization_code',
@@ -463,7 +463,7 @@ export async function exchangeCode (
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',
-                    'DPoP': dpopProofWithNonce
+                    DPoP: dpopProofWithNonce
                 },
                 body: new URLSearchParams({
                     grant_type: 'authorization_code',
