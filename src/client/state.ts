@@ -58,10 +58,10 @@ export function State () {
         // Auth state
         user: signal<User|null>(null),
         authLoading: signal(true),
-        authError: signal<string | null>(null),
+        authError: signal<string|null>(null),
         // Feeds state
         feeds: signal<Feed[]>([]),
-        feedsLoading: signal(false),
+        feedsLoading: signal<boolean>(false),
         // Items state
         items: signal<Item[]>([]),
         itemsLoading: signal(false),
@@ -70,11 +70,11 @@ export function State () {
         // Counts
         counts: signal<CountsResponse>({ unread: 0, starred: 0, total: 0 }),
         // Selected feed filter
-        selectedFeedId: signal<number | null>(null),
+        selectedFeedId: signal<number|null>(null),
         showUnreadOnly: signal(false),
         showStarredOnly: signal(false),
         // Selected item for reading
-        selectedItem: signal<Item | null>(null),
+        selectedItem: signal<Item|null>(null),
         // Computed: is authenticated
         isAuthenticated: computed(() => state.user.value !== null)
     }

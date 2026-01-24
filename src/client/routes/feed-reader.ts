@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { type FunctionComponent } from 'preact'
 import { useState } from 'preact/hooks'
 import '@substrate-system/check-box'
+import Debug from '@substrate-system/debug'
 import {
     State,
     type AppState,
@@ -12,6 +13,7 @@ import { SidebarItem } from '../components/sidebar-item.js'
 import { Button } from '../components/button.js'
 import { ButtonIcon } from '../components/button-icon.js'
 import { ELLIPSIS } from '../constants.js'
+const debug = Debug('rsss:view')
 
 export const FeedReader: FunctionComponent<{
     state: AppState
@@ -59,7 +61,9 @@ export const FeedReader: FunctionComponent<{
     }
 
     async function handleRefresh () {
+        debug('refresh')
         await State.refreshFeeds(state)
+        debug('done refreshing')
     }
 
     function handleSelectFeed (feedId: number | null) {
@@ -91,6 +95,8 @@ export const FeedReader: FunctionComponent<{
             onClose=${() => State.clearSelectedItem(state)}
         />`
     }
+
+    debug('feeds loading?', feedsLoading.value)
 
     return html`
         <div class="route feed-reader">
@@ -186,13 +192,12 @@ export const FeedReader: FunctionComponent<{
                     </div>
 
                     <div class="sidebar-footer">
-                        <button
-                            class="btn btn-small"
+                        <${Button}
                             onClick=${handleRefresh}
-                            disabled=${feedsLoading.value}
+                            isSpinning=${feedsLoading}
                         >
-                            ${feedsLoading.value ? 'Refreshing...' : 'Refresh Feeds'}
-                        </button>
+                            Refresh Feeds
+                        <//>
                     </div>
                 </aside>
 
@@ -375,11 +380,11 @@ const ItemReader: FunctionComponent<{
     `
 }
 
-function stripHtml (html: string): string {
+function stripHtml (html:string):string {
     return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
-function sanitizeHtml (html: string): string {
+function sanitizeHtml (html:string):string {
     // Basic sanitization - remove script tags and event handlers
     return html
         .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
@@ -387,3 +392,11 @@ function sanitizeHtml (html: string): string {
         .replace(/\s*on\w+='[^']*'/gi, '')
         .replace(/javascript:/gi, '')
 }
+
+// <button
+//     class="btn"
+//     onClick=${handleRefresh}
+//     disabled=${feedsLoading.value}
+// >
+//     ${feedsLoading.value ? 'Refreshing...' : 'Refresh Feeds'}
+// </button>

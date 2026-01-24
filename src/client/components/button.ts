@@ -1,7 +1,10 @@
 import { type FunctionComponent } from 'preact'
 import { html } from 'htm/preact'
+// import Debug from '@substrate-system/debug'
 import { type Signal, useSignal } from '@preact/signals'
 import './button.css'
+
+// const debug = Debug('rsss:view')
 
 export interface ButtonProps {
     onClick?:(ev:MouseEvent)=>void|Promise<void>;

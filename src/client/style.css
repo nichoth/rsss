@@ -1,8 +1,6 @@
 @import url("@substrate-system/css-normalize");
 @import url("@substrate-system/a11y");
 @import url("@substrate-system/check-box/css");
-@import url("./components/button.css");
-@import url("./components/button-icon.css");
 @import url("./routes/feed-reader.css");
 
 :root {
@@ -34,11 +32,6 @@ button {
     cursor: pointer;
     font-family: inherit;
     font-size: inherit;
-}
-
-.btn-small {
-    padding: 0.25rem 0.5rem;
-    font-size: 0.75rem;
 }
 
 .btn-back {

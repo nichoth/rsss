@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { FunctionComponent, render } from 'preact'
+import { type FunctionComponent, render } from 'preact'
 import { useEffect } from 'preact/hooks'
 import { useComputed } from '@preact/signals'
 import {
@@ -15,6 +15,9 @@ const state = State()
 if (import.meta.env.DEV || import.meta.env.MODE === 'staging') {
     // @ts-expect-error DEV env
     window.state = state
+    localStorage.setItem('DEBUG', 'rsss,rsss:*')
+} else {
+    localStorage.removeItem('DEBUG')
 }
 
 export const App: FunctionComponent<{
