@@ -35,8 +35,11 @@
 	 */
 	"kv_namespaces": [
 		{
-			"binding": "SESSIONS",
-			"id": "sessions-kv-id"
+			"binding": "KV",
+			"id": "43728a08638d483d80bfb830d2cd4dc5",
+			
+			// Optional: preview_id used for `wrangler dev` / local dev
+			"preview_id": "ab4cfea82e4546ca8ec79170aaabde38"
 		}
 	],
 
