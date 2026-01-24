@@ -253,7 +253,7 @@ export const FeedReader: FunctionComponent<{ state: AppState }> = function FeedR
                         ${!itemsLoading.value && items.value.length === 0 && html`
                             <div class="empty-state">
                                 ${feeds.value.length === 0
-                                    ? 'Maybe some feeds to start reading.'
+                                    ? 'Maybe add some feeds to start reading.'
                                     : 'No items to show.'}
                             </div>
                         `}

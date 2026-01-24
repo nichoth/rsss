@@ -1,7 +1,7 @@
 :root {
     --color-bg: #fafafa;
     --color-surface: #fff;
-    --color-text: #1a1a1a;
+    --color-text: black;
     /* --color-text-secondary: #666; */
     --color-text-secondary: black;
     --color-border: #7e7d7d;
@@ -253,7 +253,6 @@ button {
 
 .user-handle {
     font-size: 0.875rem;
-    color: var(--color-text-secondary);
 }
 
 .app-body {
@@ -377,7 +376,6 @@ button {
     & input {
         padding: 0.5rem;
         border: 1px solid var(--color-border);
-        border-radius: 4px;
         font-size: 0.875rem;
 
         &:focus {
@@ -390,7 +388,6 @@ button {
         padding: 0.375rem 0.75rem;
         background: var(--color-primary);
         border: none;
-        border-radius: 4px;
         color: white;
         font-size: 0.875rem;
 
@@ -605,13 +602,11 @@ button {
     & img {
         max-width: 100%;
         height: auto;
-        border-radius: 8px;
         margin: 1rem 0;
     }
 
     & pre, & code {
         background: var(--color-bg);
-        border-radius: 4px;
     }
 
     & pre {
