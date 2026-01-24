@@ -2,6 +2,13 @@
  * Bluesky AT Protocol OAuth implementation for Cloudflare Workers
  */
 
+// DPoP key pair stored for the session (in production, persist this securely)
+export interface DPoPKeyPair {
+    privateKey: CryptoKey
+    publicKey: CryptoKey
+    publicJwk: JsonWebKey
+}
+
 export interface OAuthSession {
     did: string
     handle: string
@@ -14,6 +21,8 @@ export interface OAuthState {
     nonce: string
     verifier: string
     returnTo: string
+    dpopPrivateKeyJwk: JsonWebKey  // DPoP private key for token exchange
+    dpopPublicKeyJwk: JsonWebKey   // DPoP public key
 }
 
 // PKCE helpers
@@ -40,6 +49,117 @@ async function sha256 (plain: string): Promise<ArrayBuffer> {
 async function generateCodeChallenge (verifier: string): Promise<string> {
     const hashed = await sha256(verifier)
     return base64UrlEncode(new Uint8Array(hashed))
+}
+
+// ============================================================================
+// DPoP (Demonstrating Proof of Possession) Implementation
+// ============================================================================
+
+/**
+ * Generate an ephemeral ES256 key pair for DPoP
+ * Bluesky requires ES256 (P-256 curve) for DPoP proofs
+ */
+export async function generateDPoPKeyPair (): Promise<DPoPKeyPair> {
+    const keyPair = await crypto.subtle.generateKey(
+        {
+            name: 'ECDSA',
+            namedCurve: 'P-256'
+        },
+        true, // extractable - needed to export public key as JWK
+        ['sign', 'verify']
+    )
+
+    // Export public key as JWK for the DPoP proof header
+    const publicJwk = await crypto.subtle.exportKey('jwk', keyPair.publicKey)
+
+    return {
+        privateKey: keyPair.privateKey,
+        publicKey: keyPair.publicKey,
+        publicJwk
+    }
+}
+
+/**
+ * Generate a UUID v4 for the DPoP jti claim
+ */
+function generateJti (): string {
+    const bytes = new Uint8Array(16)
+    crypto.getRandomValues(bytes)
+    // Set version (4) and variant (RFC 4122)
+    bytes[6] = (bytes[6] & 0x0f) | 0x40
+    bytes[8] = (bytes[8] & 0x3f) | 0x80
+
+    const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('')
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
+/**
+ * Create a DPoP proof JWT
+ *
+ * @param keyPair - The DPoP key pair
+ * @param httpMethod - The HTTP method (GET, POST, etc.)
+ * @param httpUri - The full URL of the request
+ * @param accessToken - Optional access token for the 'ath' claim (required when using DPoP with access tokens)
+ * @param nonce - Optional server-provided nonce for replay protection
+ */
+export async function createDPoPProof (
+    keyPair: DPoPKeyPair,
+    httpMethod: string,
+    httpUri: string,
+    accessToken?: string,
+    nonce?: string
+): Promise<string> {
+    // DPoP proof header - MUST include the public key
+    const header = {
+        typ: 'dpop+jwt',
+        alg: 'ES256',
+        jwk: {
+            kty: keyPair.publicJwk.kty,
+            crv: keyPair.publicJwk.crv,
+            x: keyPair.publicJwk.x,
+            y: keyPair.publicJwk.y
+            // Note: Do NOT include 'd' (private key) in the header
+        }
+    }
+
+    // DPoP proof payload
+    const payload: Record<string, string | number> = {
+        jti: generateJti(), // Unique identifier to prevent replay
+        htm: httpMethod.toUpperCase(), // HTTP method
+        htu: httpUri, // HTTP URI (without query and fragment)
+        iat: Math.floor(Date.now() / 1000) // Issued at timestamp
+    }
+
+    // Add 'ath' claim if access token is provided
+    // This binds the DPoP proof to a specific access token
+    if (accessToken) {
+        const tokenHash = await sha256(accessToken)
+        payload.ath = base64UrlEncode(new Uint8Array(tokenHash))
+    }
+
+    // Add nonce if provided by the server
+    if (nonce) {
+        payload.nonce = nonce
+    }
+
+    // Encode header and payload
+    const encoder = new TextEncoder()
+    const headerB64 = base64UrlEncode(encoder.encode(JSON.stringify(header)))
+    const payloadB64 = base64UrlEncode(encoder.encode(JSON.stringify(payload)))
+
+    // Create signature
+    const signingInput = `${headerB64}.${payloadB64}`
+    const signature = await crypto.subtle.sign(
+        { name: 'ECDSA', hash: 'SHA-256' },
+        keyPair.privateKey,
+        encoder.encode(signingInput)
+    )
+
+    // Convert signature from DER to raw format (r || s)
+    // WebCrypto ECDSA returns signature in IEEE P1363 format (already r || s)
+    const signatureB64 = base64UrlEncode(new Uint8Array(signature))
+
+    return `${headerB64}.${payloadB64}.${signatureB64}`
 }
 
 /**
@@ -145,6 +265,8 @@ async function getAuthServerMetadata (authServer: string): Promise<{
 
 /**
  * Start OAuth flow - returns authorization URL and state to store
+ *
+ * Generates a DPoP key pair that must be stored and reused for token exchange.
  */
 export async function startOAuthFlow (
     handle: string,
@@ -162,10 +284,18 @@ export async function startOAuthFlow (
     const codeChallenge = await generateCodeChallenge(verifier)
     const nonce = generateRandomString(16)
 
+    // Generate DPoP key pair for this OAuth session
+    const dpopKeyPair = await generateDPoPKeyPair()
+
+    // Export private key to JWK for storage in state
+    const dpopPrivateKeyJwk = await crypto.subtle.exportKey('jwk', dpopKeyPair.privateKey)
+
     const state: OAuthState = {
         nonce,
         verifier,
-        returnTo
+        returnTo,
+        dpopPrivateKeyJwk,
+        dpopPublicKeyJwk: dpopKeyPair.publicJwk
     }
 
     const params = new URLSearchParams({
@@ -179,30 +309,104 @@ export async function startOAuthFlow (
         login_hint: did
     })
 
-    // Use PAR if available
+    // Use PAR if available (required by Bluesky)
     if (metadata.pushed_authorization_request_endpoint) {
-        const parResponse = await fetch(metadata.pushed_authorization_request_endpoint, {
+        // Create DPoP proof for the PAR endpoint
+        const parDpopProof = await createDPoPProof(
+            dpopKeyPair,
+            'POST',
+            metadata.pushed_authorization_request_endpoint
+        )
+
+        let parResponse = await fetch(metadata.pushed_authorization_request_endpoint, {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/x-www-form-urlencoded'
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'DPoP': parDpopProof
             },
             body: params.toString()
         })
+
+        // Handle DPoP nonce requirement
+        if (parResponse.status === 400 || parResponse.status === 401) {
+            const dpopNonce = parResponse.headers.get('DPoP-Nonce')
+            if (dpopNonce) {
+                const parDpopProofWithNonce = await createDPoPProof(
+                    dpopKeyPair,
+                    'POST',
+                    metadata.pushed_authorization_request_endpoint,
+                    undefined,
+                    dpopNonce
+                )
+
+                parResponse = await fetch(metadata.pushed_authorization_request_endpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'DPoP': parDpopProofWithNonce
+                    },
+                    body: params.toString()
+                })
+            }
+        }
 
         if (parResponse.ok) {
             const parData = await parResponse.json() as { request_uri: string }
             const authUrl = `${metadata.authorization_endpoint}?client_id=${encodeURIComponent(clientId)}&request_uri=${encodeURIComponent(parData.request_uri)}`
             return { authUrl, state }
         }
+
+        // Log PAR failure for debugging
+        const parError = await parResponse.text()
+        console.error('PAR request failed:', parError)
     }
 
-    // Fall back to regular authorization URL
+    // Fall back to regular authorization URL (may not work with Bluesky)
     const authUrl = `${metadata.authorization_endpoint}?${params.toString()}`
     return { authUrl, state }
 }
 
 /**
+ * Restore a DPoP key pair from exported JWKs
+ */
+async function restoreDPoPKeyPair (
+    privateKeyJwk: JsonWebKey,
+    publicKeyJwk: JsonWebKey
+): Promise<DPoPKeyPair> {
+    const privateKey = await crypto.subtle.importKey(
+        'jwk',
+        privateKeyJwk,
+        { name: 'ECDSA', namedCurve: 'P-256' },
+        true,
+        ['sign']
+    )
+
+    const publicKey = await crypto.subtle.importKey(
+        'jwk',
+        publicKeyJwk,
+        { name: 'ECDSA', namedCurve: 'P-256' },
+        true,
+        ['verify']
+    )
+
+    return {
+        privateKey,
+        publicKey,
+        publicJwk: publicKeyJwk
+    }
+}
+
+/**
  * Exchange authorization code for tokens
+ *
+ * Bluesky requires DPoP (Demonstrating Proof of Possession) for token requests.
+ * Uses the same DPoP key pair that was used during the PAR request.
+ *
+ * @param code - Authorization code from the callback
+ * @param state - OAuth state containing the PKCE verifier and DPoP keys
+ * @param clientId - OAuth client ID
+ * @param redirectUri - Redirect URI used in the authorization request
+ * @param authServer - Authorization server URL
  */
 export async function exchangeCode (
     code: string,
@@ -210,13 +414,28 @@ export async function exchangeCode (
     clientId: string,
     redirectUri: string,
     authServer: string
-): Promise<OAuthSession> {
+): Promise<OAuthSession & { dpopKeyPair: DPoPKeyPair }> {
     const metadata = await getAuthServerMetadata(authServer)
 
-    const response = await fetch(metadata.token_endpoint, {
+    // Restore the DPoP key pair from the stored JWKs
+    const keyPair = await restoreDPoPKeyPair(
+        state.dpopPrivateKeyJwk,
+        state.dpopPublicKeyJwk
+    )
+
+    // Create DPoP proof for the token endpoint
+    const dpopProof = await createDPoPProof(
+        keyPair,
+        'POST',
+        metadata.token_endpoint
+    )
+
+    // Make initial token request with DPoP proof
+    let response = await fetch(metadata.token_endpoint, {
         method: 'POST',
         headers: {
-            'Content-Type': 'application/x-www-form-urlencoded'
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'DPoP': dpopProof
         },
         body: new URLSearchParams({
             grant_type: 'authorization_code',
@@ -226,6 +445,36 @@ export async function exchangeCode (
             code_verifier: state.verifier
         }).toString()
     })
+
+    // Handle DPoP nonce requirement (server may require a nonce for replay protection)
+    if (response.status === 400 || response.status === 401) {
+        const dpopNonce = response.headers.get('DPoP-Nonce')
+        if (dpopNonce) {
+            // Retry with the server-provided nonce
+            const dpopProofWithNonce = await createDPoPProof(
+                keyPair,
+                'POST',
+                metadata.token_endpoint,
+                undefined,
+                dpopNonce
+            )
+
+            response = await fetch(metadata.token_endpoint, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'DPoP': dpopProofWithNonce
+                },
+                body: new URLSearchParams({
+                    grant_type: 'authorization_code',
+                    code,
+                    redirect_uri: redirectUri,
+                    client_id: clientId,
+                    code_verifier: state.verifier
+                }).toString()
+            })
+        }
+    }
 
     if (!response.ok) {
         const error = await response.text()
@@ -237,6 +486,12 @@ export async function exchangeCode (
         refresh_token?: string
         expires_in?: number
         sub: string
+        token_type?: string
+    }
+
+    // Verify we got a DPoP-bound token
+    if (tokens.token_type?.toLowerCase() !== 'dpop') {
+        console.warn('Warning: Expected DPoP token type but got:', tokens.token_type)
     }
 
     // Get handle from DID
@@ -256,8 +511,73 @@ export async function exchangeCode (
         handle,
         accessToken: tokens.access_token,
         refreshToken: tokens.refresh_token || '',
-        expiresAt: Date.now() + (tokens.expires_in || 3600) * 1000
+        expiresAt: Date.now() + (tokens.expires_in || 3600) * 1000,
+        dpopKeyPair: keyPair // Return key pair for subsequent API calls
     }
+}
+
+/**
+ * Make an authenticated API request with DPoP
+ *
+ * When using DPoP-bound access tokens, each request must include a fresh DPoP proof
+ * with the 'ath' claim containing a hash of the access token.
+ *
+ * @param url - The API endpoint URL
+ * @param method - HTTP method
+ * @param accessToken - The DPoP-bound access token
+ * @param keyPair - The DPoP key pair used during token exchange
+ * @param options - Additional fetch options (body, additional headers, etc.)
+ */
+export async function fetchWithDPoP (
+    url: string,
+    method: string,
+    accessToken: string,
+    keyPair: DPoPKeyPair,
+    options: RequestInit = {}
+): Promise<Response> {
+    // Create DPoP proof with 'ath' claim for the access token
+    const dpopProof = await createDPoPProof(
+        keyPair,
+        method,
+        url,
+        accessToken // Include access token hash in the proof
+    )
+
+    const headers = new Headers(options.headers)
+    headers.set('Authorization', `DPoP ${accessToken}`)
+    headers.set('DPoP', dpopProof)
+
+    let response = await fetch(url, {
+        ...options,
+        method,
+        headers
+    })
+
+    // Handle DPoP nonce requirement
+    if (response.status === 401) {
+        const dpopNonce = response.headers.get('DPoP-Nonce')
+        if (dpopNonce) {
+            const dpopProofWithNonce = await createDPoPProof(
+                keyPair,
+                method,
+                url,
+                accessToken,
+                dpopNonce
+            )
+
+            const retryHeaders = new Headers(options.headers)
+            retryHeaders.set('Authorization', `DPoP ${accessToken}`)
+            retryHeaders.set('DPoP', dpopProofWithNonce)
+
+            response = await fetch(url, {
+                ...options,
+                method,
+                headers: retryHeaders
+            })
+        }
+    }
+
+    return response
 }
 
 /**

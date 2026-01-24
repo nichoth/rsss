@@ -29,7 +29,7 @@ export const LoginPage: FunctionComponent<{ state: AppState }> = function LoginP
         <div class="login-page">
             <div class="login-container">
                 <div class="login-header">
-                    <h1>CloudCollie</h1>
+                    <h1>RSSS</h1>
                     <p>Your personal RSS reader in the cloud</p>
                 </div>
 

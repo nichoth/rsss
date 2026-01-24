@@ -325,7 +325,7 @@ export class CollieUserDO extends DurableObject<Env> {
         try {
             const response = await fetch(feed.url, {
                 headers: {
-                    'User-Agent': 'CloudCollie/1.0 RSS Reader'
+                    'User-Agent': 'RSSS/1.0 RSS Reader'
                 }
             })
 

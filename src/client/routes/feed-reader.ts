@@ -112,7 +112,7 @@ export const FeedReader: FunctionComponent<{ state: AppState }> = function FeedR
         <div class="feed-reader">
             <header class="app-header">
                 <div class="header-left">
-                    <h1>CloudCollie</h1>
+                    <h1>RSSS</h1>
                 </div>
                 <div class="header-right">
                     <span class="user-handle">@${user.value?.handle}</span>

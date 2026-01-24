@@ -54,7 +54,7 @@ app.use('*', async (c, next) => {
  * Health check
  */
 app.get('/api/health', (c) => {
-    return c.json({ status: 'ok', service: 'cloudcollie' })
+    return c.json({ status: 'ok', service: 'rsss' })
 })
 
 app.get('/health', (c) => {
@@ -69,7 +69,7 @@ app.get('/oauth/client-metadata.json', (c) => {
 
     return c.json({
         client_id: `${baseUrl}/oauth/client-metadata.json`,
-        client_name: 'CloudCollie',
+        client_name: 'rsss',
         client_uri: baseUrl,
         logo_uri: `${baseUrl}/logo.png`,
         tos_uri: `${baseUrl}/terms`,
