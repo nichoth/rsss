@@ -13,7 +13,10 @@
     "preversion": "npm run lint",
     "version": "auto-changelog --template keepachangelog --breaking-pattern 'BREAKING CHANGE' && git add CHANGELOG.md",
     "postversion": "git push --follow-tags",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "tauri": "tauri",
+    "tauri:dev": "vite --config vite.config.tauri.js",
+    "tauri:build": "vite build --config vite.config.tauri.js"
   },
   "dependencies": {
     "@preact/signals": "^2.5.1",
@@ -35,6 +38,10 @@
     "@substrate-system/debug": "^0.9.38",
     "@substrate-system/tapout": "^0.0.35",
     "@substrate-system/tapzero": "^0.10.16",
+    "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/cli": "^2.0.0",
+    "@tauri-apps/plugin-http": "^2.0.0",
+    "@tauri-apps/plugin-sql": "^2.0.0",
     "@typescript-eslint/eslint-plugin": "^8.18.2",
     "@typescript-eslint/parser": "^8.19.1",
     "auto-changelog": "^2.4.0",

@@ -73,7 +73,8 @@ export class CollieUserDO extends DurableObject<Env> {
                 description TEXT,
                 site_url TEXT,
                 last_fetched TEXT,
-                created_at TEXT DEFAULT (datetime('now'))
+                created_at TEXT DEFAULT (datetime('now')),
+                updated_at TEXT DEFAULT (datetime('now'))
             )
         `)
 
@@ -92,6 +93,7 @@ export class CollieUserDO extends DurableObject<Env> {
                 is_read INTEGER DEFAULT 0,
                 is_starred INTEGER DEFAULT 0,
                 created_at TEXT DEFAULT (datetime('now')),
+                updated_at TEXT DEFAULT (datetime('now')),
                 FOREIGN KEY (feed_id) REFERENCES feeds(id) ON DELETE CASCADE,
                 UNIQUE(feed_id, guid)
             )
@@ -103,7 +105,59 @@ export class CollieUserDO extends DurableObject<Env> {
             CREATE INDEX IF NOT EXISTS idx_items_is_read ON items(is_read);
             CREATE INDEX IF NOT EXISTS idx_items_is_starred ON items(is_starred);
             CREATE INDEX IF NOT EXISTS idx_items_pub_date ON items(pub_date DESC);
+            CREATE INDEX IF NOT EXISTS idx_items_updated_at ON items(updated_at);
+            CREATE INDEX IF NOT EXISTS idx_feeds_updated_at ON feeds(updated_at);
         `)
+
+        // Migration: Add updated_at column to existing tables if missing
+        this.migrateAddUpdatedAt()
+
+        // Create triggers to auto-update updated_at
+        // Using WHEN clause to prevent infinite recursion
+        this.sql.exec(`
+            CREATE TRIGGER IF NOT EXISTS feeds_updated_at
+            AFTER UPDATE ON feeds
+            FOR EACH ROW
+            WHEN OLD.updated_at = NEW.updated_at OR NEW.updated_at IS NULL
+            BEGIN
+                UPDATE feeds SET updated_at = datetime('now') WHERE id = NEW.id;
+            END
+        `)
+
+        this.sql.exec(`
+            CREATE TRIGGER IF NOT EXISTS items_updated_at
+            AFTER UPDATE ON items
+            FOR EACH ROW
+            WHEN OLD.updated_at = NEW.updated_at OR NEW.updated_at IS NULL
+            BEGIN
+                UPDATE items SET updated_at = datetime('now') WHERE id = NEW.id;
+            END
+        `)
+    }
+
+    /**
+     * Migration: Add updated_at column to existing tables
+     */
+    private migrateAddUpdatedAt () {
+        // Check if feeds has updated_at
+        const feedsCols = this.sql.exec("PRAGMA table_info(feeds)").toArray()
+        const feedsHasUpdatedAt = feedsCols.some((col: unknown) =>
+            (col as { name: string }).name === 'updated_at'
+        )
+        if (!feedsHasUpdatedAt) {
+            this.sql.exec("ALTER TABLE feeds ADD COLUMN updated_at TEXT DEFAULT (datetime('now'))")
+            this.sql.exec("UPDATE feeds SET updated_at = created_at WHERE updated_at IS NULL")
+        }
+
+        // Check if items has updated_at
+        const itemsCols = this.sql.exec("PRAGMA table_info(items)").toArray()
+        const itemsHasUpdatedAt = itemsCols.some((col: unknown) =>
+            (col as { name: string }).name === 'updated_at'
+        )
+        if (!itemsHasUpdatedAt) {
+            this.sql.exec("ALTER TABLE items ADD COLUMN updated_at TEXT DEFAULT (datetime('now'))")
+            this.sql.exec("UPDATE items SET updated_at = created_at WHERE updated_at IS NULL")
+        }
     }
 
     private createRouter (): Hono {
@@ -313,6 +367,62 @@ export class CollieUserDO extends DurableObject<Env> {
             }
 
             return c.json({ success: true })
+        })
+
+        // Sync endpoint - returns all data changed since a timestamp
+        app.get('/sync', (c) => {
+            const since = c.req.query('since')
+
+            let feeds: unknown[]
+            let items: unknown[]
+
+            if (since) {
+                // Incremental sync - get only changed records
+                feeds = this.sql.exec(
+                    'SELECT * FROM feeds WHERE updated_at > ? ORDER BY updated_at ASC',
+                    since
+                ).toArray()
+
+                items = this.sql.exec(
+                    `SELECT items.*, feeds.title as feed_title
+                     FROM items
+                     JOIN feeds ON items.feed_id = feeds.id
+                     WHERE items.updated_at > ?
+                     ORDER BY items.updated_at ASC`,
+                    since
+                ).toArray()
+            } else {
+                // Full sync - get everything
+                feeds = this.sql.exec('SELECT * FROM feeds ORDER BY id ASC').toArray()
+                items = this.sql.exec(
+                    `SELECT items.*, feeds.title as feed_title
+                     FROM items
+                     JOIN feeds ON items.feed_id = feeds.id
+                     ORDER BY items.id ASC`
+                ).toArray()
+            }
+
+            // Get the latest updated_at timestamp for the client to store
+            const latestFeed = this.sql.exec(
+                'SELECT MAX(updated_at) as latest FROM feeds'
+            ).one() as { latest: string | null }
+            const latestItem = this.sql.exec(
+                'SELECT MAX(updated_at) as latest FROM items'
+            ).one() as { latest: string | null }
+
+            const syncedAt = new Date().toISOString()
+            const latestUpdatedAt = [latestFeed?.latest, latestItem?.latest]
+                .filter(Boolean)
+                .sort()
+                .pop() || syncedAt
+
+            return c.json({
+                feeds,
+                items,
+                syncedAt,
+                latestUpdatedAt,
+                isFullSync: !since
+            })
         })
 
         return app
