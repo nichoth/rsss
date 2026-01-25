@@ -266,7 +266,8 @@ export class UserDO extends DurableObject<Env> {
             const limit = parseInt(c.req.query('limit') || '50')
             const offset = parseInt(c.req.query('offset') || '0')
 
-            let query = 'SELECT items.*, feeds.title as feed_title FROM items JOIN feeds ON items.feed_id = feeds.id WHERE 1=1'
+            let query = 'SELECT items.*, feeds.title as feed_title ' +
+                'FROM items JOIN feeds ON items.feed_id = feeds.id WHERE 1=1'
             const params: (string | number)[] = []
 
             if (feedId) {
