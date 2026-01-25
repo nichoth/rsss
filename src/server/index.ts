@@ -9,14 +9,14 @@ import {
     type OAuthSession,
     type OAuthState
 } from './auth/oauth.js'
-import { CollieUserDO } from './durable-objects/collie-user.js'
+import { UserDO } from './durable-objects/index.js'
 import type { Context, Next } from 'hono'
 
 // Re-export the Durable Object class for Wrangler
-export { CollieUserDO }
+export { UserDO }
 
 export interface Env {
-    COLLIE_USER:DurableObjectNamespace<CollieUserDO>
+    COLLIE_USER:DurableObjectNamespace<UserDO>
     SESSIONS:KVNamespace
     ASSETS:Fetcher
     SESSION_SECRET:string
@@ -243,7 +243,7 @@ const requireAuth = async (c:Context<{
 /**
  * Get the user's Durable Object
  */
-function getUserDO (env:Env, did:string):DurableObjectStub<CollieUserDO> {
+function getUserDO (env:Env, did:string):DurableObjectStub<UserDO> {
     // Use the DID as the DO name for consistent routing
     const id = env.COLLIE_USER.idFromName(did)
     return env.COLLIE_USER.get(id)
@@ -253,13 +253,13 @@ function getUserDO (env:Env, did:string):DurableObjectStub<CollieUserDO> {
  * Proxy requests to user's Durable Object
  * All /api/collie/* routes go to the user's DO
  */
-app.all('/api/collie/*', requireAuth, async (c) => {
+app.all('/api/*', requireAuth, async (c) => {
     const session = c.get('session')!
     const stub = getUserDO(c.env, session.did)
 
     // Build the request URL for the DO
     const url = new URL(c.req.url)
-    const doPath = url.pathname.replace('/api/collie', '')
+    const doPath = url.pathname.replace('/api', '')
     const doUrl = new URL(doPath || '/', 'http://do')
     doUrl.search = url.search
 
@@ -279,10 +279,10 @@ app.all('/api/collie/*', requireAuth, async (c) => {
 app.post('/api/auth/dev-login', async (c) => {
     // Only allow in development mode
     if (c.env.NODE_ENV !== 'development') {
-        return c.json({ error: 'Not available in production' }, 403)
+        return c.json({ error: 'Not allowed in production' }, 403)
     }
 
-    const body = await c.req.json<{ did?: string; handle?: string }>()
+    const body = await c.req.json<{ did?:string; handle?:string }>()
 
     const session: OAuthSession = {
         did: body.did || 'did:plc:test123',

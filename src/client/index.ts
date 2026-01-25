@@ -27,11 +27,6 @@ export const App: FunctionComponent<{
     const isAuthenticated = useComputed(() => state.isAuthenticated.value)
     const authLoading = useComputed(() => state.authLoading.value)
 
-    // Check auth on mount
-    useEffect(() => {
-        State.checkAuth(state)
-    }, [])
-
     // Load data when authenticated
     useEffect(() => {
         if (isAuthenticated.value) {

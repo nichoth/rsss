@@ -89,6 +89,9 @@ export function State () {
         }
     })
 
+    // Check auth right away
+    State.checkAuth(state)
+
     return state
 }
 

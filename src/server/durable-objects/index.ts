@@ -3,7 +3,7 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 
 export interface Env {
-    COLLIE_USER:DurableObjectNamespace<CollieUserDO>
+    USER:DurableObjectNamespace<UserDO>
     SESSIONS:KVNamespace
     ASSETS:Fetcher
 }
@@ -18,35 +18,20 @@ interface Feed {
     created_at:string
 }
 
-// interface Item {
-//     id: number
-//     feed_id: number
-//     guid: string
-//     title: string | null
-//     link: string | null
-//     description: string | null
-//     content: string | null
-//     author: string | null
-//     pub_date: string | null
-//     is_read: number
-//     is_starred: number
-//     created_at: string
-// }
-
 /**
- * CollieUserDO - A Durable Object that stores feeds and items for a single user.
- * Each user gets their own DO instance with its own SQLite database.
+ * Store feeds and items for a single user.
+ * Each user gets their own DO with its own SQLite database.
  *
  * Uses the Hibernation API:
- * - DO hibernates between requests to minimize costs
+ * - DO hibernates between requests to minimize cost
  * - Uses alarms for periodic feed polling (every 10 min)
  * - State persists in SQLite across hibernation cycles
  */
-export class CollieUserDO extends DurableObject<Env> {
-    private app: Hono
-    private sql: SqlStorage
+export class UserDO extends DurableObject<Env> {
+    private app:Hono
+    private sql:SqlStorage
 
-    constructor (ctx: DurableObjectState, env: Env) {
+    constructor (ctx:DurableObjectState, env:Env) {
         super(ctx, env)
         this.sql = ctx.storage.sql
         this.initDatabase()
@@ -144,41 +129,45 @@ export class CollieUserDO extends DurableObject<Env> {
      */
     private migrateAddUpdatedAt () {
         // Check if feeds has updated_at
-        const feedsCols = this.sql.exec("PRAGMA table_info(feeds)").toArray()
+        const feedsCols = this.sql.exec('PRAGMA table_info(feeds)').toArray()
         const feedsHasUpdatedAt = feedsCols.some((col: unknown) =>
             (col as { name: string }).name === 'updated_at'
         )
         if (!feedsHasUpdatedAt) {
             // SQLite doesn't allow non-constant defaults in ALTER TABLE
-            this.sql.exec("ALTER TABLE feeds ADD COLUMN updated_at TEXT")
-            this.sql.exec("UPDATE feeds SET updated_at = COALESCE(created_at, datetime('now'))")
+            this.sql.exec('ALTER TABLE feeds ADD COLUMN updated_at TEXT')
+            this.sql.exec('UPDATE feeds SET updated_at = ' +
+                "COALESCE(created_at, datetime('now'))")
         }
 
         // Check if items has updated_at
-        const itemsCols = this.sql.exec("PRAGMA table_info(items)").toArray()
+        const itemsCols = this.sql.exec('PRAGMA table_info(items)').toArray()
         const itemsHasUpdatedAt = itemsCols.some((col: unknown) =>
             (col as { name: string }).name === 'updated_at'
         )
         if (!itemsHasUpdatedAt) {
             // SQLite doesn't allow non-constant defaults in ALTER TABLE
-            this.sql.exec("ALTER TABLE items ADD COLUMN updated_at TEXT")
-            this.sql.exec("UPDATE items SET updated_at = COALESCE(created_at, datetime('now'))")
+            this.sql.exec('ALTER TABLE items ADD COLUMN updated_at TEXT')
+            this.sql.exec('UPDATE items SET updated_at = COALESCE(created_at, ' +
+                " datetime('now'))")
         }
     }
 
-    private createRouter (): Hono {
+    private createRouter ():Hono {
         const app = new Hono()
 
         app.use('*', cors())
 
         // Health check
         app.get('/health', (c) => {
-            return c.json({ status: 'ok', service: 'collie-user-do' })
+            return c.json({ status: 'ok', service: 'do' })
         })
 
         // List all feeds
         app.get('/feeds', (c) => {
-            const feeds = this.sql.exec('SELECT * FROM feeds ORDER BY title ASC').toArray()
+            const feeds = this.sql.exec(
+                'SELECT * FROM feeds ORDER BY title ASC'
+            ).toArray()
             return c.json({ feeds })
         })
 

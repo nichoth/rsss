@@ -1,6 +1,8 @@
-# Cloud Collie
+# RSSS
 
-[Collie RSS reader](https://github.com/collie-reader/collied) + Bluesky OAuth.
+__Really Simple Syndication Service__
+
+See [rsss.space](https://rsss.space/).
 
 <details><summary><h2>Contents</h2></summary>
 

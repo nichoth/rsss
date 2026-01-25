@@ -7,6 +7,8 @@
     "lint": "eslint \"./**/*.{ts,js}\"",
     "build-tests": "esbuild test/index.ts --bundle --format=cjs --keep-names > test/test-bundle.js",
     "test": "esbuild ./test/index.ts --bundle | tapout",
+    "test:sync": "esbuild ./test/sync.ts --bundle | tapout",
+    "test:db": "esbuild ./test/db-adapter.ts --bundle | tapout",
     "build:sw": "esbuild src/sw/sw.ts --bundle --outfile=public/sw.js --format=iife --minify",
     "build:sw:dev": "esbuild src/sw/sw.ts --bundle --outfile=_public/sw.js --format=iife",
     "build": "mkdir -p ./public && rm -rf ./public/* && npx vite build && npm run build:sw",

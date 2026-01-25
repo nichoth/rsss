@@ -17,7 +17,7 @@ import { ELLIPSIS } from '../constants.js'
 const debug = Debug('rsss:view')
 
 export const FeedReader: FunctionComponent<{
-    state: AppState
+    state:AppState
 }> = function FeedReader ({ state }) {
     const {
         user,
@@ -55,13 +55,13 @@ export const FeedReader: FunctionComponent<{
         setAddingFeed(false)
     }
 
-    async function handleDeleteFeed (feed: Feed) {
+    async function handleDeleteFeed (feed:Feed) {
         if (confirm(`Delete "${feed.title || feed.url}"?`)) {
             await State.deleteFeed(state, feed.id)
         }
     }
 
-    function handleSelectFeed (feedId: number | null) {
+    function handleSelectFeed (feedId:number|null) {
         state.selectedFeedId.value = feedId
         state.showStarredOnly.value = false
         state.itemsOffset.value = 0
@@ -159,7 +159,9 @@ export const FeedReader: FunctionComponent<{
 
                             ${feeds.value.map(feed => html`
                                 <div
-                                    class="sidebar-item feed-item ${selectedFeedId.value === feed.id ? 'active' : ''}"
+                                    class="sidebar-item feed-item ${
+                                        selectedFeedId.value === feed.id ? 'active' : ''
+                                    }"
                                     key=${feed.id}
                                 >
                                     <button
