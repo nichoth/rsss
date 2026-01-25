@@ -16,8 +16,6 @@ export const SidebarFooter:FunctionComponent<{
     const [syncing, setSyncing] = useState(false)
     const [syncError, setSyncError] = useState<string | null>(null)
     const [lastSynced, setLastSynced] = useState<string | null>(null)
-    const [remoteUrl, setRemoteUrl] = useState('')
-    const [showSyncForm, setShowSyncForm] = useState(false)
 
     // Check if IndexedDB is available for sync
     useEffect(() => {
@@ -28,24 +26,16 @@ export const SidebarFooter:FunctionComponent<{
         if (available) {
             getSyncState().then(syncState => {
                 setLastSynced(syncState.lastSyncedAt)
-                if (syncState.remoteUrl) {
-                    setRemoteUrl(syncState.remoteUrl)
-                }
             })
         }
     }, [])
 
     async function handleSync () {
-        if (!remoteUrl) {
-            setShowSyncForm(true)
-            return
-        }
-
         setSyncing(true)
         setSyncError(null)
 
         try {
-            const result = await syncFromRemote(remoteUrl)
+            const result = await syncFromRemote()
             setLastSynced(result.latestUpdatedAt)
 
             // Reload data after sync
@@ -59,12 +49,6 @@ export const SidebarFooter:FunctionComponent<{
         }
     }
 
-    function handleSyncSubmit (e: Event) {
-        e.preventDefault()
-        setShowSyncForm(false)
-        handleSync()
-    }
-
     function formatLastSynced (dateStr: string | null): string {
         if (!dateStr) return 'Never'
         const date = new Date(dateStr)
@@ -74,37 +58,13 @@ export const SidebarFooter:FunctionComponent<{
     return html`<div class="sidebar-footer">
         ${canSync && html`
             <div class="sync-section">
-                ${showSyncForm ? html`
-                    <form class="sync-form" onSubmit=${handleSyncSubmit}>
-                        <input
-                            type="url"
-                            name="remote"
-                            id="remote"
-                            placeholder="https://your-rsss-server.com"
-                            value=${remoteUrl}
-                            onInput=${(e: Event) => setRemoteUrl((e.target as HTMLInputElement).value)}
-                            required
-                        />
-                        <${Button} type="submit" disabled=${!remoteUrl}>
-                            Save & Sync
-                        <//>
-                    </form>
-                ` : html`
-                    <${Button}
-                        onClick=${handleSync}
-                        isSpinning=${syncing}
-                        disabled=${syncing}
-                    >
-                        ${syncing ? 'Syncing...' : 'Pull from Server'}
-                    <//>
-                    <button
-                        class="btn-settings"
-                        onClick=${() => setShowSyncForm(true)}
-                        title="Configure sync server"
-                    >
-                        Settings
-                    </button>
-                `}
+                <${Button}
+                    onClick=${handleSync}
+                    isSpinning=${syncing}
+                    disabled=${syncing}
+                >
+                    ${syncing ? 'Syncing...' : 'Pull from Server'}
+                <//>
                 ${syncError && html`
                     <div class="sync-error">${syncError}</div>
                 `}

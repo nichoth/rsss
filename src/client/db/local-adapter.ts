@@ -60,7 +60,7 @@ function getDb (): Promise<IDBPDatabase> {
  * Local IndexedDB adapter implementation
  */
 export const localAdapter: DbAdapter & {
-    sync(remoteUrl: string): Promise<SyncResponse>
+    sync(): Promise<SyncResponse>
     getSyncState(): Promise<SyncState>
     isAvailable(): boolean
 } = {
@@ -215,31 +215,27 @@ export const localAdapter: DbAdapter & {
         const state = await db.get('sync_state', 1)
 
         return {
-            lastSyncedAt: state?.last_synced_at || null,
-            remoteUrl: state?.remote_url || null
+            lastSyncedAt: state?.last_synced_at || null
         }
     },
 
-    async sync (remoteUrl: string): Promise<SyncResponse> {
+    async sync (): Promise<SyncResponse> {
         const db = await getDb()
 
         // Get last sync time
         const syncState = await this.getSyncState()
         const since = syncState.lastSyncedAt
 
-        // Build sync URL
-        const url = new URL('/api/collie/sync', remoteUrl)
+        // Build sync URL - use current origin, user is authenticated via session cookie
+        const url = new URL('/api/collie/sync', window.location.origin)
         if (since) {
             url.searchParams.set('since', since)
         }
 
-        // Fetch from remote
+        // Fetch from remote - credentials included automatically for same-origin
         const response = await fetch(url.toString(), {
             method: 'GET',
-            credentials: 'include',
-            headers: {
-                'Content-Type': 'application/json'
-            }
+            credentials: 'include'
         })
 
         if (!response.ok) {
@@ -265,8 +261,7 @@ export const localAdapter: DbAdapter & {
         // Update sync state
         await db.put('sync_state', {
             id: 1,
-            last_synced_at: data.latestUpdatedAt,
-            remote_url: remoteUrl
+            last_synced_at: data.latestUpdatedAt
         })
 
         return data

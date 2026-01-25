@@ -48,14 +48,15 @@ export async function getLocalAdapter () {
 
 /**
  * Sync from remote server to local IndexedDB
+ * Uses the current origin - user is already authenticated via session cookie
  */
-export async function syncFromRemote (remoteUrl: string): Promise<SyncResponse> {
+export async function syncFromRemote (): Promise<SyncResponse> {
     if (!hasLocalStorage()) {
         throw new Error('IndexedDB not available')
     }
 
     const { localAdapter } = await import('./local-adapter.js')
-    return localAdapter.sync(remoteUrl)
+    return localAdapter.sync()
 }
 
 /**
@@ -63,7 +64,7 @@ export async function syncFromRemote (remoteUrl: string): Promise<SyncResponse> 
  */
 export async function getSyncState (): Promise<SyncState> {
     if (!hasLocalStorage()) {
-        return { lastSyncedAt: null, remoteUrl: null }
+        return { lastSyncedAt: null }
     }
 
     const { localAdapter } = await import('./local-adapter.js')

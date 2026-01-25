@@ -32,7 +32,6 @@ export interface Item {
 
 export interface SyncState {
     lastSyncedAt: string | null
-    remoteUrl: string | null
 }
 
 export interface SyncResponse {
