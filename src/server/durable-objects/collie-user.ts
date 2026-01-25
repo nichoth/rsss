@@ -99,18 +99,22 @@ export class CollieUserDO extends DurableObject<Env> {
             )
         `)
 
-        // Create indexes
+        // Create indexes (excluding updated_at - added after migration)
         this.sql.exec(`
             CREATE INDEX IF NOT EXISTS idx_items_feed_id ON items(feed_id);
             CREATE INDEX IF NOT EXISTS idx_items_is_read ON items(is_read);
             CREATE INDEX IF NOT EXISTS idx_items_is_starred ON items(is_starred);
             CREATE INDEX IF NOT EXISTS idx_items_pub_date ON items(pub_date DESC);
-            CREATE INDEX IF NOT EXISTS idx_items_updated_at ON items(updated_at);
-            CREATE INDEX IF NOT EXISTS idx_feeds_updated_at ON feeds(updated_at);
         `)
 
         // Migration: Add updated_at column to existing tables if missing
         this.migrateAddUpdatedAt()
+
+        // Create indexes on updated_at (after migration ensures column exists)
+        this.sql.exec(`
+            CREATE INDEX IF NOT EXISTS idx_items_updated_at ON items(updated_at);
+            CREATE INDEX IF NOT EXISTS idx_feeds_updated_at ON feeds(updated_at);
+        `)
 
         // Create triggers to auto-update updated_at
         // Using WHEN clause to prevent infinite recursion
@@ -145,8 +149,9 @@ export class CollieUserDO extends DurableObject<Env> {
             (col as { name: string }).name === 'updated_at'
         )
         if (!feedsHasUpdatedAt) {
-            this.sql.exec("ALTER TABLE feeds ADD COLUMN updated_at TEXT DEFAULT (datetime('now'))")
-            this.sql.exec("UPDATE feeds SET updated_at = created_at WHERE updated_at IS NULL")
+            // SQLite doesn't allow non-constant defaults in ALTER TABLE
+            this.sql.exec("ALTER TABLE feeds ADD COLUMN updated_at TEXT")
+            this.sql.exec("UPDATE feeds SET updated_at = COALESCE(created_at, datetime('now'))")
         }
 
         // Check if items has updated_at
@@ -155,8 +160,9 @@ export class CollieUserDO extends DurableObject<Env> {
             (col as { name: string }).name === 'updated_at'
         )
         if (!itemsHasUpdatedAt) {
-            this.sql.exec("ALTER TABLE items ADD COLUMN updated_at TEXT DEFAULT (datetime('now'))")
-            this.sql.exec("UPDATE items SET updated_at = created_at WHERE updated_at IS NULL")
+            // SQLite doesn't allow non-constant defaults in ALTER TABLE
+            this.sql.exec("ALTER TABLE items ADD COLUMN updated_at TEXT")
+            this.sql.exec("UPDATE items SET updated_at = COALESCE(created_at, datetime('now'))")
         }
     }
 
