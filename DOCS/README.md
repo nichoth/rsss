@@ -59,3 +59,43 @@ npm run tauri build
 In the desktop app, click "Pull from Server", enter your remote URL (e.g.,
 https://your-rsss.workers.dev), and it will sync all feeds and items to your
 local SQLite database.
+
+
+--------------------------------
+
+
+## Tests
+
+Test Files
+
+### test/sync.ts (47 tests)
+
+Tests for the sync workflow:
+
+* Sync endpoint logic: Full sync, incremental sync with since parameter,
+  boundary conditions
+* Response structure: Validates feeds, items, timestamps
+* Client-side upsert logic: Insert, update, preserve unchanged records
+* Sync state management: Initial state, shouldFullSync behavior, state
+  preservation
+
+### test/db-adapter.ts (33 tests)                                                 
+
+Tests for the database adapter interface contract.
+
+* Feed operations: addFeed, getFeeds (sorted), deleteFeed (cascade)
+* Item operations: getItems with pagination, filtering by
+  feedId/isRead/isStarred
+* Update operations: updateItem (read/starred), markAllRead (all or by feed)
+* Counts: getCounts accuracy, empty database edge case
+
+
+### Running Tests
+
+```sh
+npm test                                                                      
+```
+
+The tests use `@substrate-system/tapzero` and run in a browser environment via
+`tapout`. They test the sync logic by simulating the endpoint behavior and
+adapter interface.
