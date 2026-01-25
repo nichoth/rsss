@@ -7,7 +7,6 @@ import { openDB, type IDBPDatabase } from 'idb'
 import type {
     DbAdapter,
     Feed,
-    Item,
     ItemsResponse,
     CountsResponse,
     SyncState,

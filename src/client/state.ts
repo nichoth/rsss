@@ -1,4 +1,4 @@
-import { signal, computed, batch } from '@preact/signals'
+import { type Signal, signal, computed, batch, effect } from '@preact/signals'
 import Route from 'route-event'
 import ky, { type HTTPError } from 'ky'
 import Debug from '@substrate-system/debug'
@@ -48,7 +48,27 @@ export interface CountsResponse {
     total:number
 }
 
-export function State () {
+export type AppState = {
+    _setRoute:(route:string) => void,
+    route: Signal<string>,
+    user: Signal<User|null>,
+    authLoading: Signal<boolean>,
+    authError: Signal<string|null>,
+    feeds: Signal<Feed[]>,
+    feedsLoading: Signal<boolean>,
+    items: Signal<Item[]>,
+    itemsLoading: Signal<boolean>,
+    itemsTotal:Signal<number>,
+    itemsOffset:Signal<number>,
+    counts: Signal<CountsResponse>,
+    selectedFeedId: Signal<number|null>,
+    showUnreadOnly: Signal<boolean>,
+    showStarredOnly: Signal<boolean>,
+    selectedItem: Signal<Item|null>,
+    isAuthenticated: Signal<boolean>
+}
+
+export function State ():AppState {
     const onRoute = Route()
 
     // Route state
@@ -89,13 +109,21 @@ export function State () {
         }
     })
 
+    effect(() => {
+        if (!state.isAuthenticated) return
+        State.loadFeeds(state)
+        State.loadItems(state)
+        State.loadCounts(state).then(() => {
+            // After items load, check if we need to select one based on URL
+            State.handleRouteChange(state)
+        })
+    })
+
     // Check auth right away
     State.checkAuth(state)
 
     return state
 }
-
-export type AppState = ReturnType<typeof State>
 
 /**
  * API client for Collie endpoints
@@ -293,7 +321,7 @@ State.refreshFeeds = async function (state: AppState): Promise<void> {
 /**
  * Load items with current filters
  */
-State.loadItems = async function (state: AppState): Promise<void> {
+State.loadItems = async function (state:AppState):Promise<void> {
     state.itemsLoading.value = true
 
     try {

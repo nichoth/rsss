@@ -340,6 +340,19 @@ button {
     border-bottom: 1px solid var(--color-border);
 }
 
+footer {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background-color: white;
+    border-top: 1px solid;
+
+    & iframe {
+        border: none;
+        min-width: 700px;
+    }
+}
+
 .items-filters {
     display: flex;
     gap: 1rem;

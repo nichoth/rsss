@@ -41,7 +41,7 @@ export const App: FunctionComponent<{
 
     // Handle route changes (including back/forward navigation)
     useEffect(() => {
-        if (isAuthenticated.value && state.items.value.length > 0) {
+        if (isAuthenticated.value && (state.items.value?.length || 0) > 0) {
             State.handleRouteChange(state)
         }
     }, [route.value, isAuthenticated.value])
@@ -71,7 +71,15 @@ export const App: FunctionComponent<{
     }
 
     // Main app
-    return html`<${FeedReader} state=${state} />`
+    return html`
+        <${FeedReader} state=${state} />
+        <footer>
+            <iframe
+                src="https://github.com/sponsors/nichoth/card"
+                title="Sponsor nichoth"
+            ></iframe>
+        </footer>
+    `
 }
 
 render(html`<${App} state=${state} />`, document.getElementById('root')!)
