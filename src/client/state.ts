@@ -422,10 +422,29 @@ State.markAllRead = async function (state:AppState, feedId?:number):Promise<void
 }
 
 /**
+ * Convert an item's link to a route path like /domain.tld/path
+ */
+State.itemToRoute = function (item:Item):string|null {
+    if (!item.link) return null
+    try {
+        const url = new URL(item.link)
+        return '/' + url.host + url.pathname + url.search + url.hash
+    } catch {
+        return null
+    }
+}
+
+/**
  * Select an item for reading
  */
 State.selectItem = async function (state:AppState, item:Item):Promise<void> {
     state.selectedItem.value = item
+
+    // Update URL for back button support
+    const route = State.itemToRoute(item)
+    if (route) {
+        state._setRoute(route)
+    }
 
     // Mark as read if not already
     if (!item.is_read) {
@@ -434,8 +453,55 @@ State.selectItem = async function (state:AppState, item:Item):Promise<void> {
 }
 
 /**
- * Clear selected item
+ * Clear selected item and navigate back to list
  */
 State.clearSelectedItem = function (state: AppState): void {
     state.selectedItem.value = null
+    state._setRoute('/')
+}
+
+/**
+ * Check if a route matches an item route pattern (/domain.tld/path)
+ */
+State.isItemRoute = function (route:string):boolean {
+    // Item routes start with / followed by a domain (contains a dot)
+    // but exclude /login and other app routes
+    if (route === '/' || route.startsWith('/login') || route.startsWith('/api')) {
+        return false
+    }
+    // Check if it looks like /domain.tld/...
+    const match = route.match(/^\/([^/]+\.[^/]+)/)
+    return !!match
+}
+
+/**
+ * Find an item by its link matching the current route
+ */
+State.findItemByRoute = function (state:AppState, route:string):Item|null {
+    for (const item of state.items.value) {
+        if (State.itemToRoute(item) === route) {
+            return item
+        }
+    }
+    return null
+}
+
+/**
+ * Handle route change - select item if it's an item route
+ */
+State.handleRouteChange = function (state:AppState):void {
+    const route = state.route.value
+
+    if (State.isItemRoute(route)) {
+        const item = State.findItemByRoute(state, route)
+        if (item) {
+            state.selectedItem.value = item
+            // Mark as read if not already
+            if (!item.is_read) {
+                State.toggleItemRead(state, item.id, true)
+            }
+        }
+    } else if (route === '/') {
+        state.selectedItem.value = null
+    }
 }

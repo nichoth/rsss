@@ -36,10 +36,20 @@ export const App: FunctionComponent<{
     useEffect(() => {
         if (isAuthenticated.value) {
             State.loadFeeds(state)
-            State.loadItems(state)
+            State.loadItems(state).then(() => {
+                // After items load, check if we need to select one based on URL
+                State.handleRouteChange(state)
+            })
             State.loadCounts(state)
         }
     }, [isAuthenticated.value])
+
+    // Handle route changes (including back/forward navigation)
+    useEffect(() => {
+        if (isAuthenticated.value && state.items.value.length > 0) {
+            State.handleRouteChange(state)
+        }
+    }, [route.value, isAuthenticated.value])
 
     // Redirect to login if not authenticated
     useEffect(() => {
