@@ -271,12 +271,16 @@ State.loadFeeds = async function (state:AppState):Promise<void> {
 /**
  * Add a new feed
  */
-State.addFeed = async function (state: AppState, url: string): Promise<{ success: boolean; error?: string }> {
+State.addFeed = async function (
+    state:AppState,
+    url:string
+):Promise<{ success:boolean; error?:string }> {
     try {
         const response = await api.post('feeds', { json: { url } })
 
         if (response.ok) {
             await State.loadFeeds(state)
+            await State.loadItems(state)
             await State.loadCounts(state)
             return { success: true }
         } else {
@@ -294,7 +298,7 @@ State.addFeed = async function (state: AppState, url: string): Promise<{ success
 /**
  * Delete a feed
  */
-State.deleteFeed = async function (state: AppState, feedId: number): Promise<void> {
+State.deleteFeed = async function (state:AppState, feedId:number):Promise<void> {
     const response = await api.delete(`feeds/${feedId}`)
 
     if (response.ok) {

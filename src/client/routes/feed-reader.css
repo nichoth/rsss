@@ -15,13 +15,12 @@
             &::after {
                 top: 52%;
             }
-
         }
     }
 
     & .sidebar-item {
         border: none;
-        border-bottom: 2px solid transparent;
+        border-left: 2px solid transparent;
         border-color: transparent;
         display: flex;
         align-items: center;

@@ -12,6 +12,7 @@ import { SidebarItem } from '../components/sidebar-item.js'
 import { SidebarFooter } from '../components/sidebar-footer.js'
 import { Button } from '../components/button.js'
 import { ButtonIcon } from '../components/button-icon.js'
+import { CloseIcon } from '../components/close.js'
 import { ELLIPSIS } from '../constants.js'
 // import Debug from '@substrate-system/debug'
 // const debug = Debug('rsss:view')
@@ -171,9 +172,9 @@ export const FeedReader:FunctionComponent<{
                                     <button
                                         class="btn-delete"
                                         onClick=${() => handleDeleteFeed(feed)}
-                                        title="Delete feed"
+                                        aria-label="Delete feed"
                                     >
-                                        x
+                                        <${CloseIcon} />
                                     </button>
                                 </div>
                             `)}

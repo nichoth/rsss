@@ -200,10 +200,17 @@ export class UserDO extends DurableObject<Env> {
                     body.url
                 ).one()
 
-                // Schedule immediate fetch
-                this.ctx.waitUntil(this.fetchFeed(feed as unknown as Feed))
+                // Fetch feed content before responding so client sees
+                // items immediately
+                await this.fetchFeed(feed as unknown as Feed)
 
-                return c.json({ feed }, 201)
+                // Return updated feed with title/description from fetch
+                const updatedFeed = this.sql.exec(
+                    'SELECT * FROM feeds WHERE url = ?',
+                    body.url
+                ).one()
+
+                return c.json({ feed: updatedFeed }, 201)
             } catch (_err) {
                 const err = _err as Error
                 console.log('**error**', err.message)
