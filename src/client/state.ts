@@ -50,22 +50,22 @@ export interface CountsResponse {
 
 export type AppState = {
     _setRoute:(route:string) => void,
-    route: Signal<string>,
-    user: Signal<User|null>,
-    authLoading: Signal<boolean>,
-    authError: Signal<string|null>,
-    feeds: Signal<Feed[]>,
-    feedsLoading: Signal<boolean>,
-    items: Signal<Item[]>,
-    itemsLoading: Signal<boolean>,
+    route:Signal<string>,
+    user:Signal<User|null>,
+    authLoading:Signal<boolean>,
+    authError:Signal<string|null>,
+    feeds:Signal<Feed[]>,
+    feedsLoading:Signal<boolean>,
+    items:Signal<Item[]>,
+    itemsLoading:Signal<boolean>,
     itemsTotal:Signal<number>,
     itemsOffset:Signal<number>,
-    counts: Signal<CountsResponse>,
-    selectedFeedId: Signal<number|null>,
-    showUnreadOnly: Signal<boolean>,
-    showStarredOnly: Signal<boolean>,
-    selectedItem: Signal<Item|null>,
-    isAuthenticated: Signal<boolean>
+    counts:Signal<CountsResponse>,
+    selectedFeedId:Signal<number|null>,
+    showUnreadOnly:Signal<boolean>,
+    showStarredOnly:Signal<boolean>,
+    selectedItem:Signal<Item|null>,
+    isAuthenticated:Signal<boolean>
 }
 
 export function State ():AppState {
@@ -87,7 +87,6 @@ export function State ():AppState {
         itemsLoading: signal(false),
         itemsTotal: signal(0),
         itemsOffset: signal(0),
-        // Counts
         counts: signal<CountsResponse>({ unread: 0, starred: 0, total: 0 }),
         // Selected feed filter
         selectedFeedId: signal<number|null>(null),
@@ -109,6 +108,9 @@ export function State ():AppState {
         }
     })
 
+    /**
+     * Fetch everything after we authenticate
+     */
     effect(() => {
         if (!state.isAuthenticated) return
         State.loadFeeds(state)
@@ -126,7 +128,7 @@ export function State ():AppState {
 }
 
 /**
- * API client for Collie endpoints
+ * API client
  */
 const api = ky.create({
     prefixUrl: '/api',
@@ -252,7 +254,7 @@ State.loadFeeds = async function (state:AppState):Promise<void> {
     state.feedsLoading.value = true
 
     try {
-        const response = await api.get('collie/feeds')
+        const response = await api.get('feeds')
 
         if (response.ok) {
             const data = await response.json<{ feeds: Feed[] }>()
@@ -271,7 +273,7 @@ State.loadFeeds = async function (state:AppState):Promise<void> {
  */
 State.addFeed = async function (state: AppState, url: string): Promise<{ success: boolean; error?: string }> {
     try {
-        const response = await api.post('collie/feeds', { json: { url } })
+        const response = await api.post('feeds', { json: { url } })
 
         if (response.ok) {
             await State.loadFeeds(state)
@@ -293,7 +295,7 @@ State.addFeed = async function (state: AppState, url: string): Promise<{ success
  * Delete a feed
  */
 State.deleteFeed = async function (state: AppState, feedId: number): Promise<void> {
-    const response = await api.delete(`collie/feeds/${feedId}`)
+    const response = await api.delete(`feeds/${feedId}`)
 
     if (response.ok) {
         await State.loadFeeds(state)
@@ -309,7 +311,7 @@ State.refreshFeeds = async function (state: AppState): Promise<void> {
     state.feedsLoading.value = true
 
     try {
-        await api.post('collie/feeds/refresh')
+        await api.post('feeds/refresh')
         await State.loadFeeds(state)
         await State.loadItems(state)
         await State.loadCounts(state)
@@ -341,7 +343,7 @@ State.loadItems = async function (state:AppState):Promise<void> {
             params.set('is_starred', 'true')
         }
 
-        const response = await api.get(`collie/items?${params.toString()}`)
+        const response = await api.get(`items?${params.toString()}`)
 
         if (response.ok) {
             const data = await response.json<ItemsResponse>()
@@ -358,7 +360,7 @@ State.loadItems = async function (state:AppState):Promise<void> {
  */
 State.loadCounts = async function (state: AppState): Promise<void> {
     try {
-        const response = await api.get('collie/items/count')
+        const response = await api.get('items/count')
 
         if (response.ok) {
             const data = await response.json<CountsResponse>()
@@ -379,7 +381,7 @@ State.toggleItemRead = async function (
     itemId:number,
     isRead:boolean
 ):Promise<void> {
-    const response = await api.patch(`collie/items/${itemId}`, {
+    const response = await api.patch(`items/${itemId}`, {
         json: { is_read: isRead }
     })
 
@@ -413,7 +415,7 @@ State.toggleItemStarred = async function (
     itemId:number,
     isStarred:boolean
 ):Promise<void> {
-    const response = await api.patch(`collie/items/${itemId}`, {
+    const response = await api.patch(`items/${itemId}`, {
         json: { is_starred: isStarred }
     })
 
@@ -444,7 +446,7 @@ State.toggleItemStarred = async function (
  */
 State.markAllRead = async function (state:AppState, feedId?:number):Promise<void> {
     const body = feedId ? { feed_id: feedId } : {}
-    const response = await api.post('collie/items/mark-all-read', { json: body })
+    const response = await api.post('items/mark-all-read', { json: body })
 
     if (response.ok) {
         await State.loadItems(state)

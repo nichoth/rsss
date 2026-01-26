@@ -16,7 +16,7 @@ import type { Context, Next } from 'hono'
 export { UserDO }
 
 export interface Env {
-    COLLIE_USER:DurableObjectNamespace<UserDO>
+    USER_DO:DurableObjectNamespace<UserDO>
     SESSIONS:KVNamespace
     ASSETS:Fetcher
     SESSION_SECRET:string
@@ -245,13 +245,13 @@ const requireAuth = async (c:Context<{
  */
 function getUserDO (env:Env, did:string):DurableObjectStub<UserDO> {
     // Use the DID as the DO name for consistent routing
-    const id = env.COLLIE_USER.idFromName(did)
-    return env.COLLIE_USER.get(id)
+    const id = env.USER_DO.idFromName(did)
+    return env.USER_DO.get(id)
 }
 
 /**
  * Proxy requests to user's Durable Object
- * All /api/collie/* routes go to the user's DO
+ * All /api/* routes go to the user's DO
  */
 app.all('/api/*', requireAuth, async (c) => {
     const session = c.get('session')!

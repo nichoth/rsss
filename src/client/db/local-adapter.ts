@@ -226,7 +226,7 @@ export const localAdapter: DbAdapter & {
         const since = syncState.lastSyncedAt
 
         // Build sync URL - use current origin, user is authenticated via session cookie
-        const url = new URL('/api/collie/sync', window.location.origin)
+        const url = new URL('/api/sync', window.location.origin)
         if (since) {
             url.searchParams.set('since', since)
         }

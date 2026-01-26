@@ -2,7 +2,6 @@ import { html } from 'htm/preact'
 import { type FunctionComponent } from 'preact'
 import { useState } from 'preact/hooks'
 import '@substrate-system/check-box'
-import Debug from '@substrate-system/debug'
 import {
     State,
     type AppState,
@@ -14,9 +13,10 @@ import { SidebarFooter } from '../components/sidebar-footer.js'
 import { Button } from '../components/button.js'
 import { ButtonIcon } from '../components/button-icon.js'
 import { ELLIPSIS } from '../constants.js'
-const debug = Debug('rsss:view')
+// import Debug from '@substrate-system/debug'
+// const debug = Debug('rsss:view')
 
-export const FeedReader: FunctionComponent<{
+export const FeedReader:FunctionComponent<{
     state:AppState
 }> = function FeedReader ({ state }) {
     const {
@@ -36,7 +36,7 @@ export const FeedReader: FunctionComponent<{
     const [addFeedError, setAddFeedError] = useState<string | null>(null)
     const [showAddFeed, setShowAddFeed] = useState(false)
 
-    async function handleAddFeed (e: Event) {
+    async function handleAddFeed (e:Event) {
         e.preventDefault()
         if (!newFeedUrl.trim()) return
 
@@ -90,8 +90,6 @@ export const FeedReader: FunctionComponent<{
             onClose=${() => State.clearSelectedItem(state)}
         />`
     }
-
-    debug('feeds loading?', feedsLoading.value)
 
     return html`
         <div class="route feed-reader">
