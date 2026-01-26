@@ -30,7 +30,7 @@ export const LoginPage: FunctionComponent<{ state: AppState }> = function LoginP
             <div class="login-container">
                 <div class="login-header">
                     <h1>RSSS</h1>
-                    <p>Read simply syndicated things.</p>
+                    <p>Really Simple Syndication Service</p>
                 </div>
 
                 ${(authError.value || urlError) && html`
