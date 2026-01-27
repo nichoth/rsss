@@ -5,7 +5,6 @@ import '@substrate-system/tool-tip'
 import { State, type AppState } from '../state.js'
 import { ItemReader } from '../components/item-reader.js'
 import { ItemRow } from '../components/item-row.js'
-import { Header } from '../components/header.js'
 import { Sidebar } from '../components/sidebar.js'
 // import Debug from '@substrate-system/debug'
 // const debug = Debug('rsss:view')
@@ -44,8 +43,6 @@ export const FeedReader: FunctionComponent<{
 
     return html`
         <div class="route feed-reader">
-            <${Header} state=${state} />
-
             <div class="app-body">
                 <${Sidebar} state=${state} />
 

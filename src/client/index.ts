@@ -3,6 +3,7 @@ import { type FunctionComponent, render } from 'preact'
 import { useComputed } from '@preact/signals'
 import { State, type AppState } from './state.js'
 import Router from './routes/index.js'
+import { Header } from './components/header.js'
 import { FeedReader } from './routes/feed-reader.js'
 import './style.css'
 
@@ -51,6 +52,7 @@ export const App: FunctionComponent<{
     const ChildNode = match.value.action(match.value, state.route.value)
 
     return html`
+        <${Header} state=${state} />
         <${ChildNode} state=${state} />
         <footer>
             <iframe
