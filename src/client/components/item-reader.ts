@@ -1,0 +1,103 @@
+import { html } from 'htm/preact'
+import { type FunctionComponent } from 'preact'
+import { type Item, type AppState, State } from '../state'
+
+export const ItemReader:FunctionComponent<{
+    item:Item
+    state:AppState
+    onClose:()=>void
+}> = function ItemReader ({ item, state, onClose }) {
+    const isStarred = !!item.is_starred
+    const isRead = !!item.is_read
+    const isOnline = state.isOnline.value
+
+    async function handleStar () {
+        if (!isOnline) return
+        await State.toggleItemStarred(state, item.id, !isStarred)
+    }
+
+    async function handleToggleRead () {
+        if (!isOnline) return
+        await State.toggleItemRead(state, item.id, !isRead)
+    }
+
+    function formatDate (dateStr:string|null):string {
+        if (!dateStr) return ''
+        return new Date(dateStr).toLocaleString()
+    }
+
+    return html`
+        <div class="item-reader">
+            <header class="reader-header">
+                <button class="btn btn-back" onClick=${onClose}>
+                    ${'<-'} Back
+                </button>
+                <div class="reader-actions">
+                    <button
+                        class="btn btn-icon ${isStarred ? 'starred' : ''}"
+                        onClick=${handleStar}
+                        title=${isOnline ?
+                            (isStarred ? 'Unstar' : 'Star') :
+                            'Cannot star while offline'}
+                        disabled=${!isOnline}
+                    >
+                        ${isStarred ? '★' : '☆'}
+                    </button>
+                    <button
+                        class="btn btn-small"
+                        onClick=${handleToggleRead}
+                        disabled=${!isOnline}
+                        title=${isOnline ?
+                            '' :
+                            'Cannot change read status while offline'}
+                    >
+                        ${isRead ? 'Mark unread' : 'Mark read'}
+                    </button>
+                    ${item.link && html`
+                        <a
+                            class="btn btn-small"
+                            href=${item.link}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                        >
+                            Open original
+                        </a>
+                    `}
+                </div>
+            </header>
+
+            <article class="reader-content">
+                <header class="article-header">
+                    <h1>${item.title || '(No title)'}</h1>
+                    <div class="article-meta">
+                        <span class="article-feed">${item.feed_title}</span>
+                        ${item.author && html`<span
+                            class="article-author"
+                        >
+                            by ${item.author}
+                        </span>`}
+                        ${item.pub_date && html`<span
+                            class="article-date"
+                        >
+                            ${formatDate(item.pub_date)}
+                        </span>`}
+                    </div>
+                </header>
+
+                <div
+                    class="article-body"
+                    dangerouslySetInnerHTML=${{ __html: sanitizeHtml(item.content || item.description || '') }}
+                />
+            </article>
+        </div>
+    `
+}
+
+function sanitizeHtml (html: string): string {
+    // Basic sanitization - remove script tags and event handlers
+    return html
+        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+        .replace(/\s*on\w+="[^"]*"/gi, '')
+        .replace(/\s*on\w+='[^']*'/gi, '')
+        .replace(/javascript:/gi, '')
+}

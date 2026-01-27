@@ -8,71 +8,71 @@ const debug = Debug('rsss')
 const USER_STORAGE_KEY = 'rsss_user'
 
 export interface User {
-    did:string
-    handle:string
+    did: string
+    handle: string
 }
 
 export interface Feed {
-    id:number
-    url:string
-    title:string|null
-    description:string|null
-    site_url:string|null
-    last_fetched:string|null
-    created_at:string
+    id: number
+    url: string
+    title: string | null
+    description: string | null
+    site_url: string | null
+    last_fetched: string | null
+    created_at: string
 }
 
 export interface Item {
-    id:number
-    feed_id:number
-    guid:string
-    title:string|null
-    link:string|null
-    description:string|null
-    content:string|null
-    author:string|null
-    pub_date:string|null
-    is_read:number
-    is_starred:number
-    created_at:string
-    feed_title?:string
+    id: number
+    feed_id: number
+    guid: string
+    title: string | null
+    link: string | null
+    description: string | null
+    content: string | null
+    author: string | null
+    pub_date: string | null
+    is_read: number
+    is_starred: number
+    created_at: string
+    feed_title?: string
 }
 
 export interface ItemsResponse {
-    items:Item[]
-    total:number
-    limit:number
-    offset:number
+    items: Item[]
+    total: number
+    limit: number
+    offset: number
 }
 
 export interface CountsResponse {
-    unread:number
-    starred:number
-    total:number
+    unread: number
+    starred: number
+    total: number
 }
 
 export type AppState = {
-    _setRoute:(route:string) => void,
-    route:Signal<string>,
-    user:Signal<User|null>,
-    authLoading:Signal<boolean>,
-    authError:Signal<string|null>,
-    isOnline:Signal<boolean>,
-    feeds:Signal<Feed[]>,
-    feedsLoading:Signal<boolean>,
-    items:Signal<Item[]>,
-    itemsLoading:Signal<boolean>,
-    itemsTotal:Signal<number>,
-    itemsOffset:Signal<number>,
-    counts:Signal<CountsResponse>,
-    selectedFeedId:Signal<number|null>,
-    showUnreadOnly:Signal<boolean>,
-    showStarredOnly:Signal<boolean>,
-    selectedItem:Signal<Item|null>,
-    isAuthenticated:Signal<boolean>
+    _setRoute: (route: string) => void,
+    route: Signal<string>,
+    user: Signal<User | null>,
+    authLoading: Signal<boolean>,
+    authError: Signal<string | null>,
+    isOnline: Signal<boolean>,
+    feeds: Signal<Feed[]>,
+    feedsLoading: Signal<boolean>,
+    items: Signal<Item[]>,
+    itemsLoading: Signal<boolean>,
+    itemsTotal: Signal<number>,
+    itemsOffset: Signal<number>,
+    counts: Signal<CountsResponse>,
+    selectedFeedId: Signal<number | null>,
+    showUnreadOnly: Signal<boolean>,
+    showStarredOnly: Signal<boolean>,
+    selectedItem: Signal<Item | null>,
+    isAuthenticated: Signal<boolean>
 }
 
-export function State ():AppState {
+export function State (): AppState {
     const onRoute = Route()
 
     // Route state
@@ -80,9 +80,9 @@ export function State ():AppState {
         _setRoute: onRoute.setRoute.bind(onRoute),
         route: signal(location.pathname),
         // Auth state
-        user: signal<User|null>(null),
+        user: signal<User | null>(null),
         authLoading: signal(true),
-        authError: signal<string|null>(null),
+        authError: signal<string | null>(null),
         // Network state
         isOnline: signal(navigator.onLine),
         // Feeds state
@@ -95,11 +95,15 @@ export function State ():AppState {
         itemsOffset: signal(0),
         counts: signal<CountsResponse>({ unread: 0, starred: 0, total: 0 }),
         // Selected feed filter
-        selectedFeedId: signal<number|null>(null),
+        selectedFeedId: signal<number | null>(null),
         showUnreadOnly: signal(false),
         showStarredOnly: signal(false),
         // Selected item for reading
-        selectedItem: signal<Item|null>(null),
+        // Selected item for reading (derived from route)
+        selectedItem: computed(() => {
+            if (!State.isItemRoute(state.route.value)) return null
+            return State.findItemByRoute(state, state.route.value)
+        }),
         // Computed: is authenticated
         isAuthenticated: computed(() => state.user.value !== null)
     }
@@ -116,7 +120,7 @@ export function State ():AppState {
         state.isOnline.value = false
     })
 
-    onRoute((path:string, data) => {
+    onRoute((path: string, data) => {
         state.route.value = path
         // handle scroll position like a browser
         if (data.popstate) {
@@ -147,6 +151,14 @@ export function State ():AppState {
         }
     })
 
+    // Side-effect: mark as read when an item is "selected" via URL
+    effect(() => {
+        const item = state.selectedItem.value
+        if (item && !item.is_read && state.isOnline.value) {
+            State.toggleItemRead(state, item.id, true)
+        }
+    })
+
     // Check auth right away
     State.checkAuth(state)
 
@@ -160,7 +172,7 @@ const api = ky.create({
     prefixUrl: '/api',
 })
 
-State.showAll = function (state:AppState) {
+State.showAll = function (state: AppState) {
     batch(() => {
         state.showStarredOnly.value = false
         state.selectedFeedId.value = null
@@ -170,7 +182,7 @@ State.showAll = function (state:AppState) {
     State.loadItems(state)
 }
 
-State.showStarred = function (state:AppState) {
+State.showStarred = function (state: AppState) {
     batch(() => {
         state.showStarredOnly.value = true
         state.selectedFeedId.value = null
@@ -184,7 +196,7 @@ State.showStarred = function (state:AppState) {
 /**
  * Check authentication status
  */
-State.checkAuth = async function (state:AppState):Promise<void> {
+State.checkAuth = async function (state: AppState): Promise<void> {
     state.authLoading.value = true
     state.authError.value = null
 
@@ -193,9 +205,9 @@ State.checkAuth = async function (state:AppState):Promise<void> {
 
         if (response.ok) {
             const data = await response.json<{
-                authenticated:boolean;
-                did:string;
-                handle:string
+                authenticated: boolean;
+                did: string;
+                handle: string
             }>()
             if (data.authenticated) {
                 const user = { did: data.did, handle: data.handle }
@@ -235,7 +247,7 @@ State.checkAuth = async function (state:AppState):Promise<void> {
 /**
  * Start OAuth login flow
  */
-State.login = async function (state:AppState, handle:string):Promise<void> {
+State.login = async function (state: AppState, handle: string): Promise<void> {
     state.authLoading.value = true
     state.authError.value = null
 
@@ -264,7 +276,7 @@ State.login = async function (state:AppState, handle:string):Promise<void> {
 /**
  * Dev mode login (for testing)
  */
-State.devLogin = async function (state:AppState):Promise<void> {
+State.devLogin = async function (state: AppState): Promise<void> {
     state.authLoading.value = true
 
     try {
@@ -283,7 +295,7 @@ State.devLogin = async function (state:AppState):Promise<void> {
 /**
  * Logout
  */
-State.logout = async function (state:AppState):Promise<void> {
+State.logout = async function (state: AppState): Promise<void> {
     try {
         await api.post('auth/logout')
     } catch {
@@ -301,7 +313,7 @@ State.logout = async function (state:AppState):Promise<void> {
 /**
  * Load feeds from local IndexedDB
  */
-State.loadFeeds = async function (state:AppState):Promise<void> {
+State.loadFeeds = async function (state: AppState): Promise<void> {
     if (!localAdapter.isAvailable()) return
     state.feedsLoading.value = true
 
@@ -321,9 +333,9 @@ State.loadFeeds = async function (state:AppState):Promise<void> {
  * Add a new feed (requires online)
  */
 State.addFeed = async function (
-    state:AppState,
-    url:string
-):Promise<{ success:boolean; error?:string }> {
+    state: AppState,
+    url: string
+): Promise<{ success: boolean; error?: string }> {
     if (!state.isOnline.value) {
         return { success: false, error: 'Cannot add feeds while offline' }
     }
@@ -350,7 +362,7 @@ State.addFeed = async function (
 /**
  * Delete a feed (requires online)
  */
-State.deleteFeed = async function (state:AppState, feedId:number):Promise<{ success:boolean; error?:string }> {
+State.deleteFeed = async function (state: AppState, feedId: number): Promise<{ success: boolean; error?: string }> {
     if (!state.isOnline.value) {
         return { success: false, error: 'Cannot delete feeds while offline' }
     }
@@ -392,7 +404,7 @@ State.refreshFeeds = async function (state: AppState): Promise<void> {
 /**
  * Load items from local IndexedDB with current filters
  */
-State.loadItems = async function (state:AppState):Promise<void> {
+State.loadItems = async function (state: AppState): Promise<void> {
     if (!localAdapter.isAvailable()) return
     state.itemsLoading.value = true
 
@@ -476,10 +488,10 @@ State.sync = async function (state: AppState): Promise<void> {
  * Mark item as read/unread (requires online)
  */
 State.toggleItemRead = async function (
-    state:AppState,
-    itemId:number,
-    isRead:boolean
-):Promise<void> {
+    state: AppState,
+    itemId: number,
+    isRead: boolean
+): Promise<void> {
     if (!state.isOnline.value) {
         debug('Cannot toggle read status while offline')
         return
@@ -524,10 +536,10 @@ State.toggleItemRead = async function (
  * Toggle item starred (requires online)
  */
 State.toggleItemStarred = async function (
-    state:AppState,
-    itemId:number,
-    isStarred:boolean
-):Promise<void> {
+    state: AppState,
+    itemId: number,
+    isStarred: boolean
+): Promise<void> {
     if (!state.isOnline.value) {
         debug('Cannot toggle starred status while offline')
         return
@@ -571,7 +583,7 @@ State.toggleItemStarred = async function (
 /**
  * Mark all items as read (requires online)
  */
-State.markAllRead = async function (state:AppState, feedId?:number):Promise<void> {
+State.markAllRead = async function (state: AppState, feedId?: number): Promise<void> {
     if (!state.isOnline.value) {
         debug('Cannot mark all read while offline')
         return
@@ -598,7 +610,7 @@ State.markAllRead = async function (state:AppState, feedId?:number):Promise<void
 /**
  * Convert an item's link to a route path like /domain.tld/path
  */
-State.itemToRoute = function (item:Item):string|null {
+State.itemToRoute = function (item: Item): string | null {
     if (!item.link) return null
     try {
         const url = new URL(item.link)
@@ -611,14 +623,9 @@ State.itemToRoute = function (item:Item):string|null {
 /**
  * Select an item for reading
  */
-State.selectItem = async function (state:AppState, item:Item):Promise<void> {
+State.selectItem = async function (state: AppState, item: Item): Promise<void> {
+    if (state.selectedItem.value?.id === item.id) return
     state.selectedItem.value = item
-
-    // Update URL for back button support
-    const route = State.itemToRoute(item)
-    if (route) {
-        state._setRoute(route)
-    }
 
     // Mark as read if not already
     if (!item.is_read) {
@@ -630,14 +637,13 @@ State.selectItem = async function (state:AppState, item:Item):Promise<void> {
  * Clear selected item and navigate back to list
  */
 State.clearSelectedItem = function (state: AppState): void {
-    state.selectedItem.value = null
     state._setRoute('/')
 }
 
 /**
  * Check if a route matches an item route pattern (/domain.tld/path)
  */
-State.isItemRoute = function (route:string):boolean {
+State.isItemRoute = function (route: string): boolean {
     // Item routes start with / followed by a domain (contains a dot)
     // but exclude /login and other app routes
     if (route === '/' || route.startsWith('/login') || route.startsWith('/api')) {
@@ -651,7 +657,7 @@ State.isItemRoute = function (route:string):boolean {
 /**
  * Find an item by its link matching the current route
  */
-State.findItemByRoute = function (state:AppState, route:string):Item|null {
+State.findItemByRoute = function (state: AppState, route: string): Item | null {
     for (const item of state.items.value) {
         if (State.itemToRoute(item) === route) {
             return item
@@ -663,17 +669,20 @@ State.findItemByRoute = function (state:AppState, route:string):Item|null {
 /**
  * Handle route change - select item if it's an item route
  */
-State.handleRouteChange = function (state:AppState):void {
+State.handleRouteChange = function (state: AppState): void {
     const route = state.route.value
+    debug('Handling route change:', route)
 
     if (State.isItemRoute(route)) {
         const item = State.findItemByRoute(state, route)
         if (item) {
-            state.selectedItem.value = item
-            // Mark as read if not already
-            if (!item.is_read) {
-                State.toggleItemRead(state, item.id, true)
-            }
+            debug('Found item for route:', item.title)
+            State.selectItem(state, item)
+        } else {
+            debug('Item not found for route:', route)
+            // If we have items but not this one, maybe we're on a deep link
+            // and the item hasn't loaded yet. Effect will trigger again when
+            // items list changes.
         }
     } else if (route === '/') {
         state.selectedItem.value = null

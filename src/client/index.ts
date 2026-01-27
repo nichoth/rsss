@@ -3,6 +3,7 @@ import { type FunctionComponent, render } from 'preact'
 import { useComputed } from '@preact/signals'
 import { State, type AppState } from './state.js'
 import Router from './routes/index.js'
+import { FeedReader } from './routes/feed-reader.js'
 import './style.css'
 
 const state = State()
@@ -16,8 +17,8 @@ if (import.meta.env.DEV || import.meta.env.MODE === 'staging') {
     localStorage.removeItem('DEBUG')
 }
 
-export const App:FunctionComponent<{
-    state:AppState
+export const App: FunctionComponent<{
+    state: AppState
 }> = function App ({ state }) {
     const authLoading = useComputed(() => state.authLoading.value)
 
@@ -26,6 +27,10 @@ export const App:FunctionComponent<{
     })
 
     if (!match.value || !match.value.action) {
+        if (State.isItemRoute(state.route.value)) {
+            return html`<${FeedReader} state=${state} />`
+        }
+
         return html`<div class="not-found">
             <h1>404</h1>
             <p>Page not found</p>

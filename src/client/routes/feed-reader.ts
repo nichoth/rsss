@@ -2,13 +2,10 @@ import { html } from 'htm/preact'
 import { type FunctionComponent } from 'preact'
 import { useState } from 'preact/hooks'
 import '@substrate-system/check-box'
-import {
-    State,
-    type AppState,
-    type Item,
-    type Feed
-} from '../state.js'
+import { State, type AppState, type Feed } from '../state.js'
+import { ItemReader } from '../components/item-reader.js'
 import { SidebarItem } from '../components/sidebar-item.js'
+import { ItemRow } from '../components/item-row.js'
 import { SidebarFooter } from '../components/sidebar-footer.js'
 import { Button } from '../components/button.js'
 import { ButtonIcon } from '../components/button-icon.js'
@@ -17,8 +14,8 @@ import { ELLIPSIS } from '../constants.js'
 // import Debug from '@substrate-system/debug'
 // const debug = Debug('rsss:view')
 
-export const FeedReader:FunctionComponent<{
-    state:AppState
+export const FeedReader: FunctionComponent<{
+    state: AppState
 }> = function FeedReader ({ state }) {
     const {
         user,
@@ -38,7 +35,7 @@ export const FeedReader:FunctionComponent<{
     const [addFeedError, setAddFeedError] = useState<string | null>(null)
     const [showAddFeed, setShowAddFeed] = useState(false)
 
-    async function handleAddFeed (e:Event) {
+    async function handleAddFeed (e: Event) {
         e.preventDefault()
         if (!newFeedUrl.trim()) return
 
@@ -57,13 +54,13 @@ export const FeedReader:FunctionComponent<{
         setAddingFeed(false)
     }
 
-    async function handleDeleteFeed (feed:Feed) {
+    async function handleDeleteFeed (feed: Feed) {
         if (confirm(`Delete "${feed.title || feed.url}"?`)) {
             await State.deleteFeed(state, feed.id)
         }
     }
 
-    function handleSelectFeed (feedId:number|null) {
+    function handleSelectFeed (feedId: number | null) {
         state.selectedFeedId.value = feedId
         state.showStarredOnly.value = false
         state.itemsOffset.value = 0
@@ -168,11 +165,7 @@ export const FeedReader:FunctionComponent<{
 
                             ${feeds.value.map(feed => html`
                                 <div
-                                    class="sidebar-item feed-item ${
-                                        selectedFeedId.value === feed.id ?
-                                            'active' :
-                                            ''
-                                        }"
+                                    class="sidebar-item feed-item ${selectedFeedId.value === feed.id ? 'active' : ''}"
                                     key=${feed.id}
                                 >
                                     <button
@@ -193,12 +186,15 @@ export const FeedReader:FunctionComponent<{
                                 </div>
                             `)}
 
-                            ${!feedsLoading.value &&
-                                feeds.value.length === 0 && html`
-                                <div class="empty-state">
-                                    No feeds yet${ELLIPSIS}
-                                </div>
-                            `}
+                            ${(
+                                !feedsLoading.value &&
+                                feeds.value.length === 0 &&
+                                html`
+                                    <div class="empty-state">
+                                        No feeds yet${ELLIPSIS}
+                                    </div>
+                                `)
+                            }
                         </div>
                     </div>
 
@@ -237,15 +233,14 @@ export const FeedReader:FunctionComponent<{
                                 key=${item.id}
                                 item=${item}
                                 state=${state}
-                                onClick=${() => State.selectItem(state, item)}
                             />
                         `)}
 
                         ${!itemsLoading.value && items.value.length === 0 && html`
                             <div class="empty-state">
-                                ${feeds.value.length === 0
-                                    ? 'Maybe add some feeds to start reading.'
-                                    : 'No items to show.'}
+                                ${feeds.value.length === 0 ?
+                                    'Maybe add some feeds to start reading.' :
+                                    'No items to show.'}
                             </div>
                         `}
                     </div>
@@ -254,163 +249,3 @@ export const FeedReader:FunctionComponent<{
         </div>
     `
 }
-
-const ItemRow: FunctionComponent<{
-    item: Item
-    state: AppState
-    onClick: () => void
-}> = function ItemRow ({ item, state, onClick }) {
-    const isUnread = !item.is_read
-    const isStarred = !!item.is_starred
-    const isOnline = state.isOnline.value
-
-    async function handleStar (e: Event) {
-        e.stopPropagation()
-        if (!isOnline) return
-        await State.toggleItemStarred(state, item.id, !isStarred)
-    }
-
-    function formatDate (dateStr: string | null): string {
-        if (!dateStr) return ''
-        const date = new Date(dateStr)
-        const now = new Date()
-        const diff = now.getTime() - date.getTime()
-
-        if (diff < 60000) return 'just now'
-        if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`
-        if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`
-        if (diff < 604800000) return `${Math.floor(diff / 86400000)}d ago`
-
-        return date.toLocaleDateString()
-    }
-
-    return html`
-        <article
-            class="item-row ${isUnread ? 'unread' : ''}"
-            onClick=${onClick}
-        >
-            <div class="item-main">
-                <h3 class="item-title">${item.title || '(No title)'}</h3>
-                <div class="item-meta">
-                    <span class="item-feed">${item.feed_title}</span>
-                    ${item.pub_date && html`
-                        <span class="item-date">${formatDate(item.pub_date)}</span>
-                    `}
-                </div>
-                ${item.description && html`
-                    <p class="item-excerpt">${stripHtml(item.description).slice(0, 200)}</p>
-                `}
-            </div>
-            <div class="item-actions">
-                <button
-                    class="btn-star ${isStarred ? 'starred' : ''}"
-                    onClick=${handleStar}
-                    title=${isOnline ? (isStarred ? 'Unstar' : 'Star') : 'Cannot star while offline'}
-                    disabled=${!isOnline}
-                >
-                    ${isStarred ? '★' : '☆'}
-                </button>
-            </div>
-        </article>
-    `
-}
-
-const ItemReader: FunctionComponent<{
-    item: Item
-    state: AppState
-    onClose: () => void
-}> = function ItemReader ({ item, state, onClose }) {
-    const isStarred = !!item.is_starred
-    const isRead = !!item.is_read
-    const isOnline = state.isOnline.value
-
-    async function handleStar () {
-        if (!isOnline) return
-        await State.toggleItemStarred(state, item.id, !isStarred)
-    }
-
-    async function handleToggleRead () {
-        if (!isOnline) return
-        await State.toggleItemRead(state, item.id, !isRead)
-    }
-
-    function formatDate (dateStr: string | null): string {
-        if (!dateStr) return ''
-        return new Date(dateStr).toLocaleString()
-    }
-
-    return html`
-        <div class="item-reader">
-            <header class="reader-header">
-                <button class="btn btn-back" onClick=${onClose}>
-                    ← Back
-                </button>
-                <div class="reader-actions">
-                    <button
-                        class="btn btn-icon ${isStarred ? 'starred' : ''}"
-                        onClick=${handleStar}
-                        title=${isOnline ? (isStarred ? 'Unstar' : 'Star') : 'Cannot star while offline'}
-                        disabled=${!isOnline}
-                    >
-                        ${isStarred ? '★' : '☆'}
-                    </button>
-                    <button
-                        class="btn btn-small"
-                        onClick=${handleToggleRead}
-                        disabled=${!isOnline}
-                        title=${isOnline ? '' : 'Cannot change read status while offline'}
-                    >
-                        ${isRead ? 'Mark unread' : 'Mark read'}
-                    </button>
-                    ${item.link && html`
-                        <a
-                            class="btn btn-small"
-                            href=${item.link}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                        >
-                            Open original
-                        </a>
-                    `}
-                </div>
-            </header>
-
-            <article class="reader-content">
-                <header class="article-header">
-                    <h1>${item.title || '(No title)'}</h1>
-                    <div class="article-meta">
-                        <span class="article-feed">${item.feed_title}</span>
-                        ${item.author && html`<span class="article-author">by ${item.author}</span>`}
-                        ${item.pub_date && html`<span class="article-date">${formatDate(item.pub_date)}</span>`}
-                    </div>
-                </header>
-
-                <div
-                    class="article-body"
-                    dangerouslySetInnerHTML=${{ __html: sanitizeHtml(item.content || item.description || '') }}
-                />
-            </article>
-        </div>
-    `
-}
-
-function stripHtml (html:string):string {
-    return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
-}
-
-function sanitizeHtml (html:string):string {
-    // Basic sanitization - remove script tags and event handlers
-    return html
-        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-        .replace(/\s*on\w+="[^"]*"/gi, '')
-        .replace(/\s*on\w+='[^']*'/gi, '')
-        .replace(/javascript:/gi, '')
-}
-
-// <button
-//     class="btn"
-//     onClick=${handleRefresh}
-//     disabled=${feedsLoading.value}
-// >
-//     ${feedsLoading.value ? 'Refreshing...' : 'Refresh Feeds'}
-// </button>
