@@ -57,7 +57,7 @@ export const ItemRow:FunctionComponent<{
                 </div>
             </a>
             <div class="item-actions">
-                <a href="${item.link}">
+                <a href="${item.link}" target="_blank">
                     <new-tab></new-tab>
                 </a>
                 <button
