@@ -30,6 +30,7 @@ export const FeedReader:FunctionComponent<{
         feedsLoading,
         itemsLoading,
         showUnreadOnly,
+        isOnline,
     } = state
 
     const [newFeedUrl, setNewFeedUrl] = useState('')
@@ -100,6 +101,11 @@ export const FeedReader:FunctionComponent<{
                     <div>Really Simple Syndication Service</div>
                 </div>
                 <div class="header header-right">
+                    <span
+                        class="status-indicator ${isOnline.value ? 'online' : 'offline'}"
+                        title=${isOnline.value ? 'Online' : 'Offline'}
+                    ></span>
+                    <a href="/about" class="header-link">About</a>
                     <span class="user-handle">@${user.value?.handle}</span>
                     <button class="btn btn-small" onClick=${handleLogout}>Logout</button>
                 </div>
@@ -122,7 +128,8 @@ export const FeedReader:FunctionComponent<{
                             <${ButtonIcon}
                                 class="btn btn-icon"
                                 onClick=${() => setShowAddFeed(!showAddFeed)}
-                                title="Add feed"
+                                title=${isOnline.value ? 'Add feed' : 'Cannot add feeds while offline'}
+                                disabled=${!isOnline.value}
                             >
                                 +
                             <//>
@@ -135,14 +142,17 @@ export const FeedReader:FunctionComponent<{
                                     placeholder="https://example.com/feed.xml"
                                     value=${newFeedUrl}
                                     onInput=${(e: Event) => setNewFeedUrl((e.target as HTMLInputElement).value)}
-                                    disabled=${addingFeed}
+                                    disabled=${addingFeed || !isOnline.value}
                                 />
                                 <${Button}
                                     type="submit"
-                                    disabled=${addingFeed || !newFeedUrl.trim()}
+                                    disabled=${addingFeed || !newFeedUrl.trim() || !isOnline.value}
                                 >
                                     ${addingFeed ? '...' : 'Add'}
                                 <//>
+                                ${!isOnline.value && html`<div class="form-error">
+                                    Offline - cannot add feeds
+                                </div>`}
                                 ${addFeedError && html`<div
                                     class="form-error"
                                 >
@@ -159,8 +169,10 @@ export const FeedReader:FunctionComponent<{
                             ${feeds.value.map(feed => html`
                                 <div
                                     class="sidebar-item feed-item ${
-                                        selectedFeedId.value === feed.id ? 'active' : ''
-                                    }"
+                                        selectedFeedId.value === feed.id ?
+                                            'active' :
+                                            ''
+                                        }"
                                     key=${feed.id}
                                 >
                                     <button
@@ -173,13 +185,16 @@ export const FeedReader:FunctionComponent<{
                                         class="btn-delete"
                                         onClick=${() => handleDeleteFeed(feed)}
                                         aria-label="Delete feed"
+                                        disabled=${!isOnline.value}
+                                        title=${isOnline.value ? 'Delete feed' : 'Cannot delete feeds while offline'}
                                     >
                                         <${CloseIcon} />
                                     </button>
                                 </div>
                             `)}
 
-                            ${!feedsLoading.value && feeds.value.length === 0 && html`
+                            ${!feedsLoading.value &&
+                                feeds.value.length === 0 && html`
                                 <div class="empty-state">
                                     No feeds yet${ELLIPSIS}
                                 </div>
@@ -205,7 +220,8 @@ export const FeedReader:FunctionComponent<{
                         <button
                             class="btn btn-small"
                             onClick=${handleMarkAllRead}
-                            disabled=${counts.value.unread === 0}
+                            disabled=${counts.value.unread === 0 || !isOnline.value}
+                            title=${isOnline.value ? '' : 'Cannot mark read while offline'}
                         >
                             Mark all read
                         </button>
@@ -246,9 +262,11 @@ const ItemRow: FunctionComponent<{
 }> = function ItemRow ({ item, state, onClick }) {
     const isUnread = !item.is_read
     const isStarred = !!item.is_starred
+    const isOnline = state.isOnline.value
 
     async function handleStar (e: Event) {
         e.stopPropagation()
+        if (!isOnline) return
         await State.toggleItemStarred(state, item.id, !isStarred)
     }
 
@@ -287,7 +305,8 @@ const ItemRow: FunctionComponent<{
                 <button
                     class="btn-star ${isStarred ? 'starred' : ''}"
                     onClick=${handleStar}
-                    title=${isStarred ? 'Unstar' : 'Star'}
+                    title=${isOnline ? (isStarred ? 'Unstar' : 'Star') : 'Cannot star while offline'}
+                    disabled=${!isOnline}
                 >
                     ${isStarred ? '★' : '☆'}
                 </button>
@@ -303,12 +322,15 @@ const ItemReader: FunctionComponent<{
 }> = function ItemReader ({ item, state, onClose }) {
     const isStarred = !!item.is_starred
     const isRead = !!item.is_read
+    const isOnline = state.isOnline.value
 
     async function handleStar () {
+        if (!isOnline) return
         await State.toggleItemStarred(state, item.id, !isStarred)
     }
 
     async function handleToggleRead () {
+        if (!isOnline) return
         await State.toggleItemRead(state, item.id, !isRead)
     }
 
@@ -327,13 +349,16 @@ const ItemReader: FunctionComponent<{
                     <button
                         class="btn btn-icon ${isStarred ? 'starred' : ''}"
                         onClick=${handleStar}
-                        title=${isStarred ? 'Unstar' : 'Star'}
+                        title=${isOnline ? (isStarred ? 'Unstar' : 'Star') : 'Cannot star while offline'}
+                        disabled=${!isOnline}
                     >
                         ${isStarred ? '★' : '☆'}
                     </button>
                     <button
                         class="btn btn-small"
                         onClick=${handleToggleRead}
+                        disabled=${!isOnline}
+                        title=${isOnline ? '' : 'Cannot change read status while offline'}
                     >
                         ${isRead ? 'Mark unread' : 'Mark read'}
                     </button>

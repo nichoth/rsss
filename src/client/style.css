@@ -204,6 +204,22 @@ button {
     font-size: 0.875rem;
 }
 
+/* Online/Offline Status Indicator */
+.status-indicator {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.status-indicator.online {
+    background-color: var(--color-success);
+}
+
+.status-indicator.offline {
+    background-color: #9ca3af;
+}
+
 .app-body {
     display: flex;
     flex: 1;
@@ -567,6 +583,83 @@ footer {
     }
 }
 
+/* Header link */
+.header-link {
+    color: var(--color-text-secondary);
+    text-decoration: none;
+    font-size: 0.875rem;
+
+    &:hover {
+        color: var(--color-primary);
+    }
+}
+
+/* About page */
+.route.about {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 2rem;
+}
+
+.about-header {
+    margin-bottom: 2rem;
+}
+
+.back-link {
+    color: var(--color-text-secondary);
+    text-decoration: none;
+
+    &:hover {
+        color: var(--color-primary);
+    }
+}
+
+.about-content {
+    & h1 {
+        margin: 0 0 0.5rem;
+        font-size: 2rem;
+    }
+
+    & .tagline {
+        color: var(--color-text-secondary);
+        font-size: 1.125rem;
+        margin-bottom: 2rem;
+    }
+
+    & section {
+        margin-bottom: 2rem;
+    }
+
+    & h2 {
+        font-size: 1.5rem;
+        margin: 0 0 1rem;
+        border-bottom: 1px solid var(--color-border);
+        padding-bottom: 0.5rem;
+    }
+
+    & h3 {
+        font-size: 1.125rem;
+        margin: 1.5rem 0 0.5rem;
+    }
+
+    & p {
+        margin: 0 0 1rem;
+    }
+
+    & ul, & ol {
+        margin: 1rem 0;
+        padding-left: 1.5rem;
+    }
+
+    & li {
+        margin-bottom: 0.75rem;
+    }
+
+    & a {
+        color: var(--color-primary);
+    }
+}
+
 /* Responsive */
 @media (width < 768px) {
     .sidebar {
@@ -574,6 +667,10 @@ footer {
     }
 
     .reader-content {
+        padding: 1rem;
+    }
+
+    .route.about {
         padding: 1rem;
     }
 }
