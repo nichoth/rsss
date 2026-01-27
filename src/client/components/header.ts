@@ -18,22 +18,24 @@ export const Header:FunctionComponent<{
     return html`
         <header class="app-header">
             <div class="header header-left">
-                <h1>RSSS</h1>
+                <h1><a href="/" class="logo">RSSS</a></h1>
                 <div>Really Simple Syndication Service</div>
             </div>
 
-            <div>
+            <nav>
                 <${StatusIndicator}
                     type=${isOnline.value ? 'online' : 'offline'}
                     title=${isOnline.value ? 'Online' : 'Offline'}
                 >${isOnline.value ? 'online' : 'offline'}<//>
-            </div>
-
-            <div class="header header-right">
                 <a
                     href="/about"
                     class="header-link${route.value === '/about' ? ' active' : ''}"
-                >About</a>
+                >
+                    About
+                </a>
+            </nav>
+
+            <div class="header header-right">
                 <span class="user-handle">@${user.value?.handle}</span>
                 <button class="btn btn-small" onClick=${handleLogout}>
                     Logout

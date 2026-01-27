@@ -9,7 +9,7 @@ export const StatusIndicator:FunctionComponent<{
 }> = (props) => {
     const { type, title } = props
 
-    return html`
+    return html`<div class="status-indicator">
         <span
             class="status-indicator ${type}"
             title=${title}
@@ -20,5 +20,6 @@ export const StatusIndicator:FunctionComponent<{
             </span>` :
             null
         }
+    </div>
     `
 }

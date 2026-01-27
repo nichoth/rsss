@@ -8,8 +8,20 @@
     border-bottom: 1px solid var(--color-border);
     flex-shrink: 0;
 
+    & nav {
+        display: flex;
+        gap: 2rem;
+        align-items: baseline
+    }
+
     & h1 {
         font-size: 1.25rem;
+
+        & a {
+            color: initial;
+            border: none;
+            text-decoration: none;
+        }
     }
 
     & a {
