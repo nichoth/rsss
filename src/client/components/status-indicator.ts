@@ -1,16 +1,24 @@
 import { html } from 'htm/preact'
 import { type FunctionComponent } from 'preact'
 
-export type StatusType = 'online' | 'offline' | 'cached' | 'remote'
+export type StatusType = 'online'|'offline'|'cached'|'remote'
 
-export const StatusIndicator: FunctionComponent<{
-    type: StatusType
-    title?: string
-}> = ({ type, title }) => {
+export const StatusIndicator:FunctionComponent<{
+    type:StatusType
+    title?:string
+}> = (props) => {
+    const { type, title } = props
+
     return html`
         <span
             class="status-indicator ${type}"
             title=${title}
         ></span>
+        ${props.children ?
+            html`<span class="status-text">
+                ${props.children}
+            </span>` :
+            null
+        }
     `
 }

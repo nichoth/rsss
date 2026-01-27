@@ -54,27 +54,27 @@ export interface CountsResponse {
 }
 
 export type AppState = {
-    _setRoute: (route: string) => void,
-    route: Signal<string>,
-    user: Signal<User | null>,
-    authLoading: Signal<boolean>,
-    authError: Signal<string | null>,
-    isOnline: Signal<boolean>,
-    feeds: Signal<Feed[]>,
-    feedsLoading: Signal<boolean>,
-    items: Signal<Item[]>,
-    itemsLoading: Signal<boolean>,
-    itemsTotal: Signal<number>,
-    itemsOffset: Signal<number>,
-    counts: Signal<CountsResponse>,
-    selectedFeedId: Signal<number | null>,
-    showUnreadOnly: Signal<boolean>,
-    showStarredOnly: Signal<boolean>,
-    selectedItem: Signal<Item | null>,
-    isAuthenticated: Signal<boolean>
+    _setRoute:(route:string)=>void,
+    route:Signal<string>,
+    user:Signal<User | null>,
+    authLoading:Signal<boolean>,
+    authError:Signal<string | null>,
+    isOnline:Signal<boolean>,
+    feeds:Signal<Feed[]>,
+    feedsLoading:Signal<boolean>,
+    items:Signal<Item[]>,
+    itemsLoading:Signal<boolean>,
+    itemsTotal:Signal<number>,
+    itemsOffset:Signal<number>,
+    counts:Signal<CountsResponse>,
+    selectedFeedId:Signal<number | null>,
+    showUnreadOnly:Signal<boolean>,
+    showStarredOnly:Signal<boolean>,
+    selectedItem:Signal<Item | null>,
+    isAuthenticated:Signal<boolean>
 }
 
-export function State (): AppState {
+export function State ():AppState {
     const onRoute = Route()
 
     // Route state
@@ -100,7 +100,6 @@ export function State (): AppState {
         selectedFeedId: signal<number | null>(null),
         showUnreadOnly: signal(false),
         showStarredOnly: signal(false),
-        // Selected item for reading
         // Selected item for reading (derived from route)
         selectedItem: computed(() => {
             if (!State.isItemRoute(state.route.value)) return null
@@ -134,22 +133,35 @@ export function State (): AppState {
 
     /**
      * Load data after authentication
-     * 1. Load cached data from IndexedDB immediately (fast)
-     * 2. If online, sync from remote to get any updates
+     * 1. Load cached data from IndexedDB immediately
+     * 2. If online, sync from remote (pull any updates)
      */
     effect(() => {
         if (!state.isAuthenticated.value) return
 
-        // First load cached data from IndexedDB for fast initial render
+        // load cached data from IndexedDB
         State.loadFeeds(state)
         State.loadItems(state)
-        State.loadCounts(state).then(() => {
-            State.handleRouteChange(state)
-        })
+        State.loadCounts(state)
 
-        // Then sync from remote if online (will reload data after sync)
+        // sync from remote if online (will reload data after sync)
         if (state.isOnline.value) {
             State.sync(state)
+        }
+    })
+
+    /**
+     * On route change, select item if it's an item route
+     */
+    effect(() => {
+        const route = state.route.value
+        if (!State.isItemRoute(route)) return
+
+        const item = State.findItemByRoute(state, route)
+        if (item) {
+            State.selectItem(state, item)
+        } else {
+            debug('Item not found for this route...', route)
         }
     })
 
@@ -649,7 +661,7 @@ State.itemToRoute = function (item: Item): string | null {
 /**
  * Select an item for reading
  */
-State.selectItem = async function (state: AppState, item: Item): Promise<void> {
+State.selectItem = async function (state:AppState, item:Item):Promise<void> {
     if (state.selectedItem.value?.id === item.id) return
     state.selectedItem.value = item
 
@@ -662,19 +674,20 @@ State.selectItem = async function (state: AppState, item: Item): Promise<void> {
 /**
  * Clear selected item and navigate back to list
  */
-State.clearSelectedItem = function (state: AppState): void {
+State.clearSelectedItem = function (state:AppState):void {
     state._setRoute('/')
 }
 
 /**
  * Check if a route matches an item route pattern (/domain.tld/path)
  */
-State.isItemRoute = function (route: string): boolean {
+State.isItemRoute = function (route:string):boolean {
     // Item routes start with / followed by a domain (contains a dot)
     // but exclude /login and other app routes
     if (route === '/' || route.startsWith('/login') || route.startsWith('/api')) {
         return false
     }
+
     // Check if it looks like /domain.tld/...
     const match = route.match(/^\/([^/]+\.[^/]+)/)
     return !!match
@@ -690,27 +703,4 @@ State.findItemByRoute = function (state: AppState, route: string): Item | null {
         }
     }
     return null
-}
-
-/**
- * Handle route change - select item if it's an item route
- */
-State.handleRouteChange = function (state: AppState): void {
-    const route = state.route.value
-    debug('Handling route change:', route)
-
-    if (State.isItemRoute(route)) {
-        const item = State.findItemByRoute(state, route)
-        if (item) {
-            debug('Found item for route:', item.title)
-            State.selectItem(state, item)
-        } else {
-            debug('Item not found for route:', route)
-            // If we have items but not this one, maybe we're on a deep link
-            // and the item hasn't loaded yet. Effect will trigger again when
-            // items list changes.
-        }
-    } else if (route === '/') {
-        state.selectedItem.value = null
-    }
 }

@@ -179,36 +179,6 @@ button {
     height: 100vh;
 }
 
-.app-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    height: var(--header-height);
-    padding: 0 1rem;
-    background: var(--color-surface);
-    border-bottom: 1px solid var(--color-border);
-    flex-shrink: 0;
-
-    & h1 {
-        font-size: 1.25rem;
-    }
-}
-
-.header {
-    display: flex;
-    gap: 1rem;
-    align-items: baseline;
-}
-
-.header-right {
-    align-items: center;
-}
-
-.user-handle {
-    font-size: 0.875rem;
-}
-
-
 .app-body {
     display: flex;
     flex: 1;
@@ -372,6 +342,7 @@ footer {
     & iframe {
         border: none;
         min-width: 700px;
+        max-height: 100px;
     }
 }
 

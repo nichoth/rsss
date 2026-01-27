@@ -4,17 +4,20 @@
     border-radius: 50%;
     flex-shrink: 0;
     display: inline-block;
+
+    &.online, &.cached {
+        background-color: var(--color-success);
+    }
+
+    &.offline {
+        background-color: #9ca3af;
+    }
+
+    &.remote {
+        background-color: var(--color-accent);
+    }
 }
 
-.status-indicator.online,
-.status-indicator.cached {
-    background-color: var(--color-success);
-}
-
-.status-indicator.offline {
-    background-color: #9ca3af;
-}
-
-.status-indicator.remote {
-    background-color: var(--color-accent);
+.status-text {
+    margin-left: 0.5rem;
 }

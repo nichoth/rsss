@@ -14,6 +14,7 @@ import { CloseIcon } from '../components/close.js'
 import { CacheIcon } from '../components/cache-icon.js'
 import { StatusIndicator } from '../components/status-indicator.js'
 import { ELLIPSIS } from '../constants.js'
+import { Header } from '../components/header.js'
 // import Debug from '@substrate-system/debug'
 // const debug = Debug('rsss:view')
 
@@ -21,7 +22,6 @@ export const FeedReader: FunctionComponent<{
     state: AppState
 }> = function FeedReader ({ state }) {
     const {
-        user,
         feeds,
         items,
         counts,
@@ -80,10 +80,6 @@ export const FeedReader: FunctionComponent<{
         await State.markAllRead(state, state.selectedFeedId.value || undefined)
     }
 
-    async function handleLogout () {
-        await State.logout(state)
-    }
-
     async function handleToggleCache (feed:Feed, e:Event) {
         e.stopPropagation()
         const newStatus = feed.is_locally_cached === 0
@@ -101,21 +97,7 @@ export const FeedReader: FunctionComponent<{
 
     return html`
         <div class="route feed-reader">
-            <header class="app-header">
-                <div class="header header-left">
-                    <h1>RSSS</h1>
-                    <div>Really Simple Syndication Service</div>
-                </div>
-                <div class="header header-right">
-                    <${StatusIndicator}
-                        type=${isOnline.value ? 'online' : 'offline'}
-                        title=${isOnline.value ? 'Online' : 'Offline'}
-                    />
-                    <a href="/about" class="header-link">About</a>
-                    <span class="user-handle">@${user.value?.handle}</span>
-                    <button class="btn btn-small" onClick=${handleLogout}>Logout</button>
-                </div>
-            </header>
+            <${Header} state=${state} />
 
             <div class="app-body">
                 <aside class="sidebar">
