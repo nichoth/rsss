@@ -1,0 +1,20 @@
+.status-indicator {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: inline-block;
+}
+
+.status-indicator.online,
+.status-indicator.cached {
+    background-color: var(--color-success);
+}
+
+.status-indicator.offline {
+    background-color: #9ca3af;
+}
+
+.status-indicator.remote {
+    background-color: var(--color-accent);
+}

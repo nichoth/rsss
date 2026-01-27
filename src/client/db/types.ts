@@ -11,6 +11,7 @@ export interface Feed {
     last_fetched: string | null
     created_at: string
     updated_at: string
+    is_locally_cached: number
 }
 
 export interface Item {

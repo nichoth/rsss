@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { type FunctionComponent } from 'preact'
 import { useState } from 'preact/hooks'
 import '@substrate-system/check-box'
+import '@substrate-system/tool-tip'
 import { State, type AppState, type Feed } from '../state.js'
 import { ItemReader } from '../components/item-reader.js'
 import { SidebarItem } from '../components/sidebar-item.js'
@@ -10,6 +11,8 @@ import { SidebarFooter } from '../components/sidebar-footer.js'
 import { Button } from '../components/button.js'
 import { ButtonIcon } from '../components/button-icon.js'
 import { CloseIcon } from '../components/close.js'
+import { CacheIcon } from '../components/cache-icon.js'
+import { StatusIndicator } from '../components/status-indicator.js'
 import { ELLIPSIS } from '../constants.js'
 // import Debug from '@substrate-system/debug'
 // const debug = Debug('rsss:view')
@@ -81,6 +84,12 @@ export const FeedReader: FunctionComponent<{
         await State.logout(state)
     }
 
+    async function handleToggleCache (feed: Feed, e: Event) {
+        e.stopPropagation()
+        const newStatus = feed.is_locally_cached === 0
+        await State.toggleFeedCached(state, feed.id, newStatus)
+    }
+
     // If an item is selected, show the reader view
     if (selectedItem.value) {
         return html`<${ItemReader}
@@ -98,10 +107,10 @@ export const FeedReader: FunctionComponent<{
                     <div>Really Simple Syndication Service</div>
                 </div>
                 <div class="header header-right">
-                    <span
-                        class="status-indicator ${isOnline.value ? 'online' : 'offline'}"
+                    <${StatusIndicator}
+                        type=${isOnline.value ? 'online' : 'offline'}
                         title=${isOnline.value ? 'Online' : 'Offline'}
-                    ></span>
+                    />
                     <a href="/about" class="header-link">About</a>
                     <span class="user-handle">@${user.value?.handle}</span>
                     <button class="btn btn-small" onClick=${handleLogout}>Logout</button>
@@ -168,33 +177,48 @@ export const FeedReader: FunctionComponent<{
                                     class="sidebar-item feed-item ${selectedFeedId.value === feed.id ? 'active' : ''}"
                                     key=${feed.id}
                                 >
+                                    <${StatusIndicator}
+                                        type=${feed.is_locally_cached === 1 ? 'cached' : 'remote'}
+                                        title=${feed.is_locally_cached === 1 ? 'Locally cached' : 'Cloud only'}
+                                    />
                                     <button
                                         class="feed-select"
                                         onClick=${() => handleSelectFeed(feed.id)}
                                     >
                                         ${feed.title || feed.url}
                                     </button>
-                                    <button
-                                        class="btn-delete"
-                                        onClick=${() => handleDeleteFeed(feed)}
-                                        aria-label="Delete feed"
-                                        disabled=${!isOnline.value}
-                                        title=${isOnline.value ? 'Delete feed' : 'Cannot delete feeds while offline'}
-                                    >
-                                        <${CloseIcon} />
-                                    </button>
+                                    <tool-tip content=${feed.is_locally_cached === 1 ? 'Switch to on-demand fetching' : 'Switch to local caching'}>
+                                        <button
+                                            class="btn-cache"
+                                            onClick=${(e: Event) => handleToggleCache(feed, e)}
+                                            aria-label=${feed.is_locally_cached === 1 ? 'Disable local cache' : 'Enable local cache'}
+                                            disabled=${!isOnline.value}
+                                        >
+                                            <${CacheIcon} cached=${feed.is_locally_cached === 1} />
+                                        </button>
+                                    </tool-tip>
+                                    <tool-tip content="Delete feed">
+                                        <button
+                                            class="btn-delete"
+                                            onClick=${() => handleDeleteFeed(feed)}
+                                            aria-label="Delete feed"
+                                            disabled=${!isOnline.value}
+                                        >
+                                            <${CloseIcon} />
+                                        </button>
+                                    </tool-tip>
                                 </div>
                             `)}
 
                             ${(
-                                !feedsLoading.value &&
-                                feeds.value.length === 0 &&
-                                html`
+            !feedsLoading.value &&
+            feeds.value.length === 0 &&
+            html`
                                     <div class="empty-state">
                                         No feeds yet${ELLIPSIS}
                                     </div>
                                 `)
-                            }
+        }
                         </div>
                     </div>
 
@@ -239,8 +263,8 @@ export const FeedReader: FunctionComponent<{
                         ${!itemsLoading.value && items.value.length === 0 && html`
                             <div class="empty-state">
                                 ${feeds.value.length === 0 ?
-                                    'Maybe add some feeds to start reading.' :
-                                    'No items to show.'}
+                'Maybe add some feeds to start reading.' :
+                'No items to show.'}
                             </div>
                         `}
                     </div>

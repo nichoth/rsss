@@ -45,7 +45,9 @@ export const AboutRoute:FunctionComponent<{
                         <strong>Server (Cloudflare Durable Objects)</strong> —
                         Each user gets their own Durable Object with a SQLite
                         database. This stores your feeds, items, read/starred
-                        states, and handles periodic feed fetching.
+                        states, handles periodic feed fetching, and is
+                        the ultimate source of truth.
+
                     </li>
                     <li>
                         <strong>Client (IndexedDB)</strong> — A local copy of

@@ -3,6 +3,7 @@ import Route from 'route-event'
 import ky from 'ky'
 import Debug from '@substrate-system/debug'
 import { localAdapter } from './db/local-adapter.js'
+import { remoteAdapter } from './db/remote-adapter.js'
 const debug = Debug('rsss')
 
 const USER_STORAGE_KEY = 'rsss_user'
@@ -19,6 +20,7 @@ export interface Feed {
     description: string | null
     site_url: string | null
     last_fetched: string | null
+    is_locally_cached: number
     created_at: string
 }
 
@@ -383,6 +385,21 @@ State.deleteFeed = async function (state: AppState, feedId: number): Promise<{ s
         }
     }
 }
+/**
+ * Toggle whether a feed is locally cached
+ */
+State.toggleFeedCached = async function (state: AppState, feedId: number, isCached: boolean): Promise<void> {
+    if (!state.isOnline.value) return
+
+    try {
+        await api.patch(`feeds/${feedId}`, { json: { is_locally_cached: isCached } })
+        // Sync to update local Feed object, then reload items
+        await State.sync(state)
+        await State.loadItems(state)
+    } catch (err) {
+        debug('Error toggling feed cache:', err)
+    }
+}
 
 /**
  * Refresh all feeds (requires online)
@@ -420,14 +437,23 @@ State.loadItems = async function (state: AppState): Promise<void> {
             offset: state.itemsOffset.value
         }
 
-        if (state.selectedFeedId.value) {
-            options.feedId = state.selectedFeedId.value
-        }
         if (state.showUnreadOnly.value) {
             options.isRead = false
         }
         if (state.showStarredOnly.value) {
             options.isStarred = true
+        }
+
+        if (state.selectedFeedId.value) {
+            options.feedId = state.selectedFeedId.value
+            // If the feed is NOT locally cached, use remote adapter
+            const feed = state.feeds.value.find(f => f.id === state.selectedFeedId.value)
+            if (feed && feed.is_locally_cached === 0 && state.isOnline.value) {
+                const data = await remoteAdapter.getItems(options)
+                state.items.value = data.items as Item[]
+                state.itemsTotal.value = data.total
+                return
+            }
         }
 
         const data = await localAdapter.getItems(options)

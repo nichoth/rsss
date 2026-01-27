@@ -1,6 +1,8 @@
 @import url("@substrate-system/css-normalize");
 @import url("@substrate-system/a11y");
 @import url("@substrate-system/check-box/css");
+@import url("@substrate-system/tool-tip/css");
+@import url("./components/status-indicator.css");
 @import url("./routes/feed-reader.css");
 
 :root {
@@ -58,7 +60,9 @@ button {
 }
 
 @keyframes spin {
-    to { transform: rotate(360deg); }
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 .loading-text {
@@ -204,21 +208,6 @@ button {
     font-size: 0.875rem;
 }
 
-/* Online/Offline Status Indicator */
-.status-indicator {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    flex-shrink: 0;
-}
-
-.status-indicator.online {
-    background-color: var(--color-success);
-}
-
-.status-indicator.offline {
-    background-color: #9ca3af;
-}
 
 .app-body {
     display: flex;
@@ -284,7 +273,8 @@ button {
     white-space: nowrap;
 }
 
-.btn-delete {
+.btn-delete,
+.btn-cache {
     flex-shrink: 0;
     width: 28px;
     height: 28px;
@@ -304,15 +294,20 @@ button {
         height: 100%;
     }
 
-    &:hover {
-        color: var(--color-error);
-        background: var(--color-hover);
-    }
-
     &:focus-visible {
         outline: 2px solid var(--color-primary);
         outline-offset: 2px;
     }
+}
+
+.btn-delete:hover {
+    color: var(--color-error);
+    background: #0000000d;
+}
+
+.btn-cache:hover {
+    color: var(--color-primary);
+    background: #0000000d;
 }
 
 .feeds-list {
@@ -538,7 +533,12 @@ footer {
         margin-bottom: 1rem;
     }
 
-    & h1, & h2, & h3, & h4, & h5, & h6 {
+    & h1,
+    & h2,
+    & h3,
+    & h4,
+    & h5,
+    & h6 {
         margin: 1.5rem 0 0.75rem;
     }
 
@@ -552,7 +552,8 @@ footer {
         margin: 1rem 0;
     }
 
-    & pre, & code {
+    & pre,
+    & code {
         background: var(--color-bg);
     }
 
@@ -573,7 +574,8 @@ footer {
         color: var(--color-text-secondary);
     }
 
-    & ul, & ol {
+    & ul,
+    & ol {
         margin: 1rem 0;
         padding-left: 1.5rem;
     }
@@ -646,7 +648,8 @@ footer {
         margin: 0 0 1rem;
     }
 
-    & ul, & ol {
+    & ul,
+    & ol {
         margin: 1rem 0;
         padding-left: 1.5rem;
     }

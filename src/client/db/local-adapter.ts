@@ -93,6 +93,7 @@ export const localAdapter: DbAdapter & {
             description: null,
             site_url: null,
             last_fetched: null,
+            is_locally_cached: 1, // Default to locally cached
             created_at: now,
             updated_at: now
         }
@@ -252,7 +253,25 @@ export const localAdapter: DbAdapter & {
 
         // Upsert items
         const itemTx = db.transaction('items', 'readwrite')
+        const nonCachedFeedIds = new Set(
+            data.feeds
+                .filter(f => f.is_locally_cached === 0)
+                .map(f => f.id)
+        )
+
         for (const item of data.items) {
+            // Only skip if the feed is NOT locally cached
+            // AND the item is not already starred locally
+            if (nonCachedFeedIds.has(item.feed_id)) {
+                // If the item is already in local DB and is starred, keep it
+                const existing = await db.get('items', item.id)
+                if (existing && existing.is_starred === 1) {
+                    await itemTx.store.put(item)
+                    continue
+                }
+                // Otherwise skip
+                continue
+            }
             await itemTx.store.put(item)
         }
         await itemTx.done
