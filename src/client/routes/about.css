@@ -1,3 +1,11 @@
 .route.about {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 2rem;
+    margin-bottom: 4rem;
+}
 
+
+.about-header {
+    margin-bottom: 2rem;
 }

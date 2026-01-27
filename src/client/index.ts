@@ -50,10 +50,11 @@ export const App: FunctionComponent<{
     }
 
     const ChildNode = match.value.action(match.value, state.route.value)
+    const { params } = match.value
 
     return html`
         <${Header} state=${state} />
-        <${ChildNode} state=${state} />
+        <${ChildNode} state=${state} params=${params} />
         <footer>
             <iframe
                 src="https://github.com/sponsors/nichoth/card"

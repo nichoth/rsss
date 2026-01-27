@@ -11,7 +11,16 @@
     & nav {
         display: flex;
         gap: 2rem;
-        align-items: baseline
+        align-items: baseline;
+
+        & a {
+            transition: all 0.2s;
+            border-bottom: 2px solid transparent;
+
+            &.active {
+                border-color: initial;
+            }
+        }
     }
 
     & h1 {
@@ -21,15 +30,6 @@
             color: initial;
             border: none;
             text-decoration: none;
-        }
-    }
-
-    & a {
-        transition: all 0.2s;
-        border-bottom: 2px solid transparent;
-
-        &.active {
-            border-color: initial;
         }
     }
 }
@@ -42,6 +42,17 @@
 
 .header-right {
     align-items: center;
+
+    & a {
+        transition: all 0.4s;
+        text-underline-offset: 1px;
+        text-decoration-style: dotted;
+
+        &:hover {
+            text-underline-offset: 2px;
+            text-decoration-style: solid;
+        }
+    }
 }
 
 .user-handle {

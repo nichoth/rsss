@@ -5,6 +5,7 @@ import {
     type AppState,
     type Item,
 } from '../state.js'
+import './item-row.css'
 
 export const ItemRow:FunctionComponent<{
     item:Item
@@ -37,7 +38,7 @@ export const ItemRow:FunctionComponent<{
 
     const route = State.itemToRoute(item)
     return html`
-        <article class="item-row ${isUnread ? 'unread' : ''}">
+        <div class="item-row ${isUnread ? 'unread' : ''}">
             <a class="item-link" href=${route}>
                 <div class="item-main">
                     <h3 class="item-title">${item.title || '(No title)'}</h3>
@@ -62,7 +63,7 @@ export const ItemRow:FunctionComponent<{
                     ${isStarred ? '★' : '☆'}
                 </button>
             </div>
-        </article>
+        </div>
     `
 }
 

@@ -3,20 +3,18 @@ import { type FunctionComponent } from 'preact'
 import '@substrate-system/check-box'
 import '@substrate-system/tool-tip'
 import { State, type AppState } from '../state.js'
-import { ItemReader } from '../components/item-reader.js'
 import { ItemRow } from '../components/item-row.js'
 import { Sidebar } from '../components/sidebar.js'
 // import Debug from '@substrate-system/debug'
 // const debug = Debug('rsss:view')
 
-export const FeedReader: FunctionComponent<{
-    state: AppState
+export const FeedReader:FunctionComponent<{
+    state:AppState
 }> = function FeedReader ({ state }) {
     const {
         feeds,
         items,
         counts,
-        selectedItem,
         itemsLoading,
         showUnreadOnly,
         isOnline,
@@ -30,15 +28,6 @@ export const FeedReader: FunctionComponent<{
 
     async function handleMarkAllRead () {
         await State.markAllRead(state, state.selectedFeedId.value || undefined)
-    }
-
-    // If an item is selected, show the reader view
-    if (selectedItem.value) {
-        return html`<${ItemReader}
-            item=${selectedItem.value}
-            state=${state}
-            onClose=${() => State.clearSelectedItem(state)}
-        />`
     }
 
     return html`
@@ -84,8 +73,8 @@ export const FeedReader: FunctionComponent<{
                         ${!itemsLoading.value && items.value.length === 0 && html`
                             <div class="empty-state">
                                 ${feeds.value.length === 0 ?
-                'Maybe add some feeds to start reading.' :
-                'No items to show.'}
+                                    'Maybe add some feeds to start reading.' :
+                                    'No items to show.'}
                             </div>
                         `}
                     </div>

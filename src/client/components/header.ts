@@ -36,7 +36,11 @@ export const Header:FunctionComponent<{
             </nav>
 
             <div class="header header-right">
-                <span class="user-handle">@${user.value?.handle}</span>
+                <span class="user-handle">
+                    <a href="/settings">
+                        <code>@${user.value?.handle}</code>
+                    </a>
+                </span>
                 <button class="btn btn-small" onClick=${handleLogout}>
                     Logout
                 </button>

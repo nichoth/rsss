@@ -5,8 +5,7 @@ import { type Item, type AppState, State } from '../state'
 export const ItemReader:FunctionComponent<{
     item:Item
     state:AppState
-    onClose:()=>void
-}> = function ItemReader ({ item, state, onClose }) {
+}> = function ItemReader ({ item, state }) {
     const isStarred = !!item.is_starred
     const isRead = !!item.is_read
     const isOnline = state.isOnline.value
@@ -29,9 +28,9 @@ export const ItemReader:FunctionComponent<{
     return html`
         <div class="item-reader">
             <header class="reader-header">
-                <button class="btn btn-back" onClick=${onClose}>
+                <a class="btn btn-back" href="/">
                     ${'<-'} Back
-                </button>
+                </a>
                 <div class="reader-actions">
                     <button
                         class="btn btn-icon ${isStarred ? 'starred' : ''}"

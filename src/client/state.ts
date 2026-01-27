@@ -56,9 +56,9 @@ export interface CountsResponse {
 export type AppState = {
     _setRoute:(route:string)=>void,
     route:Signal<string>,
-    user:Signal<User | null>,
+    user:Signal<User|null>,
     authLoading:Signal<boolean>,
-    authError:Signal<string | null>,
+    authError:Signal<string|null>,
     isOnline:Signal<boolean>,
     feeds:Signal<Feed[]>,
     feedsLoading:Signal<boolean>,
@@ -67,10 +67,9 @@ export type AppState = {
     itemsTotal:Signal<number>,
     itemsOffset:Signal<number>,
     counts:Signal<CountsResponse>,
-    selectedFeedId:Signal<number | null>,
+    selectedFeedId:Signal<number|null>,
     showUnreadOnly:Signal<boolean>,
     showStarredOnly:Signal<boolean>,
-    selectedItem:Signal<Item | null>,
     isAuthenticated:Signal<boolean>
 }
 
@@ -147,21 +146,6 @@ export function State ():AppState {
         // sync from remote if online (will reload data after sync)
         if (state.isOnline.value) {
             State.sync(state)
-        }
-    })
-
-    /**
-     * On route change, select item if it's an item route
-     */
-    effect(() => {
-        const route = state.route.value
-        if (!State.isItemRoute(route)) return
-
-        const item = State.findItemByRoute(state, route)
-        if (item) {
-            State.selectItem(state, item)
-        } else {
-            debug('Item not found for this route...', route)
         }
     })
 
@@ -549,13 +533,6 @@ State.toggleItemRead = async function (
                         is_read: isRead ? 1 : 0
                     } : item
                 )
-
-                if (state.selectedItem.value?.id === itemId) {
-                    state.selectedItem.value = {
-                        ...state.selectedItem.value,
-                        is_read: isRead ? 1 : 0
-                    }
-                }
             })
 
             // Update local IndexedDB to keep in sync
@@ -597,13 +574,6 @@ State.toggleItemStarred = async function (
                         is_starred: isStarred ? 1 : 0
                     } : item
                 )
-
-                if (state.selectedItem.value?.id === itemId) {
-                    state.selectedItem.value = {
-                        ...state.selectedItem.value,
-                        is_starred: isStarred ? 1 : 0
-                    }
-                }
             })
 
             // Update local IndexedDB to keep in sync
@@ -659,19 +629,6 @@ State.itemToRoute = function (item: Item): string | null {
 }
 
 /**
- * Select an item for reading
- */
-State.selectItem = async function (state:AppState, item:Item):Promise<void> {
-    if (state.selectedItem.value?.id === item.id) return
-    state.selectedItem.value = item
-
-    // Mark as read if not already
-    if (!item.is_read) {
-        await State.toggleItemRead(state, item.id, true)
-    }
-}
-
-/**
  * Clear selected item and navigate back to list
  */
 State.clearSelectedItem = function (state:AppState):void {
@@ -688,9 +645,7 @@ State.isItemRoute = function (route:string):boolean {
         return false
     }
 
-    // Check if it looks like /domain.tld/...
-    const match = route.match(/^\/([^/]+\.[^/]+)/)
-    return !!match
+    return route.includes('/feed/')
 }
 
 /**

@@ -364,29 +364,6 @@ footer {
     overflow-y: auto;
 }
 
-.item-row {
-    display: flex;
-    align-items: flex-start;
-    gap: 1rem;
-    padding: 1rem;
-    border-bottom: 1px solid var(--color-border);
-    background: var(--color-surface);
-    cursor: pointer;
-    transition: background 0.15s ease;
-
-    &:hover {
-        background: var(--color-bg);
-    }
-
-    &.unread {
-        background: #fffbeb;
-
-        &:hover {
-            background: #fef3c7;
-        }
-    }
-}
-
 .item-main {
     flex: 1;
     min-width: 0;
@@ -567,17 +544,6 @@ footer {
     }
 }
 
-/* About page */
-.route.about {
-    max-width: 720px;
-    margin: 0 auto;
-    padding: 2rem;
-}
-
-.about-header {
-    margin-bottom: 2rem;
-}
-
 .back-link {
     color: var(--color-text-secondary);
     text-decoration: none;
@@ -627,10 +593,6 @@ footer {
 
     & li {
         margin-bottom: 0.75rem;
-    }
-
-    & a {
-        color: var(--color-primary);
     }
 }
 

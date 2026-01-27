@@ -36,13 +36,6 @@ export const Sidebar:FunctionComponent<{
         await State.toggleFeedCached(state, feed.id, newStatus)
     }
 
-    function handleSelectFeed (feedId:number|null) {
-        state.selectedFeedId.value = feedId
-        state.showStarredOnly.value = false
-        state.itemsOffset.value = 0
-        State.loadItems(state)
-    }
-
     const handleAddFeed = useCallback(async (ev:MouseEvent) => {
         ev.preventDefault()
         if (!newFeedUrl.trim()) return
@@ -124,12 +117,13 @@ export const Sidebar:FunctionComponent<{
                             class="sidebar-item feed-item ${selectedFeedId.value === feed.id ? 'active' : ''}"
                             key=${feed.id}
                         >
-                            <button
+                            <a
                                 class="feed-select"
-                                onClick=${() => handleSelectFeed(feed.id)}
+                                href="/${feed.url}"
                             >
                                 ${feed.title || feed.url}
-                            </button>
+                            </a>
+
                             <tool-tip content=${feed.is_locally_cached === 1 ? 'Switch to on-demand fetching' : 'Switch to local caching'}>
                                 <button
                                     class="btn-cache"
@@ -153,10 +147,9 @@ export const Sidebar:FunctionComponent<{
                         </div>
                     `)}
 
-                    ${(
-    !feedsLoading.value &&
-    feeds.value.length === 0 &&
-    html`
+                    ${((!feedsLoading.value &&
+                        feeds.value.length === 0) &&
+                        html`
                             <div class="empty-state">
                                 No feeds yet${ELLIPSIS}
                             </div>

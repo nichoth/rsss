@@ -19,7 +19,7 @@ export const AboutRoute:FunctionComponent<{
             <section>
                 <h2>What is this?</h2>
                 <p>
-                    RSSS is an RSS/Atom feed reader as a${NBSP}
+                    RSSS is an RSS/Atom feed reader built as a${NBSP}
                     <a href="https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps">
                         Progressive Web App (PWA)
                     </a>. It lets you subscribe to feeds
@@ -51,14 +51,14 @@ export const AboutRoute:FunctionComponent<{
                     </li>
                     <li>
                         <strong>Client (IndexedDB)</strong> — A local copy of
-                        your data is stored in your browser for offline access
-                        and fast reads.
+                        your data can be stored in your browser for
+                        offline access.
                     </li>
                 </ol>
 
                 <h3>Syncing</h3>
                 <p>
-                    The app uses timestamp-based incremental sync to keep local
+                    We use timestamp-based incremental sync to keep local
                     and remote data in sync:
                 </p>
                 <ol>
@@ -72,7 +72,8 @@ export const AboutRoute:FunctionComponent<{
                     </li>
                     <li>
                         When you perform actions (mark as read, star, etc.), the
-                        change is sent to the server immediately.
+                        change is sent to the server immediately. You must be
+                        online to perform <em>write </em> operations.
                     </li>
                     <li>
                         The server periodically polls your feeds (every 10

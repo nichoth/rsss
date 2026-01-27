@@ -3,6 +3,7 @@ import { useCallback } from 'preact/hooks'
 import { type FunctionComponent } from 'preact'
 import { useComputed } from '@preact/signals'
 import { State, type AppState } from '../state'
+import './sidebar-item.css'
 
 export const SidebarItem:FunctionComponent<{
     state:AppState,
