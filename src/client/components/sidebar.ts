@@ -9,6 +9,7 @@ import { CacheIcon } from '../components/cache-icon.js'
 import { ELLIPSIS } from '../constants.js'
 import { ButtonIcon } from './button-icon.js'
 import { type Feed, type AppState, State } from '../state.js'
+import './sidebar.css'
 
 export const Sidebar:FunctionComponent<{
     state:AppState

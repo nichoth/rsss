@@ -23,7 +23,7 @@
 }
 
 body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    font-family: 'Gill Sans', 'Gill Sans MT', Calibri, 'Trebuchet MS', sans-serif;
     background-color: var(--color-bg);
     color: var(--color-text);
     line-height: 1.5;
@@ -183,39 +183,6 @@ button {
     display: flex;
     flex: 1;
     overflow: hidden;
-}
-
-/* Sidebar */
-.sidebar {
-    width: var(--sidebar-width);
-    background: var(--color-surface);
-    border-right: 1px solid var(--color-border);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    flex-shrink: 0;
-}
-
-.sidebar-section {
-    padding: 0.5rem;
-
-    &:not(:last-child) {
-        border-bottom: 1px solid var(--color-border);
-    }
-}
-
-.sidebar-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0.5rem;
-
-    & h3 {
-        font-size: 0.75rem;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        color: var(--color-text-secondary);
-    }
 }
 
 .badge {
@@ -382,42 +349,6 @@ footer {
     font-size: 0.75rem;
     color: var(--color-text-secondary);
     margin-bottom: 0.5rem;
-}
-
-.item-excerpt {
-    font-size: 0.875rem;
-    color: var(--color-text-secondary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-}
-
-.item-actions {
-    display: flex;
-    gap: 0.5rem;
-    flex-shrink: 0;
-}
-
-.btn-star {
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    border: none;
-    background: none;
-    font-size: 1.25rem;
-    color: var(--color-text-secondary);
-    cursor: pointer;
-    transition: color 0.15s ease;
-
-    &:hover {
-        color: var(--color-accent);
-    }
-
-    &.starred {
-        color: var(--color-accent);
-    }
 }
 
 /* Item Reader */
