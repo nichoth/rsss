@@ -1,36 +1,41 @@
 import { test } from '@substrate-system/tapzero'
-import type { DbAdapter, Feed, Item, ItemsResponse, CountsResponse } from '../src/client/db/types.js'
+import type {
+    DbAdapter,
+    Feed,
+    Item,
+    ItemsResponse,
+    CountsResponse
+} from '../src/client/db/types.js'
 
 /**
  * Tests for the database adapter interface
  *
- * These tests verify that any adapter implementation (remote or local)
+ * These tests verify that the adapter (remote or local)
  * correctly implements the DbAdapter interface contract.
  */
 
 // Mock in-memory adapter for testing the interface contract
-function createMockAdapter (): DbAdapter & {
-    _feeds: Feed[]
-    _items: Item[]
-} {
-    const feeds: Feed[] = []
-    const items: Item[] = []
+function createMockAdapter ():DbAdapter & {
+    _feeds:Feed[]
+    _items:Item[]
+    } {
+    const feeds:Feed[] = []
+    const items:Item[] = []
     let nextFeedId = 1
-    let nextItemId = 1
 
     return {
         _feeds: feeds,
         _items: items,
 
-        async getFeeds (): Promise<Feed[]> {
+        async getFeeds ():Promise<Feed[]> {
             return [...feeds].sort((a, b) =>
                 (a.title || '').localeCompare(b.title || '')
             )
         },
 
-        async addFeed (url: string): Promise<Feed> {
+        async addFeed (url:string):Promise<Feed> {
             const now = new Date().toISOString()
-            const feed: Feed = {
+            const feed:Feed = {
                 id: nextFeedId++,
                 url,
                 title: null,

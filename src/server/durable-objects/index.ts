@@ -3,46 +3,33 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 
 export interface Env {
-    COLLIE_USER:DurableObjectNamespace<CollieUserDO>
-    SESSIONS:KVNamespace
-    ASSETS:Fetcher
+    USER: DurableObjectNamespace<UserDO>
+    SESSIONS: KVNamespace
+    ASSETS: Fetcher
 }
 
 interface Feed {
-    id:number
-    url:string
-    title:string|null
-    description:string|null
-    site_url:string|null
-    last_fetched:string|null
-    created_at:string
+    id: number
+    url: string
+    title: string | null
+    description: string | null
+    site_url: string | null
+    last_fetched: string | null
+    created_at: string
+    updated_at: string
+    is_locally_cached: number
 }
 
-// interface Item {
-//     id: number
-//     feed_id: number
-//     guid: string
-//     title: string | null
-//     link: string | null
-//     description: string | null
-//     content: string | null
-//     author: string | null
-//     pub_date: string | null
-//     is_read: number
-//     is_starred: number
-//     created_at: string
-// }
-
 /**
- * CollieUserDO - A Durable Object that stores feeds and items for a single user.
- * Each user gets their own DO instance with its own SQLite database.
+ * Store feeds and items for a single user.
+ * Each user gets their own DO with its own SQLite database.
  *
  * Uses the Hibernation API:
- * - DO hibernates between requests to minimize costs
+ * - DO hibernates between requests to minimize cost
  * - Uses alarms for periodic feed polling (every 10 min)
  * - State persists in SQLite across hibernation cycles
  */
-export class CollieUserDO extends DurableObject<Env> {
+export class UserDO extends DurableObject<Env> {
     private app: Hono
     private sql: SqlStorage
 
@@ -73,6 +60,7 @@ export class CollieUserDO extends DurableObject<Env> {
                 description TEXT,
                 site_url TEXT,
                 last_fetched TEXT,
+                is_locally_cached INTEGER DEFAULT 1,
                 created_at TEXT DEFAULT (datetime('now')),
                 updated_at TEXT DEFAULT (datetime('now'))
             )
@@ -99,18 +87,23 @@ export class CollieUserDO extends DurableObject<Env> {
             )
         `)
 
-        // Create indexes
+        // Create indexes (excluding updated_at - added after migration)
         this.sql.exec(`
             CREATE INDEX IF NOT EXISTS idx_items_feed_id ON items(feed_id);
             CREATE INDEX IF NOT EXISTS idx_items_is_read ON items(is_read);
             CREATE INDEX IF NOT EXISTS idx_items_is_starred ON items(is_starred);
             CREATE INDEX IF NOT EXISTS idx_items_pub_date ON items(pub_date DESC);
-            CREATE INDEX IF NOT EXISTS idx_items_updated_at ON items(updated_at);
-            CREATE INDEX IF NOT EXISTS idx_feeds_updated_at ON feeds(updated_at);
         `)
 
         // Migration: Add updated_at column to existing tables if missing
         this.migrateAddUpdatedAt()
+        this.migrateAddIsLocallyCached()
+
+        // Create indexes on updated_at (after migration ensures column exists)
+        this.sql.exec(`
+            CREATE INDEX IF NOT EXISTS idx_items_updated_at ON items(updated_at);
+            CREATE INDEX IF NOT EXISTS idx_feeds_updated_at ON feeds(updated_at);
+        `)
 
         // Create triggers to auto-update updated_at
         // Using WHEN clause to prevent infinite recursion
@@ -140,23 +133,40 @@ export class CollieUserDO extends DurableObject<Env> {
      */
     private migrateAddUpdatedAt () {
         // Check if feeds has updated_at
-        const feedsCols = this.sql.exec("PRAGMA table_info(feeds)").toArray()
+        const feedsCols = this.sql.exec('PRAGMA table_info(feeds)').toArray()
         const feedsHasUpdatedAt = feedsCols.some((col: unknown) =>
             (col as { name: string }).name === 'updated_at'
         )
         if (!feedsHasUpdatedAt) {
-            this.sql.exec("ALTER TABLE feeds ADD COLUMN updated_at TEXT DEFAULT (datetime('now'))")
-            this.sql.exec("UPDATE feeds SET updated_at = created_at WHERE updated_at IS NULL")
+            // SQLite doesn't allow non-constant defaults in ALTER TABLE
+            this.sql.exec('ALTER TABLE feeds ADD COLUMN updated_at TEXT')
+            this.sql.exec('UPDATE feeds SET updated_at = ' +
+                "COALESCE(created_at, datetime('now'))")
         }
 
         // Check if items has updated_at
-        const itemsCols = this.sql.exec("PRAGMA table_info(items)").toArray()
+        const itemsCols = this.sql.exec('PRAGMA table_info(items)').toArray()
         const itemsHasUpdatedAt = itemsCols.some((col: unknown) =>
             (col as { name: string }).name === 'updated_at'
         )
         if (!itemsHasUpdatedAt) {
-            this.sql.exec("ALTER TABLE items ADD COLUMN updated_at TEXT DEFAULT (datetime('now'))")
-            this.sql.exec("UPDATE items SET updated_at = created_at WHERE updated_at IS NULL")
+            // SQLite doesn't allow non-constant defaults in ALTER TABLE
+            this.sql.exec('ALTER TABLE items ADD COLUMN updated_at TEXT')
+            this.sql.exec('UPDATE items SET updated_at = COALESCE(created_at, ' +
+                " datetime('now'))")
+        }
+    }
+
+    /**
+     * Migration: Add is_locally_cached column to feeds table
+     */
+    private migrateAddIsLocallyCached () {
+        const columns = this.sql.exec('PRAGMA table_info(feeds)').toArray()
+        const hasColumn = columns.some((col: unknown) =>
+            (col as { name: string }).name === 'is_locally_cached'
+        )
+        if (!hasColumn) {
+            this.sql.exec('ALTER TABLE feeds ADD COLUMN is_locally_cached INTEGER DEFAULT 1')
         }
     }
 
@@ -167,12 +177,14 @@ export class CollieUserDO extends DurableObject<Env> {
 
         // Health check
         app.get('/health', (c) => {
-            return c.json({ status: 'ok', service: 'collie-user-do' })
+            return c.json({ status: 'ok', service: 'do' })
         })
 
         // List all feeds
         app.get('/feeds', (c) => {
-            const feeds = this.sql.exec('SELECT * FROM feeds ORDER BY title ASC').toArray()
+            const feeds = this.sql.exec(
+                'SELECT * FROM feeds ORDER BY title ASC'
+            ).toArray()
             return c.json({ feeds })
         })
 
@@ -205,10 +217,17 @@ export class CollieUserDO extends DurableObject<Env> {
                     body.url
                 ).one()
 
-                // Schedule immediate fetch
-                this.ctx.waitUntil(this.fetchFeed(feed as unknown as Feed))
+                // Fetch feed content before responding so client sees
+                // items immediately
+                await this.fetchFeed(feed as unknown as Feed)
 
-                return c.json({ feed }, 201)
+                // Return updated feed with title/description from fetch
+                const updatedFeed = this.sql.exec(
+                    'SELECT * FROM feeds WHERE url = ?',
+                    body.url
+                ).one()
+
+                return c.json({ feed: updatedFeed }, 201)
             } catch (_err) {
                 const err = _err as Error
                 console.log('**error**', err.message)
@@ -226,6 +245,28 @@ export class CollieUserDO extends DurableObject<Env> {
             }
 
             return c.json({ feed })
+        })
+
+        // Update a feed (e.g. toggle caching)
+        app.patch('/feeds/:id', async (c) => {
+            const id = parseInt(c.req.param('id'))
+            const body = await c.req.json<{ is_locally_cached?: boolean }>()
+
+            const feed = this.sql.exec('SELECT id FROM feeds WHERE id = ?', id).one()
+            if (!feed) {
+                return c.json({ error: 'Feed not found' }, 404)
+            }
+
+            if (body.is_locally_cached !== undefined) {
+                this.sql.exec(
+                    'UPDATE feeds SET is_locally_cached = ? WHERE id = ?',
+                    body.is_locally_cached ? 1 : 0,
+                    id
+                )
+            }
+
+            const updated = this.sql.exec('SELECT * FROM feeds WHERE id = ?', id).one()
+            return c.json({ feed: updated })
         })
 
         // Delete a feed
@@ -271,7 +312,8 @@ export class CollieUserDO extends DurableObject<Env> {
             const limit = parseInt(c.req.query('limit') || '50')
             const offset = parseInt(c.req.query('offset') || '0')
 
-            let query = 'SELECT items.*, feeds.title as feed_title FROM items JOIN feeds ON items.feed_id = feeds.id WHERE 1=1'
+            let query = 'SELECT items.*, feeds.title as feed_title ' +
+                'FROM items JOIN feeds ON items.feed_id = feeds.id WHERE 1=1'
             const params: (string | number)[] = []
 
             if (feedId) {

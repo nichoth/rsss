@@ -1,16 +1,14 @@
 import { html } from 'htm/preact'
 import { type FunctionComponent, render } from 'preact'
-import { useEffect } from 'preact/hooks'
 import { useComputed } from '@preact/signals'
-import {
-    State,
-    type AppState
-} from './state.js'
-import { LoginPage } from './routes/login.js'
+import { State, type AppState } from './state.js'
+import Router from './routes/index.js'
+import { Header } from './components/header.js'
 import { FeedReader } from './routes/feed-reader.js'
 import './style.css'
 
 const state = State()
+const router = Router(state)
 
 if (import.meta.env.DEV || import.meta.env.MODE === 'staging') {
     // @ts-expect-error DEV env
@@ -23,42 +21,23 @@ if (import.meta.env.DEV || import.meta.env.MODE === 'staging') {
 export const App: FunctionComponent<{
     state:AppState
 }> = function App ({ state }) {
-    const route = useComputed(() => state.route.value)
-    const isAuthenticated = useComputed(() => state.isAuthenticated.value)
     const authLoading = useComputed(() => state.authLoading.value)
 
-    // Check auth on mount
-    useEffect(() => {
-        State.checkAuth(state)
-    }, [])
+    const match = useComputed(() => {
+        return router.match(state.route.value)
+    })
 
-    // Load data when authenticated
-    useEffect(() => {
-        if (isAuthenticated.value) {
-            State.loadFeeds(state)
-            State.loadItems(state).then(() => {
-                // After items load, check if we need to select one based on URL
-                State.handleRouteChange(state)
-            })
-            State.loadCounts(state)
+    if (!match.value || !match.value.action) {
+        if (State.isItemRoute(state.route.value)) {
+            return html`<${FeedReader} state=${state} />`
         }
-    }, [isAuthenticated.value])
 
-    // Handle route changes (including back/forward navigation)
-    useEffect(() => {
-        if (isAuthenticated.value && state.items.value.length > 0) {
-            State.handleRouteChange(state)
-        }
-    }, [route.value, isAuthenticated.value])
-
-    // Redirect to login if not authenticated
-    useEffect(() => {
-        if (!authLoading.value && !isAuthenticated.value) {
-            if (!route.value.startsWith('/login')) {
-                state._setRoute('/login')
-            }
-        }
-    }, [authLoading.value, isAuthenticated.value, route.value])
+        return html`<div class="not-found">
+            <h1>404</h1>
+            <p>Page not found</p>
+            <a href="/">Go home</a>
+        </div>`
+    }
 
     // Loading state
     if (authLoading.value) {
@@ -70,13 +49,19 @@ export const App: FunctionComponent<{
         `
     }
 
-    // Login page
-    if (route.value.startsWith('/login') || !isAuthenticated.value) {
-        return html`<${LoginPage} state=${state} />`
-    }
+    const ChildNode = match.value.action(match.value, state.route.value)
+    const { params } = match.value
 
-    // Main app
-    return html`<${FeedReader} state=${state} />`
+    return html`
+        <${Header} state=${state} />
+        <${ChildNode} state=${state} params=${params} />
+        <footer>
+            <iframe
+                src="https://github.com/sponsors/nichoth/card"
+                title="Sponsor nichoth"
+            ></iframe>
+        </footer>
+    `
 }
 
 render(html`<${App} state=${state} />`, document.getElementById('root')!)

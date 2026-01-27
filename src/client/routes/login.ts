@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { FunctionComponent } from 'preact'
+import type { FunctionComponent } from 'preact'
 import { useState } from 'preact/hooks'
 import { useComputed } from '@preact/signals'
 import { State, type AppState } from '../state.js'
@@ -30,7 +30,7 @@ export const LoginPage: FunctionComponent<{ state: AppState }> = function LoginP
             <div class="login-container">
                 <div class="login-header">
                     <h1>RSSS</h1>
-                    <p>Your personal RSS reader in the cloud</p>
+                    <p>Really Simple Syndication Service</p>
                 </div>
 
                 ${(authError.value || urlError) && html`

@@ -1,0 +1,60 @@
+.app-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: var(--header-height);
+    padding: 0 1rem;
+    background: var(--color-surface);
+    border-bottom: 1px solid var(--color-border);
+    flex-shrink: 0;
+
+    & nav {
+        display: flex;
+        gap: 2rem;
+        align-items: baseline;
+
+        & a {
+            transition: all 0.2s;
+            border-bottom: 2px solid transparent;
+
+            &.active {
+                border-color: initial;
+            }
+        }
+    }
+
+    & h1 {
+        font-size: 1.25rem;
+
+        & a {
+            color: initial;
+            border: none;
+            text-decoration: none;
+        }
+    }
+}
+
+.header {
+    display: flex;
+    gap: 1rem;
+    align-items: baseline;
+}
+
+.header-right {
+    align-items: center;
+
+    & a {
+        transition: all 0.4s;
+        text-underline-offset: 1px;
+        text-decoration-style: dotted;
+
+        &:hover {
+            text-underline-offset: 2px;
+            text-decoration-style: solid;
+        }
+    }
+}
+
+.user-handle {
+    font-size: 0.875rem;
+}

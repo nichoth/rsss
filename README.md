@@ -1,6 +1,8 @@
-# Cloud Collie
+# RSSS
 
-[Collie RSS reader](https://github.com/collie-reader/collied) + Bluesky OAuth.
+__Really Simple Syndication Service__
+
+See [rsss.space](https://rsss.space/).
 
 <details><summary><h2>Contents</h2></summary>
 
@@ -8,12 +10,16 @@
 
 - [Develop](#develop)
 - [Architecture](#architecture)
+  * [Local First](#local-first)
+  * [Sync (remote -> local)](#sync-remote---local)
   * [Worker (Hono) - Main entry point](#worker-hono---main-entry-point)
-  * [Durable Object per user (CollieUserDO)](#durable-object-per-user-collieuserdo)
+  * [Durable Object per user (UserDO)](#durable-object-per-user-userdo)
   * [Frontend](#frontend)
 - [Files](#files)
 - [Running Locally](#running-locally)
 - [Deploy](#deploy)
+- [Notes](#notes)
+  * [Generate a Secret](#generate-a-secret)
 
 <!-- tocstop -->
 
@@ -27,72 +33,96 @@ npm start
 ```
 
 ## Architecture                                                                  
-                                                                                
+
+### Local First
+
+Reads are always via `IndexedDB`.
+
+* `loadFeeds()`, `loadItems()`, `loadCounts()` read exclusively
+  from `IndexedDB`.
+* Works identically whether online or offline
+
+
+### Sync (remote -> local)
+
+- `State.sync()` calls `localAdapter.sync()` which hits
+  `/api/sync?since=<lastSyncTime>` and upserts any new/updated feeds and items
+  into `IndexedDB`
+- Called automatically on app startup (when authenticated + online)
+- Called automatically when the browser comes back online (online event)
+
+
 ### Worker (Hono) - Main entry point
 
 * Bluesky OAuth authentication (AT Protocol)
 * Session management with encrypted cookies
-* Routes requests to user-specific Durable Objects
+* Route requests to user-specific Durable Objects
 * Static asset serving for the Preact frontend
-                                                                              
-### Durable Object per user (CollieUserDO)
+
+
+### Durable Object per user (UserDO)
 
 * Uses SQLite storage for feeds and items
 * Uses the Hibernation API (extends DurableObject)
 * Alarms for periodic feed refreshing (every 10 minutes)
 * Complete RSS/Atom feed parser
-                                                                              
+
 ### Frontend
 
-* Login page with Bluesky OAuth                                               
-* Feed management (add/delete/refresh)                                        
-* Item list with filtering (unread/starred/by feed)                           
-* Item reader with read/star toggles                                          
-* Responsive design                                                           
+* Login page with Bluesky OAuth
+* Feed management (add/delete/refresh)
+* Item list with filtering (unread/starred/by feed)
+* Item reader with read/star toggles
+* Responsive design
 
+-------
 
-## Files                                                                     
+## Files
 
 ```
-src/                                                                          
-├── server/                                                                   
-│   ├── index.ts                    # Main Hono worker                        
-│   ├── auth/oauth.ts               # Bluesky OAuth implementation            
-│   └── durable-objects/                                                      
-│       └── collie-user.ts          # Per-user DO with SQLite                 
-└── client/                                                                   
-    ├── index.ts                    # Main Preact entry                       
-    ├── state.ts                    # State management & API client           
-    ├── style.css                   # All styles                              
-    └── routes/                                                               
-        ├── login.ts                # Login page component                    
-        └── feed-reader.ts          # Main feed reader UI                     
+src/
+├── server/
+│   ├── index.ts                    # Main Hono worker
+│   ├── auth/oauth.ts               # Bluesky OAuth implementation
+│   └── durable-objects/
+│       └── collie-user.ts          # Per-user DO with SQLite
+└── client/
+    ├── index.ts                    # Main Preact entry
+    ├── state.ts                    # State management & API client
+    ├── style.css                   # All styles
+    └── routes/
+        ├── login.ts                # Login page component
+        └── feed-reader.ts          # Main feed reader UI
 ```
-                                                                              
-## Running Locally                                                               
+
+## Running Locally
 
 ```sh
 npm run start           # Start dev server
 ```
-                                                                              
-Then access `http://localhost:8888` and use the "Dev Login" button in           
+
+Then access `http://localhost:8888` and use the "Dev Login" button in
 development mode.
-                                                                              
+
+---
+
 ## Deploy
-                                                                              
+
 1. Create a KV namespace for sessions:
 ```sh
-wrangler kv:namespace create SESSIONS                                         
+wrangler kv:namespace create SESSIONS
 ```
-2. Update wrangler.jsonc with the KV ID                                       
-3. Set secrets:                                                               
+2. Update wrangler.jsonc with the KV ID
+3. Set secrets:
 ```sh
-wrangler secret put SESSION_SECRET                                            
+wrangler secret put SESSION_SECRET
 ```
-4. Deploy:                                                                    
+4. Deploy:
 ```sh
-wrangler deploy                      
+wrangler deploy
 ```
+
+---
 
 ## Notes
 

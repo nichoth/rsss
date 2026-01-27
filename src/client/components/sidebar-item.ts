@@ -3,10 +3,11 @@ import { useCallback } from 'preact/hooks'
 import { type FunctionComponent } from 'preact'
 import { useComputed } from '@preact/signals'
 import { State, type AppState } from '../state'
+import './sidebar-item.css'
 
 export const SidebarItem:FunctionComponent<{
     state:AppState,
-    starred:boolean  // two options -- only starred, or all items
+    starred:boolean  // two options -- starred, or all items
 }> = function (props) {
     const { state, starred } = props
     const { showStarredOnly, counts } = state

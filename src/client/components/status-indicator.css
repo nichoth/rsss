@@ -1,0 +1,23 @@
+span.status-indicator {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: inline-block;
+
+    &.online, &.cached {
+        background-color: var(--color-success);
+    }
+
+    &.offline {
+        background-color: #9ca3af;
+    }
+
+    &.remote {
+        background-color: var(--color-accent);
+    }
+}
+
+.status-text {
+    margin-left: 0.5rem;
+}

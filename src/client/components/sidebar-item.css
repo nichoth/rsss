@@ -1,0 +1,21 @@
+.sidebar-item {
+    border: none;
+    border-left: 2px solid transparent;
+    border-color: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    background: none;
+    text-align: left;
+    font-size: 0.875rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+
+    &.active {
+        background: #2563eb1a;
+        color: var(--color-primary);
+        border-color: var(--color-primary);
+    }
+}

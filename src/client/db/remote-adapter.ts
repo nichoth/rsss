@@ -12,7 +12,7 @@ import type {
 } from './types.js'
 
 const api = ky.create({
-    prefixUrl: '/api/collie',
+    prefixUrl: '/api',
 })
 
 /**
