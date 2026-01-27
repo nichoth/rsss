@@ -35,10 +35,10 @@ export const FeedReader: FunctionComponent<{
 
     const [newFeedUrl, setNewFeedUrl] = useState('')
     const [addingFeed, setAddingFeed] = useState(false)
-    const [addFeedError, setAddFeedError] = useState<string | null>(null)
+    const [addFeedError, setAddFeedError] = useState<string|null>(null)
     const [showAddFeed, setShowAddFeed] = useState(false)
 
-    async function handleAddFeed (e: Event) {
+    async function handleAddFeed (e:Event) {
         e.preventDefault()
         if (!newFeedUrl.trim()) return
 
@@ -57,13 +57,13 @@ export const FeedReader: FunctionComponent<{
         setAddingFeed(false)
     }
 
-    async function handleDeleteFeed (feed: Feed) {
+    async function handleDeleteFeed (feed:Feed) {
         if (confirm(`Delete "${feed.title || feed.url}"?`)) {
             await State.deleteFeed(state, feed.id)
         }
     }
 
-    function handleSelectFeed (feedId: number | null) {
+    function handleSelectFeed (feedId:number|null) {
         state.selectedFeedId.value = feedId
         state.showStarredOnly.value = false
         state.itemsOffset.value = 0
@@ -84,7 +84,7 @@ export const FeedReader: FunctionComponent<{
         await State.logout(state)
     }
 
-    async function handleToggleCache (feed: Feed, e: Event) {
+    async function handleToggleCache (feed:Feed, e:Event) {
         e.stopPropagation()
         const newStatus = feed.is_locally_cached === 0
         await State.toggleFeedCached(state, feed.id, newStatus)
@@ -147,7 +147,7 @@ export const FeedReader: FunctionComponent<{
                                     type="url"
                                     placeholder="https://example.com/feed.xml"
                                     value=${newFeedUrl}
-                                    onInput=${(e: Event) => setNewFeedUrl((e.target as HTMLInputElement).value)}
+                                    onInput=${(e:Event) => setNewFeedUrl((e.target as HTMLInputElement).value)}
                                     disabled=${addingFeed || !isOnline.value}
                                 />
                                 <${Button}
