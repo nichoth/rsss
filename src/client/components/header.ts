@@ -9,7 +9,7 @@ import './header.css'
 export const Header:FunctionComponent<{
     state:AppState
 }> = function ({ state }) {
-    const { isOnline, user } = state
+    const { isOnline, user, route } = state
 
     const handleLogout = useCallback(async () => {
         await State.logout(state)
@@ -30,7 +30,10 @@ export const Header:FunctionComponent<{
             </div>
 
             <div class="header header-right">
-                <a href="/about" class="header-link">About</a>
+                <a
+                    href="/about"
+                    class="header-link${route.value === '/about' ? ' active' : ''}"
+                >About</a>
                 <span class="user-handle">@${user.value?.handle}</span>
                 <button class="btn btn-small" onClick=${handleLogout}>
                     Logout

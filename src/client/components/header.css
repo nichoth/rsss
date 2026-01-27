@@ -11,6 +11,15 @@
     & h1 {
         font-size: 1.25rem;
     }
+
+    & a {
+        transition: all 0.2s;
+        border-bottom: 2px solid transparent;
+
+        &.active {
+            border-color: initial;
+        }
+    }
 }
 
 .header {

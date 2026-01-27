@@ -6,7 +6,6 @@ import { SidebarFooter } from '../components/sidebar-footer.js'
 import { Button } from '../components/button.js'
 import { CloseIcon } from '../components/close.js'
 import { CacheIcon } from '../components/cache-icon.js'
-import { StatusIndicator } from '../components/status-indicator.js'
 import { ELLIPSIS } from '../constants.js'
 import { ButtonIcon } from './button-icon.js'
 import { type Feed, type AppState, State } from '../state.js'
@@ -80,7 +79,9 @@ export const Sidebar:FunctionComponent<{
                     <${ButtonIcon}
                         class="btn btn-icon"
                         onClick=${() => setShowAddFeed(!showAddFeed)}
-                        title=${isOnline.value ? 'Add feed' : 'Cannot add feeds while offline'}
+                        title=${isOnline.value ?
+                            'Add feed' :
+                            'Cannot add feeds while offline'}
                         disabled=${!isOnline.value}
                     >
                         +
@@ -123,10 +124,6 @@ export const Sidebar:FunctionComponent<{
                             class="sidebar-item feed-item ${selectedFeedId.value === feed.id ? 'active' : ''}"
                             key=${feed.id}
                         >
-                            <${StatusIndicator}
-                                type=${feed.is_locally_cached === 1 ? 'cached' : 'remote'}
-                                title=${feed.is_locally_cached === 1 ? 'Locally cached' : 'Cloud only'}
-                            />
                             <button
                                 class="feed-select"
                                 onClick=${() => handleSelectFeed(feed.id)}

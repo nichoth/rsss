@@ -6,7 +6,7 @@ import { State, type AppState } from '../state'
 
 export const SidebarItem:FunctionComponent<{
     state:AppState,
-    starred:boolean  // two options -- only starred, or all items
+    starred:boolean  // two options -- starred, or all items
 }> = function (props) {
     const { state, starred } = props
     const { showStarredOnly, counts } = state
