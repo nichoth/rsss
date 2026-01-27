@@ -6,6 +6,9 @@ import {
     type Item,
 } from '../state.js'
 import './item-row.css'
+import '@substrate-system/icons/css'
+import { define } from '@substrate-system/icons/new-tab'
+define()
 
 export const ItemRow:FunctionComponent<{
     item:Item
@@ -54,6 +57,9 @@ export const ItemRow:FunctionComponent<{
                 </div>
             </a>
             <div class="item-actions">
+                <a href="${item.link}">
+                    <new-tab></new-tab>
+                </a>
                 <button
                     class="btn-star ${isStarred ? 'starred' : ''}"
                     onClick=${handleStar}

@@ -29,11 +29,19 @@ body {
     line-height: 1.5;
 }
 
+.not-found {
+    margin: 1rem;
+}
+
 /* Buttons */
 button {
     cursor: pointer;
     font-family: inherit;
     font-size: inherit;
+}
+
+.route {
+    min-height: 100vh;
 }
 
 .btn-back {

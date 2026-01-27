@@ -9,48 +9,48 @@ const debug = Debug('rsss')
 const USER_STORAGE_KEY = 'rsss_user'
 
 export interface User {
-    did: string
-    handle: string
+    did:string
+    handle:string
 }
 
 export interface Feed {
-    id: number
-    url: string
-    title: string | null
-    description: string | null
-    site_url: string | null
-    last_fetched: string | null
-    is_locally_cached: number
-    created_at: string
+    id:number
+    url:string
+    title:string|null
+    description:string|null
+    site_url:string|null
+    last_fetched:string|null
+    is_locally_cached:number
+    created_at:string
 }
 
 export interface Item {
-    id: number
-    feed_id: number
-    guid: string
-    title: string | null
-    link: string | null
-    description: string | null
-    content: string | null
-    author: string | null
-    pub_date: string | null
-    is_read: number
-    is_starred: number
-    created_at: string
-    feed_title?: string
+    id:number
+    feed_id:number
+    guid:string
+    title:string|null
+    link:string|null
+    description:string|null
+    content:string|null
+    author:string|null
+    pub_date:string|null
+    is_read:number
+    is_starred:number
+    created_at:string
+    feed_title?:string
 }
 
 export interface ItemsResponse {
-    items: Item[]
-    total: number
-    limit: number
-    offset: number
+    items:Item[]
+    total:number
+    limit:number
+    offset:number
 }
 
 export interface CountsResponse {
-    unread: number
-    starred: number
-    total: number
+    unread:number
+    starred:number
+    total:number
 }
 
 export type AppState = {

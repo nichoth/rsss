@@ -25,6 +25,7 @@
     "@substrate-system/a11y": "^0.0.17",
     "@substrate-system/check-box": "^0.0.9",
     "@substrate-system/css-normalize": "^0.0.13",
+    "@substrate-system/icons": "^0.1.29",
     "@substrate-system/routes": "^5.0.0",
     "@substrate-system/tool-tip": "^0.0.2",
     "hono": "^4.11.3",
