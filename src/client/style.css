@@ -42,7 +42,11 @@ button {
 
 .route {
     min-height: 100vh;
-    margin: 1rem;
+
+    &.settings {
+        max-width: 40rem;
+        margin: 1rem auto;
+    }
 }
 
 .btn-back {
