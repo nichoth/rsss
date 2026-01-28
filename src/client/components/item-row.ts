@@ -44,15 +44,23 @@ export const ItemRow:FunctionComponent<{
         <div class="item-row ${isUnread ? 'unread' : ''}">
             <a class="item-link" href=${route}>
                 <div class="item-main">
-                    <h3 class="item-title">${item.title || '(No title)'}</h3>
+                    <h3 class="item-title">
+                        ${decodeEntities(item.title + '') || '(No title)'}
+                    </h3>
                     <div class="item-meta">
-                        <span class="item-feed">${item.feed_title}</span>
+                        <span class="item-feed">
+                            ${item.feed_title}
+                        </span>
                         ${item.pub_date && html`
-                            <span class="item-date">${formatDate(item.pub_date)}</span>
+                            <span class="item-date">
+                                ${formatDate(item.pub_date)}
+                            </span>
                         `}
                     </div>
                     ${item.description && html`
-                        <p class="item-excerpt">${stripHtml(item.description).slice(0, 200)}</p>
+                        <p class="item-excerpt">
+                            ${stripHtml(item.description).slice(0, 200)}
+                        </p>
                     `}
                 </div>
             </a>
@@ -78,4 +86,9 @@ export const ItemRow:FunctionComponent<{
 
 function stripHtml (html: string): string {
     return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
+function decodeEntities (html:string) {
+    const doc = new DOMParser().parseFromString(html, 'text/html')
+    return doc.documentElement.textContent
 }
