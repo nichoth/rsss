@@ -3,9 +3,11 @@ import { type FunctionComponent, render } from 'preact'
 import { useComputed } from '@preact/signals'
 import { State, type AppState } from './state.js'
 import Router from './routes/index.js'
+import { NotFound } from './not-found.js'
 import { Header } from './components/header.js'
-import { FeedReader } from './routes/feed-reader.js'
 import './style.css'
+import Debug from '@substrate-system/debug'
+const debug = Debug('rsss:view')
 
 const state = State()
 const router = Router(state)
@@ -18,7 +20,7 @@ if (import.meta.env.DEV || import.meta.env.MODE === 'staging') {
     localStorage.removeItem('DEBUG')
 }
 
-export const App: FunctionComponent<{
+export const App:FunctionComponent<{
     state:AppState
 }> = function App ({ state }) {
     const authLoading = useComputed(() => state.authLoading.value)
@@ -28,15 +30,7 @@ export const App: FunctionComponent<{
     })
 
     if (!match.value || !match.value.action) {
-        if (State.isItemRoute(state.route.value)) {
-            return html`<${FeedReader} state=${state} />`
-        }
-
-        return html`<div class="not-found">
-            <h1>404</h1>
-            <p>Page not found</p>
-            <a href="/">Go home</a>
-        </div>`
+        return html`<${NotFound} />`
     }
 
     // Loading state
@@ -50,11 +44,12 @@ export const App: FunctionComponent<{
     }
 
     const ChildNode = match.value.action(match.value, state.route.value)
-    const { params } = match.value
+    const { params, splats } = match.value
+    debug('rendering index...', splats)
 
     return html`
         <${Header} state=${state} />
-        <${ChildNode} state=${state} params=${params} />
+        <${ChildNode} state=${state} params=${params} splats=${splats} />
         <footer>
             <iframe
                 src="https://github.com/sponsors/nichoth/card"

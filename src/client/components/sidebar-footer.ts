@@ -6,8 +6,8 @@ import { type AppState, State } from '../state'
 import { hasLocalStorage, syncFromRemote, getSyncState } from '../db/index.js'
 import './sidebar-footer.css'
 
-export const SidebarFooter:FunctionComponent<{
-    state:AppState
+export const SidebarFooter: FunctionComponent<{
+    state: AppState
 }> = function (props) {
     const { state } = props
     const { feedsLoading } = state
@@ -30,7 +30,7 @@ export const SidebarFooter:FunctionComponent<{
         }
     }, [])
 
-    async function handleSync () {
+    async function handleSync() {
         setSyncing(true)
         setSyncError(null)
 
@@ -49,7 +49,7 @@ export const SidebarFooter:FunctionComponent<{
         }
     }
 
-    function formatLastSynced (dateStr: string | null): string {
+    function formatLastSynced(dateStr: string | null): string {
         if (!dateStr) return 'Never'
         const date = new Date(dateStr)
         return date.toLocaleString()
@@ -82,5 +82,8 @@ export const SidebarFooter:FunctionComponent<{
                 Refresh Feeds
             <//>
         `}
+        <div class="footer-links">
+            <a href="/settings" class="settings-link">Settings</a>
+        </div>
     </div>`
 }

@@ -25,37 +25,37 @@ export const ItemRow:FunctionComponent<{
         await State.toggleItemStarred(state, item.id, !isStarred)
     }
 
-    function formatDate (dateStr: string | null): string {
-        if (!dateStr) return ''
-        const date = new Date(dateStr)
-        const now = new Date()
-        const diff = now.getTime() - date.getTime()
-
-        if (diff < 60000) return 'just now'
-        if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`
-        if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`
-        if (diff < 604800000) return `${Math.floor(diff / 86400000)}d ago`
-
-        return date.toLocaleDateString()
-    }
-
     const route = State.itemToRoute(item)
     return html`
         <div class="item-row ${isUnread ? 'unread' : ''}">
             <a class="item-link" href=${route}>
                 <div class="item-main">
-                    <h3 class="item-title">${item.title || '(No title)'}</h3>
+                    <h3 class="item-title">
+                        ${decodeEntities(item.title + '') || '(No title)'}
+                    </h3>
                     <div class="item-meta">
-                        <span class="item-feed">${item.feed_title}</span>
+                        <span class="item-feed">
+                            ${item.feed_title}
+                        </span>
                         ${item.pub_date && html`
-                            <span class="item-date">${formatDate(item.pub_date)}</span>
+                            <time class="item-date" datetime="${
+                                new Date(item.pub_date)
+                                    .toISOString()
+                                    .split('T')
+                                    .shift()
+                            }">
+                                ${formatDate(item.pub_date)}
+                            </time>
                         `}
                     </div>
                     ${item.description && html`
-                        <p class="item-excerpt">${stripHtml(item.description).slice(0, 200)}</p>
+                        <p class="item-excerpt">
+                            ${stripHtml(item.description).slice(0, 200)}
+                        </p>
                     `}
                 </div>
             </a>
+
             <div class="item-actions">
                 <a href="${item.link}" target="_blank">
                     <new-tab></new-tab>
@@ -63,7 +63,9 @@ export const ItemRow:FunctionComponent<{
                 <button
                     class="btn-star ${isStarred ? 'starred' : ''}"
                     onClick=${handleStar}
-                    title=${isOnline ? (isStarred ? 'Unstar' : 'Star') : 'Cannot star while offline'}
+                    title=${isOnline ?
+                        (isStarred ? 'Unstar' : 'Star') :
+                        'Cannot star while offline'}
                     disabled=${!isOnline}
                 >
                     ${isStarred ? '★' : '☆'}
@@ -75,4 +77,23 @@ export const ItemRow:FunctionComponent<{
 
 function stripHtml (html: string): string {
     return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
+function decodeEntities (html:string) {
+    const doc = new DOMParser().parseFromString(html, 'text/html')
+    return doc.documentElement.textContent
+}
+
+function formatDate (dateStr:string|null):string {
+    if (!dateStr) return ''
+    const date = new Date(dateStr)
+    const now = new Date()
+    const diff = now.getTime() - date.getTime()
+
+    if (diff < 60000) return 'just now'
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`
+    if (diff < 604800000) return `${Math.floor(diff / 86400000)}d ago`
+
+    return date.toLocaleDateString()
 }

@@ -99,11 +99,6 @@ export function State ():AppState {
         selectedFeedId: signal<number | null>(null),
         showUnreadOnly: signal(false),
         showStarredOnly: signal(false),
-        // Selected item for reading (derived from route)
-        selectedItem: computed(() => {
-            if (!State.isItemRoute(state.route.value)) return null
-            return State.findItemByRoute(state, state.route.value)
-        }),
         // Computed: is authenticated
         isAuthenticated: computed(() => state.user.value !== null)
     }
@@ -120,7 +115,7 @@ export function State ():AppState {
         state.isOnline.value = false
     })
 
-    onRoute((path: string, data) => {
+    onRoute((path:string, data) => {
         state.route.value = path
         // handle scroll position like a browser
         if (data.popstate) {
@@ -137,24 +132,15 @@ export function State ():AppState {
      */
     effect(() => {
         if (!state.isAuthenticated.value) return
+        // sync from remote if online (will reload data after sync)
+        if (state.isOnline.value) {
+            State.sync(state)
+        }
 
         // load cached data from IndexedDB
         State.loadFeeds(state)
         State.loadItems(state)
         State.loadCounts(state)
-
-        // sync from remote if online (will reload data after sync)
-        if (state.isOnline.value) {
-            State.sync(state)
-        }
-    })
-
-    // Side-effect: mark as read when an item is "selected" via URL
-    effect(() => {
-        const item = state.selectedItem.value
-        if (item && !item.is_read && state.isOnline.value) {
-            State.toggleItemRead(state, item.id, true)
-        }
     })
 
     // Check auth right away
@@ -194,7 +180,7 @@ State.showStarred = function (state: AppState) {
 /**
  * Check authentication status
  */
-State.checkAuth = async function (state: AppState): Promise<void> {
+State.checkAuth = async function (state:AppState):Promise<void> {
     state.authLoading.value = true
     state.authError.value = null
 
@@ -245,7 +231,7 @@ State.checkAuth = async function (state: AppState): Promise<void> {
 /**
  * Start OAuth login flow
  */
-State.login = async function (state: AppState, handle: string): Promise<void> {
+State.login = async function (state:AppState, handle:string):Promise<void> {
     state.authLoading.value = true
     state.authError.value = null
 
@@ -381,10 +367,15 @@ State.deleteFeed = async function (state: AppState, feedId: number): Promise<{ s
         }
     }
 }
+
 /**
  * Toggle whether a feed is locally cached
  */
-State.toggleFeedCached = async function (state: AppState, feedId: number, isCached: boolean): Promise<void> {
+State.toggleFeedCached = async function (
+    state:AppState,
+    feedId:number,
+    isCached:boolean
+):Promise<void> {
     if (!state.isOnline.value) return
 
     try {
@@ -616,13 +607,13 @@ State.markAllRead = async function (state: AppState, feedId?: number): Promise<v
 }
 
 /**
- * Convert an item's link to a route path like /domain.tld/path
+ * Convert an item's link to a route path like /domain.tld/feed/path
  */
-State.itemToRoute = function (item: Item): string | null {
+State.itemToRoute = function (item:Item):string|null {
     if (!item.link) return null
     try {
         const url = new URL(item.link)
-        return '/' + url.host + url.pathname + url.search + url.hash
+        return '/feed/' + url.host + url.pathname + url.search + url.hash
     } catch {
         return null
     }

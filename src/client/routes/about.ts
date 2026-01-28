@@ -19,7 +19,8 @@ export const AboutRoute:FunctionComponent<{
             <section>
                 <h2>What is this?</h2>
                 <p>
-                    RSSS is an RSS/Atom feed reader built as a${NBSP}
+                    RSSS is an <a href="https://en.wikipedia.org/wiki/RSS">
+                    RSS/Atom</a> feed reader built as a${NBSP}
                     <a href="https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps">
                         Progressive Web App (PWA)
                     </a>. It lets you subscribe to feeds
@@ -93,9 +94,14 @@ export const AboutRoute:FunctionComponent<{
                 <h2>Privacy</h2>
                 <p>
                     Your feeds and reading history are private to you. The only
-                    data shared is what's necessary for Bluesky OAuth
+                    data shared is what's necessary for Bluesky OAuth.
                     Feed content is fetched server-side, so the websites
                     you subscribe to don't see your IP address.
+                </p>
+                <p>
+                    Nothing here is encrypted. You <em>are</em> taking it
+                    at my word that I am not reading your RSS subscriptions,
+                    and no one at Cloudflare is either.
                 </p>
             </section>
 

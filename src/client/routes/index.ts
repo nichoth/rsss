@@ -5,6 +5,8 @@ import { AboutRoute } from './about.js'
 import { type AppState } from '../state.js'
 import { ItemReader } from './item-reader.js'
 import { SettingsRoute } from './settings.js'
+// import Debug from '@substrate-system/debug'
+// const debug = Debug('rsss:routes')
 
 export default function _Router (state:AppState):InstanceType<typeof Router> {
     const router = new Router()
@@ -29,7 +31,13 @@ export default function _Router (state:AppState):InstanceType<typeof Router> {
         return SettingsRoute
     })
 
-    router.addRoute('/feed/:feedUrl', () => {
+    /**
+     * Item reader route
+     *   - fetch the item if we do not have it already
+     */
+    router.addRoute('/feed/*', () => {
+        // fetch the item if we do not have it
+
         return ItemReader
     })
 
