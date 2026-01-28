@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { type FunctionComponent } from 'preact'
+import { useCallback } from 'preact/hooks'
 import { useComputed } from '@preact/signals'
 import { NotFound } from '../not-found.js'
 import { formatDate, sanitizeHtml } from '../util.js'
@@ -28,10 +29,10 @@ export const ItemReader:FunctionComponent<{
     const isRead = !!item.is_read
     const isOnline = state.isOnline.value
 
-    async function handleStar () {
+    const handleStar = useCallback(async () => {
         if (!isOnline) return
         await State.toggleItemStarred(state, item!.id, !isStarred)
-    }
+    }, [])
 
     async function handleToggleRead () {
         if (!isOnline) return
@@ -99,7 +100,7 @@ export const ItemReader:FunctionComponent<{
                 <div
                     class="article-body"
                     dangerouslySetInnerHTML=${{
-                        __html: sanitizeHtml(item.content || '')
+                        __html: sanitizeHtml(item.content || item.description || '')
                     }}
                 ></div>
             </article>

@@ -46,6 +46,13 @@ button {
     cursor: pointer;
     font-family: inherit;
     font-size: inherit;
+
+    &.icon {
+        display: flex;
+        align-items: center;
+        border: none;
+        background-color: transparent;
+    }
 }
 
 .route {
@@ -436,5 +443,12 @@ footer {
 
     .route.about {
         padding: 1rem;
+    }
+}
+
+/* overrides */
+new-tab {
+    & svg.icon {
+        height: auto;
     }
 }

@@ -27,7 +27,7 @@
     "@substrate-system/css-normalize": "^0.0.13",
     "@substrate-system/icons": "^0.1.29",
     "@substrate-system/routes": "^5.0.0",
-    "@substrate-system/tool-tip": "^0.0.2",
+    "@substrate-system/tool-tip": "^0.0.5",
     "hono": "^4.11.3",
     "htm": "^3.1.1",
     "idb": "^8.0.3",

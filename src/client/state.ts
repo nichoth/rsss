@@ -391,7 +391,7 @@ State.toggleFeedCached = async function (
 /**
  * Refresh all feeds (requires online)
  */
-State.refreshFeeds = async function (state: AppState): Promise<void> {
+State.refreshFeeds = async function (state:AppState):Promise<void> {
     if (!state.isOnline.value) return
 
     state.feedsLoading.value = true
@@ -408,17 +408,17 @@ State.refreshFeeds = async function (state: AppState): Promise<void> {
 /**
  * Load items from local IndexedDB with current filters
  */
-State.loadItems = async function (state: AppState): Promise<void> {
+State.loadItems = async function (state:AppState):Promise<void> {
     if (!localAdapter.isAvailable()) return
     state.itemsLoading.value = true
 
     try {
         const options: {
-            feedId?: number
-            isRead?: boolean
-            isStarred?: boolean
-            limit?: number
-            offset?: number
+            feedId?:number
+            isRead?:boolean
+            isStarred?:boolean
+            limit?:number
+            offset?:number
         } = {
             limit: 50,
             offset: state.itemsOffset.value
@@ -434,7 +434,9 @@ State.loadItems = async function (state: AppState): Promise<void> {
         if (state.selectedFeedId.value) {
             options.feedId = state.selectedFeedId.value
             // If the feed is NOT locally cached, use remote adapter
-            const feed = state.feeds.value.find(f => f.id === state.selectedFeedId.value)
+            const feed = state.feeds.value.find(f => {
+                return f.id === state.selectedFeedId.value
+            })
             if (feed && feed.is_locally_cached === 0 && state.isOnline.value) {
                 const data = await remoteAdapter.getItems(options)
                 state.items.value = data.items as Item[]
@@ -501,10 +503,10 @@ State.sync = async function (state: AppState): Promise<void> {
  * Mark item as read/unread (requires online)
  */
 State.toggleItemRead = async function (
-    state: AppState,
-    itemId: number,
-    isRead: boolean
-): Promise<void> {
+    state:AppState,
+    itemId:number,
+    isRead:boolean
+):Promise<void> {
     if (!state.isOnline.value) {
         debug('Cannot toggle read status while offline')
         return

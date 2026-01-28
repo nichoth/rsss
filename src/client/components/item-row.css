@@ -8,6 +8,12 @@
     background: var(--color-surface);
     transition: background-color 0.2s ease;
 
+    & .item-controls {
+        display: flex;
+        flex-direction: column;
+        gap: 2rem;
+    }
+
     & new-tab {
         width: 1rem;
         height: 1rem;
@@ -19,6 +25,13 @@
         padding: 1rem;
         padding-right: 0;
         padding-top: 0;
+
+        &.icon {
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
     }
 
     &:hover {

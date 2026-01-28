@@ -1,6 +1,8 @@
 import { type FunctionComponent } from 'preact'
-import { html } from 'htm/preact'
+import { html, useCallback } from 'htm/preact'
 import { decodeEntities, formatDate, stripHtml } from '../util.js'
+import { MailOpened } from './mail-opened.js'
+import '@substrate-system/tool-tip'
 import {
     State,
     type AppState,
@@ -9,22 +11,27 @@ import {
 import './item-row.css'
 import '@substrate-system/icons/css'
 import { define } from '@substrate-system/icons/new-tab'
+import { MailSpark } from './mail-spark.js'
 define()
 
 export const ItemRow:FunctionComponent<{
     item:Item
     state:AppState
-    onClick:()=>void
 }> = function ItemRow ({ item, state }) {
     const isUnread = !item.is_read
     const isStarred = !!item.is_starred
     const isOnline = state.isOnline.value
 
-    async function handleStar (e: Event) {
-        e.stopPropagation()
+    const toggleRead = useCallback((ev:MouseEvent) => {
+        ev.preventDefault()
+        State.toggleItemRead(state, item.id, !item.is_read)
+    }, [])
+
+    const handleStar = useCallback(async (ev:MouseEvent) => {
+        ev.stopPropagation()
         if (!isOnline) return
         await State.toggleItemStarred(state, item.id, !isStarred)
-    }
+    }, [])
 
     const route = State.itemToRoute(item)
     return html`
@@ -57,20 +64,47 @@ export const ItemRow:FunctionComponent<{
                 </div>
             </a>
 
-            <div class="item-actions">
-                <a href="${item.link}" target="_blank">
-                    <new-tab></new-tab>
-                </a>
-                <button
-                    class="btn-star ${isStarred ? 'starred' : ''}"
-                    onClick=${handleStar}
-                    title=${isOnline ?
-                        (isStarred ? 'Unstar' : 'Star') :
-                        'Cannot star while offline'}
-                    disabled=${!isOnline}
-                >
-                    ${isStarred ? '★' : '☆'}
-                </button>
+            <div class="item-controls">
+                <div class="item-actions">
+                    <a href="${item.link}" target="_blank" class="icon">
+                        <new-tab></new-tab>
+                        <span class="visually-hidden">New Tab</span>
+                    </a>
+                    <button
+                        class="btn-star ${isStarred ? 'starred' : ''}"
+                        onClick=${handleStar}
+                        title=${isOnline ?
+                            (isStarred ? 'Unstar' : 'Star') :
+                            'Cannot star while offline'}
+                        disabled=${!isOnline}
+                    >
+                        ${isStarred ? '★' : '☆'}
+                        <span class="visually-hidden">star</span>
+                    </button>
+                </div>
+
+                <div class="item-actions">
+                    <button class="icon" onClick=${toggleRead}>
+                        ${item.is_read ?
+                            // is read, so click marks it unread
+                            html`
+                                <tool-tip content="Mark unread" placement="left">
+                                    <${MailSpark} />
+                                </tool-tip>
+                                <span class="visually-hidden">
+                                    Mark as unread
+                                </span>
+                            ` :
+                            // not read, mark as read
+                            html`
+                                <tool-tip content="Mark as read" placement="left-start">
+                                    <${MailOpened} />
+                                </tool-tip>
+                                <span class="visually-hidden">Mark as read</span>
+                            `
+                        }
+                    </button>
+                </div>
             </div>
         </div>
     `
