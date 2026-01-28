@@ -1,5 +1,6 @@
 import { type FunctionComponent } from 'preact'
 import { html } from 'htm/preact'
+import { decodeEntities, formatDate, stripHtml } from '../util.js'
 import {
     State,
     type AppState,
@@ -73,27 +74,4 @@ export const ItemRow:FunctionComponent<{
             </div>
         </div>
     `
-}
-
-function stripHtml (html: string): string {
-    return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
-}
-
-function decodeEntities (html:string) {
-    const doc = new DOMParser().parseFromString(html, 'text/html')
-    return doc.documentElement.textContent
-}
-
-function formatDate (dateStr:string|null):string {
-    if (!dateStr) return ''
-    const date = new Date(dateStr)
-    const now = new Date()
-    const diff = now.getTime() - date.getTime()
-
-    if (diff < 60000) return 'just now'
-    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`
-    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`
-    if (diff < 604800000) return `${Math.floor(diff / 86400000)}d ago`
-
-    return date.toLocaleDateString()
 }

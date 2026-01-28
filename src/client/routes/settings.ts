@@ -35,12 +35,13 @@ export const SettingsRoute:FunctionComponent<{
         <section class="settings-section">
             <h2>Feeds</h2>
             <ul class="settings-feeds-list">
-                ${feeds.value.length === 0 ? html`
-                    <p class="empty-state">No feeds followed yet.</p>
-                ` : feeds.value.map(feed => {
-                    const isResolving = useComputed(() => {
-                        return checkResolving.value === ('' + feed.id)
-                    })
+                ${feeds.value.length === 0 ?
+                    html`
+                        <p class="empty-state">No feeds followed yet.</p>
+                    ` : feeds.value.map(feed => {
+                        const isResolving = useComputed(() => {
+                            return checkResolving.value === ('' + feed.id)
+                        })
 
                     debug('is resolving...?', isResolving.value, feed.id)
 

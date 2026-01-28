@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { type FunctionComponent } from 'preact'
 import { useComputed } from '@preact/signals'
 import { NotFound } from '../not-found.js'
+import { formatDate, sanitizeHtml } from '../util.js'
 import { type Item, type AppState, State } from '../state.js'
 import './item-reader.css'
 // import Debug from '@substrate-system/debug'
@@ -95,24 +96,13 @@ export const ItemReader:FunctionComponent<{
                     </div>
                 </header>
 
-                <div class="article-body"
-                    dangerouslySetInnerHTML=${{ __html: sanitizeHtml(item.content || item.description || '') }}
+                <div
+                    class="article-body"
+                    dangerouslySetInnerHTML=${{
+                        __html: sanitizeHtml(item.content || '')
+                    }}
                 ></div>
             </article>
         </div>
     `
-}
-
-function sanitizeHtml (html: string): string {
-    // Basic sanitization - remove script tags and event handlers
-    return html
-        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-        .replace(/\s*on\w+="[^"]*"/gi, '')
-        .replace(/\s*on\w+='[^']*'/gi, '')
-        .replace(/javascript:/gi, '')
-}
-
-function formatDate (dateStr:string|null):string {
-    if (!dateStr) return ''
-    return new Date(dateStr).toLocaleString()
 }
