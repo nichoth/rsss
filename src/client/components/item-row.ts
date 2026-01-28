@@ -25,20 +25,6 @@ export const ItemRow:FunctionComponent<{
         await State.toggleItemStarred(state, item.id, !isStarred)
     }
 
-    function formatDate (dateStr: string | null): string {
-        if (!dateStr) return ''
-        const date = new Date(dateStr)
-        const now = new Date()
-        const diff = now.getTime() - date.getTime()
-
-        if (diff < 60000) return 'just now'
-        if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`
-        if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`
-        if (diff < 604800000) return `${Math.floor(diff / 86400000)}d ago`
-
-        return date.toLocaleDateString()
-    }
-
     const route = State.itemToRoute(item)
     return html`
         <div class="item-row ${isUnread ? 'unread' : ''}">
@@ -52,9 +38,14 @@ export const ItemRow:FunctionComponent<{
                             ${item.feed_title}
                         </span>
                         ${item.pub_date && html`
-                            <span class="item-date">
+                            <time class="item-date" datetime="${
+                                new Date(item.pub_date)
+                                    .toISOString()
+                                    .split('T')
+                                    .shift()
+                            }">
                                 ${formatDate(item.pub_date)}
-                            </span>
+                            </time>
                         `}
                     </div>
                     ${item.description && html`
@@ -91,4 +82,18 @@ function stripHtml (html: string): string {
 function decodeEntities (html:string) {
     const doc = new DOMParser().parseFromString(html, 'text/html')
     return doc.documentElement.textContent
+}
+
+function formatDate (dateStr:string|null):string {
+    if (!dateStr) return ''
+    const date = new Date(dateStr)
+    const now = new Date()
+    const diff = now.getTime() - date.getTime()
+
+    if (diff < 60000) return 'just now'
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`
+    if (diff < 604800000) return `${Math.floor(diff / 86400000)}d ago`
+
+    return date.toLocaleDateString()
 }
