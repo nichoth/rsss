@@ -36,6 +36,8 @@ export default function _Router (state:AppState):InstanceType<typeof Router> {
      *   - fetch the item if we do not have it already
      */
     router.addRoute('/feed/*', () => {
+        // fetch the item if we do not have it
+
         return ItemReader
     })
 

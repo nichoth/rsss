@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { type FunctionComponent } from 'preact'
 import { useComputed } from '@preact/signals'
+import { NotFound } from '../not-found.js'
 import { type Item, type AppState, State } from '../state.js'
 import './item-reader.css'
 // import Debug from '@substrate-system/debug'
@@ -19,7 +20,7 @@ export const ItemReader:FunctionComponent<{
 
     const item = itemSignal.value
     if (!item) {
-        return html`<p>oh no</p>`
+        return html`<${NotFound} />`
     }
 
     const isStarred = !!item.is_starred

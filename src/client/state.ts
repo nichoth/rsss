@@ -99,11 +99,6 @@ export function State ():AppState {
         selectedFeedId: signal<number | null>(null),
         showUnreadOnly: signal(false),
         showStarredOnly: signal(false),
-        // Selected item for reading (derived from route)
-        selectedItem: computed(() => {
-            if (!State.isItemRoute(state.route.value)) return null
-            return State.findItemByRoute(state, state.route.value)
-        }),
         // Computed: is authenticated
         isAuthenticated: computed(() => state.user.value !== null)
     }
@@ -137,24 +132,15 @@ export function State ():AppState {
      */
     effect(() => {
         if (!state.isAuthenticated.value) return
+        // sync from remote if online (will reload data after sync)
+        if (state.isOnline.value) {
+            State.sync(state)
+        }
 
         // load cached data from IndexedDB
         State.loadFeeds(state)
         State.loadItems(state)
         State.loadCounts(state)
-
-        // sync from remote if online (will reload data after sync)
-        if (state.isOnline.value) {
-            State.sync(state)
-        }
-    })
-
-    // Side-effect: mark as read when an item is "selected" via URL
-    effect(() => {
-        const item = state.selectedItem.value
-        if (item && !item.is_read && state.isOnline.value) {
-            State.toggleItemRead(state, item.id, true)
-        }
     })
 
     // Check auth right away
@@ -194,7 +180,7 @@ State.showStarred = function (state: AppState) {
 /**
  * Check authentication status
  */
-State.checkAuth = async function (state: AppState): Promise<void> {
+State.checkAuth = async function (state:AppState):Promise<void> {
     state.authLoading.value = true
     state.authError.value = null
 
@@ -245,7 +231,7 @@ State.checkAuth = async function (state: AppState): Promise<void> {
 /**
  * Start OAuth login flow
  */
-State.login = async function (state: AppState, handle: string): Promise<void> {
+State.login = async function (state:AppState, handle:string):Promise<void> {
     state.authLoading.value = true
     state.authError.value = null
 

@@ -3,6 +3,7 @@ import { type FunctionComponent, render } from 'preact'
 import { useComputed } from '@preact/signals'
 import { State, type AppState } from './state.js'
 import Router from './routes/index.js'
+import { NotFound } from './not-found.js'
 import { Header } from './components/header.js'
 import './style.css'
 import Debug from '@substrate-system/debug'
@@ -29,11 +30,7 @@ export const App:FunctionComponent<{
     })
 
     if (!match.value || !match.value.action) {
-        return html`<div class="not-found">
-            <h1>404</h1>
-            <p>Page not found</p>
-            <a href="/">Go home</a>
-        </div>`
+        return html`<${NotFound} />`
     }
 
     // Loading state
