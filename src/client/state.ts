@@ -120,7 +120,7 @@ export function State ():AppState {
         state.isOnline.value = false
     })
 
-    onRoute((path: string, data) => {
+    onRoute((path:string, data) => {
         state.route.value = path
         // handle scroll position like a browser
         if (data.popstate) {
@@ -621,13 +621,13 @@ State.markAllRead = async function (state: AppState, feedId?: number): Promise<v
 }
 
 /**
- * Convert an item's link to a route path like /domain.tld/path
+ * Convert an item's link to a route path like /domain.tld/feed/path
  */
-State.itemToRoute = function (item: Item): string | null {
+State.itemToRoute = function (item:Item):string|null {
     if (!item.link) return null
     try {
         const url = new URL(item.link)
-        return '/' + url.host + url.pathname + url.search + url.hash
+        return '/feed/' + url.host + url.pathname + url.search + url.hash
     } catch {
         return null
     }
