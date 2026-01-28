@@ -93,9 +93,14 @@ export const AboutRoute:FunctionComponent<{
                 <h2>Privacy</h2>
                 <p>
                     Your feeds and reading history are private to you. The only
-                    data shared is what's necessary for Bluesky OAuth
+                    data shared is what's necessary for Bluesky OAuth.
                     Feed content is fetched server-side, so the websites
                     you subscribe to don't see your IP address.
+                </p>
+                <p>
+                    Nothing here is encrypted. You <em>are</em> taking it
+                    at my word that I am not reading your RSS subscriptions,
+                    and no one at Cloudflare is either.
                 </p>
             </section>
 

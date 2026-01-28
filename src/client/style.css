@@ -22,6 +22,14 @@
     --header-height: 56px;
 }
 
+* {
+    line-height: calc(6px + 2ex);
+}
+
+p {
+    line-height: calc(8px + 2ex);
+}
+
 body {
     font-family: 'Gill Sans', 'Gill Sans MT', Calibri, 'Trebuchet MS', sans-serif;
     background-color: var(--color-bg);
