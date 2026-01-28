@@ -381,10 +381,15 @@ State.deleteFeed = async function (state: AppState, feedId: number): Promise<{ s
         }
     }
 }
+
 /**
  * Toggle whether a feed is locally cached
  */
-State.toggleFeedCached = async function (state: AppState, feedId: number, isCached: boolean): Promise<void> {
+State.toggleFeedCached = async function (
+    state:AppState,
+    feedId:number,
+    isCached:boolean
+):Promise<void> {
     if (!state.isOnline.value) return
 
     try {

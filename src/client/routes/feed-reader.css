@@ -1,4 +1,9 @@
 .route.feed-reader {
+    & ul {
+        list-style: none;
+        padding: 0;
+    }
+
     & check-box {
         & label {
             gap: 0.8rem;

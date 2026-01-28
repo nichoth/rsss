@@ -57,17 +57,19 @@ export const FeedReader:FunctionComponent<{
                         </button>
                     </div>
 
-                    <div class="items-list">
+                    <ul class="items-list">
                         ${itemsLoading.value && items.value.length === 0 && html`
                             <div class="loading-text">Loading items...</div>
                         `}
 
                         ${items.value.map(item => html`
+                            <li>
                             <${ItemRow}
                                 key=${item.id}
                                 item=${item}
                                 state=${state}
                             />
+                            </li>
                         `)}
 
                         ${!itemsLoading.value && items.value.length === 0 && html`
@@ -77,7 +79,7 @@ export const FeedReader:FunctionComponent<{
                                     'No items to show.'}
                             </div>
                         `}
-                    </div>
+                    </ul>
                 </main>
             </div>
         </div>
