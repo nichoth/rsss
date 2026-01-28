@@ -518,15 +518,13 @@ State.toggleItemRead = async function (
         })
 
         if (response.ok) {
-            // Update local UI state immediately for responsiveness
-            batch(() => {
-                state.items.value = state.items.value.map(item =>
-                    item.id === itemId ? {
-                        ...item,
-                        is_read: isRead ? 1 : 0
-                    } : item
-                )
-            })
+            // Update local UI state
+            state.items.value = state.items.value.map(item =>
+                item.id === itemId ? {
+                    ...item,
+                    is_read: isRead ? 1 : 0
+                } : item
+            )
 
             // Update local IndexedDB to keep in sync
             if (localAdapter.isAvailable()) {
@@ -611,7 +609,7 @@ State.markAllRead = async function (state: AppState, feedId?: number): Promise<v
 /**
  * Convert an item's link to a route path like /domain.tld/feed/path
  */
-State.itemToRoute = function (item:Item):string|null {
+export const itemToRoute = function (item:Item):string|null {
     if (!item.link) return null
     try {
         const url = new URL(item.link)
@@ -631,10 +629,14 @@ State.clearSelectedItem = function (state:AppState):void {
 /**
  * Check if a route matches an item route pattern (/domain.tld/path)
  */
-State.isItemRoute = function (route:string):boolean {
+export const isItemRoute = function (route:string):boolean {
     // Item routes start with / followed by a domain (contains a dot)
     // but exclude /login and other app routes
-    if (route === '/' || route.startsWith('/login') || route.startsWith('/api')) {
+    if (
+        route === '/' ||
+        route.startsWith('/login') ||
+        route.startsWith('/api')
+    ) {
         return false
     }
 
@@ -644,9 +646,12 @@ State.isItemRoute = function (route:string):boolean {
 /**
  * Find an item by its link matching the current route
  */
-State.findItemByRoute = function (state: AppState, route: string): Item | null {
+export const findItemByRoute = function (
+    state:AppState,
+    route:string
+):Item|null {
     for (const item of state.items.value) {
-        if (State.itemToRoute(item) === route) {
+        if (itemToRoute(item) === route) {
             return item
         }
     }

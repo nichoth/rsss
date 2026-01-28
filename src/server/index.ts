@@ -197,7 +197,10 @@ app.get('/oauth/callback', async (c) => {
         await c.env.SESSIONS.delete(stateKey)
 
         // Create session cookie
-        const sessionCookie = await createSessionCookie(session, c.env.SESSION_SECRET)
+        const sessionCookie = await createSessionCookie(
+            session,
+            c.env.SESSION_SECRET
+        )
 
         setCookie(c, 'session', sessionCookie, {
             httpOnly: true,
@@ -210,7 +213,11 @@ app.get('/oauth/callback', async (c) => {
         return c.redirect(storedState.returnTo || '/')
     } catch (err) {
         console.error('OAuth callback error:', err)
-        return c.redirect(`/login?error=${encodeURIComponent(err instanceof Error ? err.message : 'Authentication failed')}`)
+        const errMsg = encodeURIComponent(err instanceof Error ?
+            err.message :
+            'Authentication failed'
+        )
+        return c.redirect(`/login?error=${errMsg}`)
     }
 })
 

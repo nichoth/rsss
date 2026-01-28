@@ -6,6 +6,7 @@ import { MailOpened } from './mail-opened.js'
 import '@substrate-system/tool-tip'
 import {
     State,
+    itemToRoute,
     type AppState,
     type Item,
 } from '../state.js'
@@ -34,13 +35,16 @@ export const ItemRow:FunctionComponent<{
         await State.toggleItemStarred(state, item.id, !isStarred)
     }, [])
 
-    const route = State.itemToRoute(item)
+    const route = itemToRoute(item)
     return html`
         <div class="item-row ${isUnread ? 'unread' : ''}">
             <a class="item-link" href=${route}>
                 <div class="item-main">
                     <h3 class="item-title">
-                        ${decodeEntities(item.title + '') || '(No title)'}
+                        ${item.title ?
+                            decodeEntities(item.title + '') :
+                            '(No title)'
+                        }
                     </h3>
                     <div class="item-meta">
                         <span class="item-feed">
@@ -85,7 +89,10 @@ export const ItemRow:FunctionComponent<{
                 </div>
 
                 <div class="item-actions">
-                    <button class="icon" onClick=${toggleRead}>
+                    <button
+                        class="icon"
+                        onClick=${toggleRead}
+                    >
                         ${item.is_read ?
                             // is read, so click marks it unread
                             html`
@@ -98,10 +105,15 @@ export const ItemRow:FunctionComponent<{
                             ` :
                             // not read, mark as read
                             html`
-                                <tool-tip content="Mark as read" placement="left-start">
+                                <tool-tip
+                                    content="Mark as read"
+                                    placement="left-start"
+                                >
                                     <${MailOpened} />
                                 </tool-tip>
-                                <span class="visually-hidden">Mark as read</span>
+                                <span class="visually-hidden">
+                                    Mark as read
+                                </span>
                             `
                         }
                     </button>
