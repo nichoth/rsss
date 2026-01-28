@@ -56,6 +56,7 @@ export const ItemRow:FunctionComponent<{
                     `}
                 </div>
             </a>
+
             <div class="item-actions">
                 <a href="${item.link}" target="_blank">
                     <new-tab></new-tab>
@@ -63,7 +64,9 @@ export const ItemRow:FunctionComponent<{
                 <button
                     class="btn-star ${isStarred ? 'starred' : ''}"
                     onClick=${handleStar}
-                    title=${isOnline ? (isStarred ? 'Unstar' : 'Star') : 'Cannot star while offline'}
+                    title=${isOnline ?
+                        (isStarred ? 'Unstar' : 'Star') :
+                        'Cannot star while offline'}
                     disabled=${!isOnline}
                 >
                     ${isStarred ? '★' : '☆'}
