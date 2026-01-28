@@ -1,5 +1,6 @@
 import { type FunctionComponent } from 'preact'
-import { html, useCallback } from 'htm/preact'
+import { useCallback } from 'preact/hooks'
+import { html } from 'htm/preact'
 import { decodeEntities, formatDate, stripHtml } from '../util.js'
 import { MailOpened } from './mail-opened.js'
 import '@substrate-system/tool-tip'
