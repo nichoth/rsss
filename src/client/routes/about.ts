@@ -19,7 +19,8 @@ export const AboutRoute:FunctionComponent<{
             <section>
                 <h2>What is this?</h2>
                 <p>
-                    RSSS is an RSS/Atom feed reader built as a${NBSP}
+                    RSSS is an <a href="https://en.wikipedia.org/wiki/RSS">
+                    RSS/Atom</a> feed reader built as a${NBSP}
                     <a href="https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps">
                         Progressive Web App (PWA)
                     </a>. It lets you subscribe to feeds
