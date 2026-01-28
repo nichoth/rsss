@@ -28,7 +28,7 @@ export const SettingsRoute:FunctionComponent<{
 
     return html`<div class="route settings">
         <header class="settings-header">
-            <a href="/" class="back-link">← Back to Feeds</a>
+            <a href="/" class="back-link">${'<'} Back to Feeds</a>
             <h1>Settings</h1>
         </header>
 
@@ -66,7 +66,7 @@ export const SettingsRoute:FunctionComponent<{
                                         onChange=${handleToggleCaching}
                                         disabled=${!isOnline.value}
                                     >
-                                        Cached Locally
+                                        Cache Locally
                                     <//>
                                 </div>
                             </div>
