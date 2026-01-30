@@ -31,7 +31,7 @@ export const Sidebar:FunctionComponent<{
         if (confirm(`Delete "${feed.title || feed.url}"?`)) {
             debug('deleting feed', feed.id)
             await State.deleteFeed(state, feed.id)
-            debug('done deleting it...', feed.id)
+            debug('done deleting it...', 'feed ID: ' + feed.id)
         }
     }
 
