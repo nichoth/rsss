@@ -319,30 +319,15 @@ State.loadFeeds = async function (state: AppState): Promise<void> {
 State.addFeed = async function (
     state:AppState,
     url:string
-): Promise<{ success: boolean; error?: string }> {
+):Promise<Response> {
     if (!state.isOnline.value) {
         debug('offline...')
-        return { success: false, error: 'Cannot add feeds while offline' }
+        throw new Error('Cannot add feeds while offline')
     }
 
-    try {
-        const response = await api.post('feeds', { json: { url } })
-        debug('response from the API...', response)
-
-        if (response.ok) {
-            // Sync to update local IndexedDB, then reload UI
-            await State.sync(state)
-            return { success: true }
-        } else {
-            const error = await response.json<{ error: string }>()
-            return { success: false, error: error.error }
-        }
-    } catch (err) {
-        return {
-            success: false,
-            error: err instanceof Error ? err.message : 'Failed to add feed'
-        }
-    }
+    const response = await api.post('feeds', { json: { url } })
+    debug('response from the API...', response)
+    return response
 }
 
 /**
@@ -357,15 +342,21 @@ State.deleteFeed = async function (
     }
 
     try {
-        const response = await api.delete(`feeds/${feedId}`)
-
-        if (response.ok) {
-            // Sync to update local IndexedDB, then reload UI
-            await State.sync(state)
-            return { success: true }
-        }
-        return { success: false, error: 'Failed to delete feed' }
+        await api.delete(`feeds/${feedId}`)
+        await State.sync(state)
+        return { success: true }
     } catch (err) {
+        // If the feed doesn't exist remotely (404), clean it up locally
+        if (err instanceof Error && 'response' in err) {
+            const response = (err as { response: Response }).response
+            if (response.status === 404) {
+                await localAdapter.deleteFeed(feedId)
+                await State.loadFeeds(state)
+                await State.loadItems(state)
+                await State.loadCounts(state)
+                return { success: true }
+            }
+        }
         return {
             success: false,
             error: err instanceof Error ? err.message : 'Failed to delete feed'

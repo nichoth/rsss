@@ -25,7 +25,6 @@ export const Sidebar:FunctionComponent<{
     const [showAddFeed, setShowAddFeed] = useState(false)
     const [addingFeed, setAddingFeed] = useState(false)
     const [addFeedError, setAddFeedError] = useState<string|null>(null)
-    const [newFeedUrl, setNewFeedUrl] = useState('')
 
     async function handleDeleteFeed (feed:Feed) {
         if (confirm(`Delete "${feed.title || feed.url}"?`)) {
@@ -44,20 +43,25 @@ export const Sidebar:FunctionComponent<{
 
     const handleAddFeed = useCallback(async (ev:MouseEvent) => {
         ev.preventDefault()
-        debug('adding a new feed...', newFeedUrl)
+        const form = ev.target as HTMLFormElement
+        const els = form.elements
+        const input = els['new-feed-url']
+        const newFeedUrl = input.value
         if (!newFeedUrl.trim()) return
+        debug('adding a new feed...', newFeedUrl)
 
         setAddingFeed(true)
         setAddFeedError(null)
 
-        const result = await State.addFeed(state, newFeedUrl.trim())
-        debug('done adding feed...', result)
+        try {
+            const result = await State.addFeed(state, newFeedUrl.trim())
+            debug('done adding feed...', result)
 
-        if (result.success) {
-            setNewFeedUrl('')
+            input.value = ''
             setShowAddFeed(false)
-        } else {
-            setAddFeedError(result.error || 'Failed to add feed')
+        } catch (_err) {
+            const err = _err as Error
+            setAddFeedError((err as Error).message || 'Failed to add feed')
         }
 
         setAddingFeed(false)
@@ -93,14 +97,14 @@ export const Sidebar:FunctionComponent<{
                     <form class="add-feed-form" onSubmit=${handleAddFeed}>
                         <input
                             type="url"
+                            id="new-feed-url"
+                            name="new-feed-url"
                             placeholder="https://example.com/feed.xml"
-                            value=${newFeedUrl}
-                            onInput=${(e:Event) => setNewFeedUrl((e.target as HTMLInputElement).value)}
                             disabled=${addingFeed || !isOnline.value}
                         />
                         <${Button}
                             type="submit"
-                            disabled=${addingFeed || !newFeedUrl.trim() || !isOnline.value}
+                            disabled=${!isOnline.value}
                         >
                             ${addingFeed ? '...' : 'Add'}
                         <//>
