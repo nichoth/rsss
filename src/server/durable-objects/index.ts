@@ -273,8 +273,8 @@ export class UserDO extends DurableObject<Env> {
         app.delete('/feeds/:id', (c) => {
             const id = parseInt(c.req.param('id'))
 
-            const feed = this.sql.exec('SELECT id FROM feeds WHERE id = ?', id).one()
-            if (!feed) {
+            const feeds = this.sql.exec('SELECT id FROM feeds WHERE id = ?', id).toArray()
+            if (feeds.length === 0) {
                 return c.json({ error: 'Feed not found' }, 404)
             }
 

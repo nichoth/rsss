@@ -10,6 +10,8 @@ import { ELLIPSIS } from '../constants.js'
 import { ButtonIcon } from './button-icon.js'
 import { type Feed, type AppState, State } from '../state.js'
 import './sidebar.css'
+import Debug from '@substrate-system/debug'
+const debug = Debug('rsss:view')
 
 export const Sidebar:FunctionComponent<{
     state:AppState
@@ -27,11 +29,14 @@ export const Sidebar:FunctionComponent<{
 
     async function handleDeleteFeed (feed:Feed) {
         if (confirm(`Delete "${feed.title || feed.url}"?`)) {
+            debug('deleting feed', feed.id)
             await State.deleteFeed(state, feed.id)
+            debug('done deleting it...', feed.id)
         }
     }
 
     async function handleToggleCache (feed:Feed, e:Event) {
+        e.preventDefault()
         e.stopPropagation()
         const newStatus = feed.is_locally_cached === 0
         await State.toggleFeedCached(state, feed.id, newStatus)
@@ -39,12 +44,14 @@ export const Sidebar:FunctionComponent<{
 
     const handleAddFeed = useCallback(async (ev:MouseEvent) => {
         ev.preventDefault()
+        debug('adding a new feed...', newFeedUrl)
         if (!newFeedUrl.trim()) return
 
         setAddingFeed(true)
         setAddFeedError(null)
 
         const result = await State.addFeed(state, newFeedUrl.trim())
+        debug('done adding feed...', result)
 
         if (result.success) {
             setNewFeedUrl('')
@@ -115,7 +122,9 @@ export const Sidebar:FunctionComponent<{
 
                     ${feeds.value.map(feed => html`
                         <div
-                            class="sidebar-item feed-item ${selectedFeedId.value === feed.id ? 'active' : ''}"
+                            class="sidebar-item feed-item ${
+                                selectedFeedId.value === feed.id ? 'active' : ''
+                            }"
                             key=${feed.id}
                         >
                             <a
@@ -128,7 +137,7 @@ export const Sidebar:FunctionComponent<{
                             <tool-tip content=${feed.is_locally_cached === 1 ? 'Switch to on-demand fetching' : 'Switch to local caching'}>
                                 <button
                                     class="btn-cache"
-                                    onClick=${(e: Event) => handleToggleCache(feed, e)}
+                                    onClick=${(e:Event) => handleToggleCache(feed, e)}
                                     aria-label=${feed.is_locally_cached === 1 ? 'Disable local cache' : 'Enable local cache'}
                                     disabled=${!isOnline.value}
                                 >
