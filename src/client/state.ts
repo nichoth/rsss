@@ -317,15 +317,17 @@ State.loadFeeds = async function (state: AppState): Promise<void> {
  * Add a new feed (requires online)
  */
 State.addFeed = async function (
-    state: AppState,
-    url: string
+    state:AppState,
+    url:string
 ): Promise<{ success: boolean; error?: string }> {
     if (!state.isOnline.value) {
+        debug('offline...')
         return { success: false, error: 'Cannot add feeds while offline' }
     }
 
     try {
         const response = await api.post('feeds', { json: { url } })
+        debug('response from the API...', response)
 
         if (response.ok) {
             // Sync to update local IndexedDB, then reload UI
@@ -346,7 +348,10 @@ State.addFeed = async function (
 /**
  * Delete a feed (requires online)
  */
-State.deleteFeed = async function (state: AppState, feedId: number): Promise<{ success: boolean; error?: string }> {
+State.deleteFeed = async function (
+    state:AppState,
+    feedId:number
+):Promise<{ success:boolean; error?:string }> {
     if (!state.isOnline.value) {
         return { success: false, error: 'Cannot delete feeds while offline' }
     }

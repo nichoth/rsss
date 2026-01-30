@@ -26,6 +26,11 @@
 	"migrations": [
 		{
 			"tag": "v1",
+			"new_sqlite_classes": ["CollieUserDO"]
+		},
+		{
+			"tag": "v2",
+			"deleted_classes": ["CollieUserDO"],
 			"new_sqlite_classes": ["UserDO"]
 		}
 	],
