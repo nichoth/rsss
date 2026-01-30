@@ -42,11 +42,12 @@
             height: 1.2rem;
 
             &::before {
-                top: 52%
+                top: calc(50% + 1px);
+                left: calc(50% - 1px);
             }
 
             &::after {
-                top: 52%;
+                top: calc(50% + 1px);
             }
         }
     }
