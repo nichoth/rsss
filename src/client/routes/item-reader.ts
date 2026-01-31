@@ -6,14 +6,16 @@ import { NotFound } from '../not-found.js'
 import { formatDate, sanitizeHtml } from '../util.js'
 import { type Item, type AppState, State } from '../state.js'
 import './item-reader.css'
-// import Debug from '@substrate-system/debug'
-// const debug = Debug('rsss:view')
+import Debug from '@substrate-system/debug'
+const debug = Debug('rsss:view')
 
 export const ItemReader:FunctionComponent<{
     state:AppState;
     splats:string[];
 }> = function ItemReader ({ state, splats }) {
     const itemUrl = splats.shift()
+
+    debug('reading...', itemUrl)
 
     const itemSignal = useComputed<undefined|null|Item>(() => {
         if (!state.items.value.length) return null

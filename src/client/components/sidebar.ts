@@ -133,7 +133,7 @@ export const Sidebar:FunctionComponent<{
                         >
                             <a
                                 class="feed-select"
-                                href="/${feed.url}"
+                                href="/feed/${feed.url}"
                             >
                                 ${feed.title || feed.url}
                             </a>
