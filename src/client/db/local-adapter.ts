@@ -219,40 +219,53 @@ export const localAdapter: DbAdapter & {
         }
     },
 
-    async sync (): Promise<SyncResponse> {
+    async sync ():Promise<SyncResponse> {
         const db = await getDb()
 
         // Get last sync time
         const syncState = await this.getSyncState()
         const since = syncState.lastSyncedAt
 
-        // Build sync URL - use current origin, user is authenticated via session cookie
+        // Build sync URL - use current origin, user is authenticated via
+        // session cookie
         const url = new URL('/api/sync', window.location.origin)
         if (since) {
             url.searchParams.set('since', since)
         }
 
-        // Fetch from remote - credentials included automatically for same-origin
+        // Fetch from remote - credentials included automatically
+        // for same-origin
         const response = await fetch(url.toString(), {
             method: 'GET',
             credentials: 'include'
         })
 
         if (!response.ok) {
-            throw new Error(`Sync failed: ${response.status} ${response.statusText}`)
+            throw new Error(`Sync failed: ${response.status} ` +
+                `${response.statusText}`)
         }
 
         const data = await response.json() as SyncResponse
 
-        // Upsert feeds
+        // Upsert feeds; on full sync remove feeds that no longer exist remotely
         const feedTx = db.transaction('feeds', 'readwrite')
         for (const feed of data.feeds) {
             await feedTx.store.put(feed)
+        }
+        if (data.isFullSync) {
+            const remoteFeedIds = new Set(data.feeds.map(f => f.id))
+            const localFeeds = await feedTx.store.getAll()
+            for (const local of localFeeds) {
+                if (!remoteFeedIds.has(local.id)) {
+                    await feedTx.store.delete(local.id)
+                }
+            }
         }
         await feedTx.done
 
         // Upsert items
         const itemTx = db.transaction('items', 'readwrite')
+        const remoteFeedIds = new Set(data.feeds.map(f => f.id))
         const nonCachedFeedIds = new Set(
             data.feeds
                 .filter(f => f.is_locally_cached === 0)
@@ -273,6 +286,16 @@ export const localAdapter: DbAdapter & {
                 continue
             }
             await itemTx.store.put(item)
+        }
+
+        // On full sync, remove items belonging to feeds that no longer exist
+        if (data.isFullSync) {
+            const allItems = await itemTx.store.getAll()
+            for (const item of allItems) {
+                if (!remoteFeedIds.has(item.feed_id)) {
+                    await itemTx.store.delete(item.id)
+                }
+            }
         }
         await itemTx.done
 

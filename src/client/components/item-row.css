@@ -1,5 +1,6 @@
 .item-row {
     display: flex;
+    justify-content: space-between;
     align-items: flex-start;
     gap: 1rem;
     padding-right: 1rem;

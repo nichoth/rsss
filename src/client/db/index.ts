@@ -7,6 +7,7 @@
  */
 
 import type { DbAdapter, SyncResponse, SyncState } from './types.js'
+import { localAdapter } from './local-adapter.js'
 
 export type * from './types.js'
 
@@ -42,7 +43,6 @@ export async function getAdapter (): Promise<DbAdapter> {
  * Get the local adapter for offline storage and sync
  */
 export async function getLocalAdapter () {
-    const { localAdapter } = await import('./local-adapter.js')
     return localAdapter
 }
 
@@ -55,7 +55,6 @@ export async function syncFromRemote (): Promise<SyncResponse> {
         throw new Error('IndexedDB not available')
     }
 
-    const { localAdapter } = await import('./local-adapter.js')
     return localAdapter.sync()
 }
 

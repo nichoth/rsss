@@ -35,6 +35,16 @@ export const Header:FunctionComponent<{
                 </a>
             </nav>
 
+            <div>
+                <iframe
+                    src="https://github.com/sponsors/nichoth/button"
+                    title="Sponsor nichoth"
+                    height="32"
+                    width="114"
+                    style="border: 0; border-radius: 6px;"
+                ></iframe>
+            </div>
+
             <div class="header header-right">
                 <span class="user-handle">
                     <a href="/settings">

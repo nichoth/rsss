@@ -131,3 +131,18 @@ wrangler deploy
 ```sh
 openssl rand -base64 32
 ```
+
+### Local Durable Object
+
+```sh
+sqlite3 /Users/nick/code/rsss/.wrangler/state/v3/do/rsss-UserDO/5ccaac5db5efdc5e2ac84cd63b9141cf9dcf247c7a410cc13ce1f9d1ebbc1410.sqlite
+```
+
+### Storage use vs quota
+
+```js
+const { usage, quota } = await navigator.storage.estimate();
+  
+console.log(usage / (1024 * 1024).toFixed(2));
+console.log(quota / (1024 * 1024).toFixed(2));
+```

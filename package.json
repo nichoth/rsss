@@ -27,6 +27,7 @@
     "@substrate-system/css-normalize": "^0.0.13",
     "@substrate-system/icons": "^0.1.29",
     "@substrate-system/routes": "^5.0.0",
+    "@substrate-system/state": "^0.0.4",
     "@substrate-system/tool-tip": "^0.0.5",
     "hono": "^4.11.3",
     "htm": "^3.1.1",
@@ -57,6 +58,7 @@
     "tap-spec": "^5.0.0",
     "typescript": "^5.9.3",
     "vite": "^7.3.1",
+    "vite-plugin-pwa": "^1.2.0",
     "wrangler": "^4.56.0"
   },
   "author": "nichoth <nichoth@nichoth.com> (https://nichoth.com)"

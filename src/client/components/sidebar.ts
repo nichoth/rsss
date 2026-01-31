@@ -8,7 +8,7 @@ import { CloseIcon } from '../components/close.js'
 import { CacheIcon } from '../components/cache-icon.js'
 import { ELLIPSIS } from '../constants.js'
 import { ButtonIcon } from './button-icon.js'
-import { type Feed, type AppState, State } from '../state.js'
+import { type Feed, type AppState, State, stripProtocol } from '../state.js'
 import './sidebar.css'
 import Debug from '@substrate-system/debug'
 const debug = Debug('rsss:view')
@@ -18,14 +18,13 @@ export const Sidebar:FunctionComponent<{
 }> = function ({ state }) {
     const {
         isOnline,
-        selectedFeedId,
         feedsLoading,
         feeds,
+        route,
     } = state
     const [showAddFeed, setShowAddFeed] = useState(false)
     const [addingFeed, setAddingFeed] = useState(false)
     const [addFeedError, setAddFeedError] = useState<string|null>(null)
-    const [newFeedUrl, setNewFeedUrl] = useState('')
 
     async function handleDeleteFeed (feed:Feed) {
         if (confirm(`Delete "${feed.title || feed.url}"?`)) {
@@ -44,20 +43,25 @@ export const Sidebar:FunctionComponent<{
 
     const handleAddFeed = useCallback(async (ev:MouseEvent) => {
         ev.preventDefault()
-        debug('adding a new feed...', newFeedUrl)
+        const form = ev.target as HTMLFormElement
+        const els = form.elements
+        const input = els['new-feed-url']
+        const newFeedUrl = input.value
         if (!newFeedUrl.trim()) return
+        debug('adding a new feed...', newFeedUrl)
 
         setAddingFeed(true)
         setAddFeedError(null)
 
-        const result = await State.addFeed(state, newFeedUrl.trim())
-        debug('done adding feed...', result)
+        try {
+            const result = await State.addFeed(state, newFeedUrl.trim())
+            debug('done adding feed...', result)
 
-        if (result.success) {
-            setNewFeedUrl('')
+            input.value = ''
             setShowAddFeed(false)
-        } else {
-            setAddFeedError(result.error || 'Failed to add feed')
+        } catch (_err) {
+            const err = _err as Error
+            setAddFeedError((err as Error).message || 'Failed to add feed')
         }
 
         setAddingFeed(false)
@@ -93,14 +97,14 @@ export const Sidebar:FunctionComponent<{
                     <form class="add-feed-form" onSubmit=${handleAddFeed}>
                         <input
                             type="url"
+                            id="new-feed-url"
+                            name="new-feed-url"
                             placeholder="https://example.com/feed.xml"
-                            value=${newFeedUrl}
-                            onInput=${(e:Event) => setNewFeedUrl((e.target as HTMLInputElement).value)}
                             disabled=${addingFeed || !isOnline.value}
                         />
                         <${Button}
                             type="submit"
-                            disabled=${addingFeed || !newFeedUrl.trim() || !isOnline.value}
+                            disabled=${!isOnline.value}
                         >
                             ${addingFeed ? '...' : 'Add'}
                         <//>
@@ -120,25 +124,31 @@ export const Sidebar:FunctionComponent<{
                         <div class="loading-text">Loading feeds...</div>
                     `}
 
-                    ${feeds.value.map(feed => html`
-                        <div
-                            class="sidebar-item feed-item ${
-                                selectedFeedId.value === feed.id ? 'active' : ''
-                            }"
-                            key=${feed.id}
-                        >
-                            <a
-                                class="feed-select"
-                                href="/${feed.url}"
+                    ${feeds.value.map(feed => {
+                        const feedPath = stripProtocol(feed.url)
+                        const isActive = route.value === `/feed/${feedPath}`
+                        return html`
+                            <div
+                                class="sidebar-item feed-item ${isActive ? 'active' : ''}"
+                                key=${feed.id}
                             >
-                                ${feed.title || feed.url}
-                            </a>
+                                <a
+                                    class="feed-select"
+                                    href="/feed/${feedPath}"
+                                >
+                                    ${feed.title || feed.url}
+                                </a>
 
-                            <tool-tip content=${feed.is_locally_cached === 1 ? 'Switch to on-demand fetching' : 'Switch to local caching'}>
+                            <tool-tip content=${feed.is_locally_cached === 1 ?
+                                'Switch to on-demand fetching' :
+                                'Switch to local caching'
+                            }>
                                 <button
                                     class="btn-cache"
                                     onClick=${(e:Event) => handleToggleCache(feed, e)}
-                                    aria-label=${feed.is_locally_cached === 1 ? 'Disable local cache' : 'Enable local cache'}
+                                    aria-label=${feed.is_locally_cached === 1 ?
+                                        'Disable local cache' :
+                                        'Enable local cache'}
                                     disabled=${!isOnline.value}
                                 >
                                     <${CacheIcon} cached=${feed.is_locally_cached === 1} />
@@ -155,7 +165,8 @@ export const Sidebar:FunctionComponent<{
                                 </button>
                             </tool-tip>
                         </div>
-                    `)}
+                    `
+                        })}
 
                     ${((!feedsLoading.value &&
                         feeds.value.length === 0) &&

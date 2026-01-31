@@ -5,7 +5,7 @@ export type {}  // Make this a module
 
 /**
  * RSSS Service Worker
- * Provides offline support for the PWA
+ *   - offline support
  */
 
 const CACHE_NAME = 'rsss-v1'
@@ -18,8 +18,8 @@ const STATIC_ASSETS:string[] = [
 ]
 
 // Install event - cache static assets
-self.addEventListener('install', (event:ExtendableEvent) => {
-    event.waitUntil(
+self.addEventListener('install', (ev:ExtendableEvent) => {
+    ev.waitUntil(
         caches.open(CACHE_NAME).then((cache) => {
             return cache.addAll(STATIC_ASSETS)
         })
