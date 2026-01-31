@@ -12,6 +12,9 @@ const debug = Debug('rsss:view')
 const state = State()
 const router = Router(state)
 
+/**
+ * Debug logging
+ */
 if (import.meta.env.DEV || import.meta.env.MODE === 'staging') {
     // @ts-expect-error DEV env
     window.state = state
@@ -20,6 +23,17 @@ if (import.meta.env.DEV || import.meta.env.MODE === 'staging') {
     localStorage.removeItem('DEBUG')
 }
 
+/**
+ * Service worker
+ */
+if (import.meta.env.PROD) {
+    const { registerSW } = await import('virtual:pwa-register')
+    registerSW({ immediate: true })
+}
+
+/**
+ * Main app
+ */
 export const App:FunctionComponent<{
     state:AppState
 }> = function App ({ state }) {
