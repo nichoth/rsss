@@ -18,9 +18,9 @@ export const Sidebar:FunctionComponent<{
 }> = function ({ state }) {
     const {
         isOnline,
-        selectedFeedId,
         feedsLoading,
         feeds,
+        route,
     } = state
     const [showAddFeed, setShowAddFeed] = useState(false)
     const [addingFeed, setAddingFeed] = useState(false)
@@ -124,19 +124,19 @@ export const Sidebar:FunctionComponent<{
                         <div class="loading-text">Loading feeds...</div>
                     `}
 
-                    ${feeds.value.map(feed => html`
-                        <div
-                            class="sidebar-item feed-item ${
-                                selectedFeedId.value === feed.id ? 'active' : ''
-                            }"
-                            key=${feed.id}
-                        >
-                            <a
-                                class="feed-select"
-                                href="/feed/${feed.url}"
+                    ${feeds.value.map(feed => {
+                        const isActive = route.value === `/feed/${feed.url}`
+                        return html`
+                            <div
+                                class="sidebar-item feed-item ${isActive ? 'active' : ''}"
+                                key=${feed.id}
                             >
-                                ${feed.title || feed.url}
-                            </a>
+                                <a
+                                    class="feed-select"
+                                    href="/feed/${feed.url}"
+                                >
+                                    ${feed.title || feed.url}
+                                </a>
 
                             <tool-tip content=${feed.is_locally_cached === 1 ?
                                 'Switch to on-demand fetching' :
@@ -164,7 +164,8 @@ export const Sidebar:FunctionComponent<{
                                 </button>
                             </tool-tip>
                         </div>
-                    `)}
+                    `
+                        })}
 
                     ${((!feedsLoading.value &&
                         feeds.value.length === 0) &&

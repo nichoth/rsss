@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { type FunctionComponent } from 'preact'
+import { useMemo } from 'preact/hooks'
 import '@substrate-system/check-box'
 import '@substrate-system/tool-tip'
 import { State, type AppState } from '../state.js'
@@ -21,8 +22,24 @@ export const FeedReader:FunctionComponent<{
         isOnline,
     } = state
 
-    const feed = splats.shift()
-    debug('feeeeeeeeeeeeeeeeeeeeeeeeed', feed)
+    // Extract feed URL from splats (everything after /feed/)
+    const feedUrl = useMemo(() => {
+        return splats.join('/')
+    }, [splats.join('/')])
+
+    // Find the feed by URL
+    const selectedFeed = useMemo(() => {
+        if (!feedUrl) return null
+        return feeds.value.find(f => f.url === feedUrl) || null
+    }, [feedUrl, feeds.value])
+
+    // Filter items based on the selected feed (client-side)
+    const filteredItems = useMemo(() => {
+        if (!selectedFeed) return items.value
+        return items.value.filter(item => item.feed_id === selectedFeed.id)
+    }, [items.value, selectedFeed?.id])
+
+    debug('Feed URL:', feedUrl, 'Selected feed:', selectedFeed)
 
     function handleToggleUnread () {
         state.showUnreadOnly.value = !state.showUnreadOnly.value
@@ -31,8 +48,11 @@ export const FeedReader:FunctionComponent<{
     }
 
     async function handleMarkAllRead () {
-        await State.markAllRead(state, state.selectedFeedId.value || undefined)
+        await State.markAllRead(state, selectedFeed?.id)
     }
+
+    // Get the feed title for display
+    const feedTitle = selectedFeed?.title || feedUrl || 'All Feeds'
 
     return html`
         <div class="route feed-reader">
@@ -41,6 +61,9 @@ export const FeedReader:FunctionComponent<{
 
                 <main class="content">
                     <div class="items-header">
+                        ${selectedFeed && html`
+                            <h2 class="feed-title">${feedTitle}</h2>
+                        `}
                         <div class="items-filters">
                             <check-box
                                 name="unread"
@@ -62,11 +85,11 @@ export const FeedReader:FunctionComponent<{
                     </div>
 
                     <ul class="items-list">
-                        ${itemsLoading.value && items.value.length === 0 && html`
+                        ${itemsLoading.value && filteredItems.length === 0 && html`
                             <div class="loading-text">Loading items...</div>
                         `}
 
-                        ${items.value.map(item => html`
+                        ${filteredItems.map(item => html`
                             <li>
                             <${ItemRow}
                                 key=${item.id}
@@ -76,11 +99,13 @@ export const FeedReader:FunctionComponent<{
                             </li>
                         `)}
 
-                        ${!itemsLoading.value && items.value.length === 0 && html`
+                        ${!itemsLoading.value && filteredItems.length === 0 && html`
                             <div class="empty-state">
                                 ${feeds.value.length === 0 ?
                                     'Maybe add some feeds to start reading.' :
-                                    'No items to show.'}
+                                    selectedFeed ?
+                                        `No items in ${selectedFeed.title || selectedFeed.url}` :
+                                        'No items to show.'}
                             </div>
                         `}
                     </ul>
