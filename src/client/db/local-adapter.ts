@@ -219,32 +219,35 @@ export const localAdapter: DbAdapter & {
         }
     },
 
-    async sync (): Promise<SyncResponse> {
+    async sync ():Promise<SyncResponse> {
         const db = await getDb()
 
         // Get last sync time
         const syncState = await this.getSyncState()
         const since = syncState.lastSyncedAt
 
-        // Build sync URL - use current origin, user is authenticated via session cookie
+        // Build sync URL - use current origin, user is authenticated via
+        // session cookie
         const url = new URL('/api/sync', window.location.origin)
         if (since) {
             url.searchParams.set('since', since)
         }
 
-        // Fetch from remote - credentials included automatically for same-origin
+        // Fetch from remote - credentials included automatically
+        // for same-origin
         const response = await fetch(url.toString(), {
             method: 'GET',
             credentials: 'include'
         })
 
         if (!response.ok) {
-            throw new Error(`Sync failed: ${response.status} ${response.statusText}`)
+            throw new Error(`Sync failed: ${response.status} ` +
+                `${response.statusText}`)
         }
 
         const data = await response.json() as SyncResponse
 
-        // Upsert feeds, and on full sync remove feeds that no longer exist remotely
+        // Upsert feeds; on full sync remove feeds that no longer exist remotely
         const feedTx = db.transaction('feeds', 'readwrite')
         for (const feed of data.feeds) {
             await feedTx.store.put(feed)

@@ -30,7 +30,7 @@ export const SidebarFooter: FunctionComponent<{
         }
     }, [])
 
-    async function handleSync() {
+    async function handleSync () {
         setSyncing(true)
         setSyncError(null)
 
@@ -49,7 +49,7 @@ export const SidebarFooter: FunctionComponent<{
         }
     }
 
-    function formatLastSynced(dateStr: string | null): string {
+    function formatLastSynced (dateStr: string | null): string {
         if (!dateStr) return 'Never'
         const date = new Date(dateStr)
         return date.toLocaleString()

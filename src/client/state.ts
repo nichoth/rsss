@@ -326,7 +326,13 @@ State.addFeed = async function (
     }
 
     const response = await api.post('feeds', { json: { url } })
-    debug('response from the API...', response)
+    debug('got response...', response)
+    const json = await response.json<{ feed:Feed }>()
+    debug('got json...', json)
+    state.feeds.value = [
+        ...state.feeds.value,
+        json.feed
+    ]
     return response
 }
 
@@ -342,13 +348,19 @@ State.deleteFeed = async function (
     }
 
     try {
+        // Delete from remote API
         await api.delete(`feeds/${feedId}`)
-        await State.sync(state)
-        state.feeds.value = [
-            ...state.feeds.value.filter(f => {
-                return f.id !== feedId
-            })
-        ]
+
+        // Delete from local IndexedDB
+        if (localAdapter.isAvailable()) {
+            await localAdapter.deleteFeed(feedId)
+        }
+
+        // Reload data to update UI
+        await State.loadFeeds(state)
+        await State.loadItems(state)
+        await State.loadCounts(state)
+
         return { success: true }
     } catch (err) {
         // If the feed doesn't exist remotely (404), clean it up locally
@@ -362,6 +374,7 @@ State.deleteFeed = async function (
                 return { success: true }
             }
         }
+
         return {
             success: false,
             error: err instanceof Error ? err.message : 'Failed to delete feed'
