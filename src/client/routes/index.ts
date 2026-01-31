@@ -2,7 +2,7 @@ import Router from '@substrate-system/routes'
 import { LoginPage } from './login.js'
 import { FeedReader } from './feed-reader.js'
 import { AboutRoute } from './about.js'
-import { type AppState } from '../state.js'
+import { type AppState, stripProtocol } from '../state.js'
 import { SettingsRoute } from './settings.js'
 import Debug from '@substrate-system/debug'
 const debug = Debug('rsss:routes')
@@ -36,7 +36,7 @@ export default function _Router (state:AppState):InstanceType<typeof Router> {
      */
     router.addRoute('/feed/*', () => {
         const feedUrl = window.location.pathname.replace('/feed/', '')
-        const feed = state.feeds.value.find(f => f.url === feedUrl)
+        const feed = state.feeds.value.find(f => stripProtocol(f.url) === feedUrl)
         debug('route match...', feed)
 
         return FeedReader

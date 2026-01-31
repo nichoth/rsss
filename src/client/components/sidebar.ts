@@ -8,7 +8,7 @@ import { CloseIcon } from '../components/close.js'
 import { CacheIcon } from '../components/cache-icon.js'
 import { ELLIPSIS } from '../constants.js'
 import { ButtonIcon } from './button-icon.js'
-import { type Feed, type AppState, State } from '../state.js'
+import { type Feed, type AppState, State, stripProtocol } from '../state.js'
 import './sidebar.css'
 import Debug from '@substrate-system/debug'
 const debug = Debug('rsss:view')
@@ -125,7 +125,8 @@ export const Sidebar:FunctionComponent<{
                     `}
 
                     ${feeds.value.map(feed => {
-                        const isActive = route.value === `/feed/${feed.url}`
+                        const feedPath = stripProtocol(feed.url)
+                        const isActive = route.value === `/feed/${feedPath}`
                         return html`
                             <div
                                 class="sidebar-item feed-item ${isActive ? 'active' : ''}"
@@ -133,7 +134,7 @@ export const Sidebar:FunctionComponent<{
                             >
                                 <a
                                     class="feed-select"
-                                    href="/feed/${feed.url}"
+                                    href="/feed/${feedPath}"
                                 >
                                     ${feed.title || feed.url}
                                 </a>

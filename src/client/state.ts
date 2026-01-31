@@ -621,6 +621,13 @@ State.markAllRead = async function (state: AppState, feedId?: number): Promise<v
 }
 
 /**
+ * Strip protocol from a URL (e.g., "https://example.com/path" -> "example.com/path")
+ */
+export const stripProtocol = function (url:string):string {
+    return url.replace(/^https?:\/\//, '')
+}
+
+/**
  * Convert an item's link to a route path like /domain.tld/feed/path
  */
 export const itemToRoute = function (item:Item):string|null {

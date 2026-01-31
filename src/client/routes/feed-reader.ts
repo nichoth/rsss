@@ -1,9 +1,9 @@
 import { html } from 'htm/preact'
 import { type FunctionComponent } from 'preact'
-import { useMemo } from 'preact/hooks'
+import { useCallback, useMemo } from 'preact/hooks'
 import '@substrate-system/check-box'
 import '@substrate-system/tool-tip'
-import { State, type AppState } from '../state.js'
+import { State, type AppState, stripProtocol } from '../state.js'
 import { ItemRow } from '../components/item-row.js'
 import { Sidebar } from '../components/sidebar.js'
 import Debug from '@substrate-system/debug'
@@ -27,10 +27,10 @@ export const FeedReader:FunctionComponent<{
         return splats.join('/')
     }, [splats.join('/')])
 
-    // Find the feed by URL
+    // Find the feed by URL (without protocol)
     const selectedFeed = useMemo(() => {
         if (!feedUrl) return null
-        return feeds.value.find(f => f.url === feedUrl) || null
+        return feeds.value.find(f => stripProtocol(f.url) === feedUrl) || null
     }, [feedUrl, feeds.value])
 
     // Filter items based on the selected feed (client-side)
@@ -41,15 +41,15 @@ export const FeedReader:FunctionComponent<{
 
     debug('Feed URL:', feedUrl, 'Selected feed:', selectedFeed)
 
-    function handleToggleUnread () {
+    const handleToggleUnread = useCallback(() => {
         state.showUnreadOnly.value = !state.showUnreadOnly.value
         state.itemsOffset.value = 0
         State.loadItems(state)
-    }
+    }, [])
 
-    async function handleMarkAllRead () {
+    const handleMarkAllRead = useCallback(async () => {
         await State.markAllRead(state, selectedFeed?.id)
-    }
+    }, [])
 
     // Get the feed title for display
     const feedTitle = selectedFeed?.title || feedUrl || 'All Feeds'
@@ -78,7 +78,9 @@ export const FeedReader:FunctionComponent<{
                             class="btn btn-small"
                             onClick=${handleMarkAllRead}
                             disabled=${counts.value.unread === 0 || !isOnline.value}
-                            title=${isOnline.value ? '' : 'Cannot mark read while offline'}
+                            title=${isOnline.value ?
+                                '' :
+                                'Cannot mark read while offline'}
                         >
                             Mark all read
                         </button>
