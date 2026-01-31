@@ -138,11 +138,16 @@ export const Sidebar:FunctionComponent<{
                                 ${feed.title || feed.url}
                             </a>
 
-                            <tool-tip content=${feed.is_locally_cached === 1 ? 'Switch to on-demand fetching' : 'Switch to local caching'}>
+                            <tool-tip content=${feed.is_locally_cached === 1 ?
+                                'Switch to on-demand fetching' :
+                                'Switch to local caching'
+                            }>
                                 <button
                                     class="btn-cache"
                                     onClick=${(e:Event) => handleToggleCache(feed, e)}
-                                    aria-label=${feed.is_locally_cached === 1 ? 'Disable local cache' : 'Enable local cache'}
+                                    aria-label=${feed.is_locally_cached === 1 ?
+                                        'Disable local cache' :
+                                        'Enable local cache'}
                                     disabled=${!isOnline.value}
                                 >
                                     <${CacheIcon} cached=${feed.is_locally_cached === 1} />

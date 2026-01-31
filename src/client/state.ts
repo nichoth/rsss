@@ -344,6 +344,11 @@ State.deleteFeed = async function (
     try {
         await api.delete(`feeds/${feedId}`)
         await State.sync(state)
+        state.feeds.value = [
+            ...state.feeds.value.filter(f => {
+                return f.id !== feedId
+            })
+        ]
         return { success: true }
     } catch (err) {
         // If the feed doesn't exist remotely (404), clean it up locally
