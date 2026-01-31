@@ -1,6 +1,7 @@
 import { html } from 'htm/preact/index.js'
 import { type FunctionComponent } from 'preact'
 import { useState, useCallback } from 'preact/hooks'
+import { CogWheel } from './cog-wheel.js'
 import { SidebarItem } from './sidebar-item.js'
 import { SidebarFooter } from '../components/sidebar-footer.js'
 import { Button } from '../components/button.js'
@@ -67,6 +68,8 @@ export const Sidebar:FunctionComponent<{
         setAddingFeed(false)
     }, [])
 
+    const allFeeds = !route.value.startsWith('/feed/')
+
     return html`
         <aside class="sidebar">
             <div class="sidebar-section">
@@ -81,16 +84,21 @@ export const Sidebar:FunctionComponent<{
             <div class="sidebar-section">
                 <div class="sidebar-header">
                     <h3>Feeds</h3>
-                    <${ButtonIcon}
-                        class="btn btn-icon"
-                        onClick=${() => setShowAddFeed(!showAddFeed)}
-                        title=${isOnline.value ?
-                            'Add feed' :
-                            'Cannot add feeds while offline'}
-                        disabled=${!isOnline.value}
-                    >
-                        +
-                    <//>
+                    <div class="feeds-controls">
+                        <a class="cog-wheel" href="/settings">
+                            <${CogWheel} />
+                        </a>
+                        <${ButtonIcon}
+                            class="btn btn-icon"
+                            onClick=${() => setShowAddFeed(!showAddFeed)}
+                            title=${isOnline.value ?
+                                'Add feed' :
+                                'Cannot add feeds while offline'}
+                            disabled=${!isOnline.value}
+                        >
+                            +
+                        <//>
+                    </div>
                 </div>
 
                 ${showAddFeed && html`
@@ -120,6 +128,10 @@ export const Sidebar:FunctionComponent<{
                 `}
 
                 <div class="feeds-list">
+                    <div class="sidebar-item feed-item${allFeeds ? ' active' : ''}">
+                        <a class="feed-select" href="/">All Feeds</a>
+                    </div>
+
                     ${feedsLoading.value && feeds.value.length === 0 && html`
                         <div class="loading-text">Loading feeds...</div>
                     `}

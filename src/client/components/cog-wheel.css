@@ -1,0 +1,10 @@
+a.cog-wheel, button.cog-wheel {
+    opacity: 0.4;
+    transition: all 0.2s;
+    width: 1.8rem;
+    height: 1.8rem;
+
+    &:hover {
+        opacity: 1;
+    }
+}

@@ -1,3 +1,5 @@
+@import url("./cog-wheel.css");
+
 /* Sidebar */
 .sidebar {
     width: var(--sidebar-width);
@@ -7,6 +9,12 @@
     flex-direction: column;
     overflow: hidden;
     flex-shrink: 0;
+}
+
+.feeds-controls {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
 }
 
 .sidebar-section {

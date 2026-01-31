@@ -72,11 +72,6 @@ button {
 .route {
     min-height: 100vh;
     overflow: scroll;
-
-    &.settings {
-        max-width: 40rem;
-        margin: 1rem auto;
-    }
 }
 
 .btn-back {

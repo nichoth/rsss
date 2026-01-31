@@ -7,8 +7,8 @@
     "/index.html",
     "/manifest.json"
   ];
-  self.addEventListener("install", (event) => {
-    event.waitUntil(
+  self.addEventListener("install", (ev) => {
+    ev.waitUntil(
       caches.open(CACHE_NAME).then((cache) => {
         return cache.addAll(STATIC_ASSETS);
       })

@@ -3,8 +3,7 @@ import Route from 'route-event'
 import ky from 'ky'
 import Debug from '@substrate-system/debug'
 import { localAdapter } from './db/local-adapter.js'
-import { remoteAdapter } from './db/remote-adapter.js'
-const debug = Debug('rsss')
+const debug = Debug('rsss:state')
 
 const USER_STORAGE_KEY = 'rsss_user'
 
@@ -67,7 +66,6 @@ export type AppState = {
     itemsTotal:Signal<number>,
     itemsOffset:Signal<number>,
     counts:Signal<CountsResponse>,
-    selectedFeedId:Signal<number|null>,
     showUnreadOnly:Signal<boolean>,
     showStarredOnly:Signal<boolean>,
     isAuthenticated:Signal<boolean>
@@ -95,8 +93,6 @@ export function State ():AppState {
         itemsTotal: signal(0),
         itemsOffset: signal(0),
         counts: signal<CountsResponse>({ unread: 0, starred: 0, total: 0 }),
-        // Selected feed filter
-        selectedFeedId: signal<number | null>(null),
         showUnreadOnly: signal(false),
         showStarredOnly: signal(false),
         // Computed: is authenticated
@@ -159,7 +155,6 @@ const api = ky.create({
 State.showAll = function (state: AppState) {
     batch(() => {
         state.showStarredOnly.value = false
-        state.selectedFeedId.value = null
         state.itemsOffset.value = 0
     })
 
@@ -169,7 +164,6 @@ State.showAll = function (state: AppState) {
 State.showStarred = function (state: AppState) {
     batch(() => {
         state.showStarredOnly.value = true
-        state.selectedFeedId.value = null
         state.itemsOffset.value = 0
         State.loadItems(state)
     })
@@ -443,20 +437,6 @@ State.loadItems = async function (state:AppState):Promise<void> {
         }
         if (state.showStarredOnly.value) {
             options.isStarred = true
-        }
-
-        if (state.selectedFeedId.value) {
-            options.feedId = state.selectedFeedId.value
-            // If the feed is NOT locally cached, use remote adapter
-            const feed = state.feeds.value.find(f => {
-                return f.id === state.selectedFeedId.value
-            })
-            if (feed && feed.is_locally_cached === 0 && state.isOnline.value) {
-                const data = await remoteAdapter.getItems(options)
-                state.items.value = data.items as Item[]
-                state.itemsTotal.value = data.total
-                return
-            }
         }
 
         const data = await localAdapter.getItems(options)

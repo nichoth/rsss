@@ -6,8 +6,8 @@ import '@substrate-system/tool-tip'
 import { State, type AppState, stripProtocol } from '../state.js'
 import { ItemRow } from '../components/item-row.js'
 import { Sidebar } from '../components/sidebar.js'
-import Debug from '@substrate-system/debug'
-const debug = Debug('rsss:view')
+// import Debug from '@substrate-system/debug'
+// const debug = Debug('rsss:view')
 
 export const FeedReader:FunctionComponent<{
     state:AppState;
@@ -27,7 +27,7 @@ export const FeedReader:FunctionComponent<{
         return splats.join('/')
     }, [splats.join('/')])
 
-    // Find the feed by URL (without protocol)
+    // Find the feed by URL
     const selectedFeed = useMemo(() => {
         if (!feedUrl) return null
         return feeds.value.find(f => stripProtocol(f.url) === feedUrl) || null
@@ -38,8 +38,6 @@ export const FeedReader:FunctionComponent<{
         if (!selectedFeed) return items.value
         return items.value.filter(item => item.feed_id === selectedFeed.id)
     }, [items.value, selectedFeed?.id])
-
-    debug('Feed URL:', feedUrl, 'Selected feed:', selectedFeed)
 
     const handleToggleUnread = useCallback(() => {
         state.showUnreadOnly.value = !state.showUnreadOnly.value

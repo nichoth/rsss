@@ -1,5 +1,5 @@
 .route.settings {
-    max-width: 800px;
+    width: 60rem;
     margin: 0 auto;
     padding: 2rem;
 
@@ -71,7 +71,7 @@
 .settings-feeds-list {
     display: flex;
     flex-direction: column;
-    gap: 1rem;
+    gap: 2rem;
 }
 
 .feed-title {
