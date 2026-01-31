@@ -3,7 +3,6 @@ import { LoginPage } from './login.js'
 import { FeedReader } from './feed-reader.js'
 import { AboutRoute } from './about.js'
 import { type AppState } from '../state.js'
-import { ItemReader } from './item-reader.js'
 import { SettingsRoute } from './settings.js'
 // import Debug from '@substrate-system/debug'
 // const debug = Debug('rsss:routes')
@@ -32,13 +31,17 @@ export default function _Router (state:AppState):InstanceType<typeof Router> {
     })
 
     /**
-     * Item reader route
-     *   - fetch the item if we do not have it already
+     * Feed-filtered view
+     *   - show items for a single feed, matched by URL
      */
     router.addRoute('/feed/*', () => {
-        // need to fetch the item if we do not have it
+        const feedUrl = window.location.pathname.replace('/feed/', '')
+        const feed = state.feeds.value.find(f => f.url === feedUrl)
+        if (feed) {
+            state.selectedFeedId.value = feed.id
+        }
 
-        return ItemReader
+        return FeedReader
     })
 
     return router
