@@ -5,12 +5,13 @@ import '@substrate-system/tool-tip'
 import { State, type AppState } from '../state.js'
 import { ItemRow } from '../components/item-row.js'
 import { Sidebar } from '../components/sidebar.js'
-// import Debug from '@substrate-system/debug'
-// const debug = Debug('rsss:view')
+import Debug from '@substrate-system/debug'
+const debug = Debug('rsss:view')
 
 export const FeedReader:FunctionComponent<{
-    state:AppState
-}> = function FeedReader ({ state }) {
+    state:AppState;
+    splats:string[];
+}> = function FeedReader ({ state, splats }) {
     const {
         feeds,
         items,
@@ -19,6 +20,9 @@ export const FeedReader:FunctionComponent<{
         showUnreadOnly,
         isOnline,
     } = state
+
+    const feed = splats.shift()
+    debug('feeeeeeeeeeeeeeeeeeeeeeeeed', feed)
 
     function handleToggleUnread () {
         state.showUnreadOnly.value = !state.showUnreadOnly.value
