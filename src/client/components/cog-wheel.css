@@ -3,6 +3,7 @@ a.cog-wheel, button.cog-wheel {
     width: 1.8rem;
     height: 1.8rem;
     transform: translateY(1px);
+    color: black;
 
     &:hover {
         transform: translateY(0);

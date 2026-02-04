@@ -1,6 +1,7 @@
 import Router from '@substrate-system/routes'
 import { LoginPage } from './login.js'
 import { FeedReader } from './feed-reader.js'
+import { ItemReader } from './item-reader.js'
 import { AboutRoute } from './about.js'
 import { type AppState } from '../state.js'
 import { SettingsRoute } from './settings.js'
@@ -35,7 +36,7 @@ export default function _Router (state:AppState):InstanceType<typeof Router> {
      *   - show items for a single feed, matched by URL
      */
     router.addRoute('/feed/*', () => {
-        return FeedReader
+        return ItemReader
     })
 
     return router

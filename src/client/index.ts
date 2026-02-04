@@ -7,7 +7,7 @@ import { NotFound } from './not-found.js'
 import { Header } from './components/header.js'
 import './style.css'
 import Debug from '@substrate-system/debug'
-const debug = Debug('rsss:view')
+const debug = Debug('rsss:view:index')
 
 const state = State()
 const router = Router(state)
@@ -60,6 +60,7 @@ export const App:FunctionComponent<{
     const ChildNode = match.value.action(match.value, state.route.value)
     const { params, splats } = match.value
     debug('rendering index...', splats)
+    debug('child name', ChildNode.name)
 
     return html`
         <${Header} state=${state} />
