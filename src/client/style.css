@@ -244,7 +244,7 @@ button {
     border: 1px solid;
     flex-shrink: 0;
     height: 28px;
-    padding: 0.8rem 1rem;
+    padding: 0.8rem 0.4rem;
     background: none;
     color: var(--color-text-secondary);
     cursor: pointer;
@@ -275,6 +275,19 @@ button {
 .feeds-list {
     max-height: 300px;
     overflow-y: auto;
+
+    & .btn-delete {
+        padding-right: 0;
+
+        & svg {
+            width: 1.5rem;
+            height: 1.5rem;
+        }
+    }
+
+    & .btn-delete, & .btn-cache {
+        border: none;
+    }
 }
 
 .add-feed-form {

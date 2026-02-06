@@ -11,6 +11,10 @@
     flex-shrink: 0;
 }
 
+.item-controls {
+    display: flex;
+}
+
 .feeds-controls {
     display: flex;
     align-items: center;

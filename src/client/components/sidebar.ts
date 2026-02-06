@@ -151,31 +151,33 @@ export const Sidebar:FunctionComponent<{
                                     ${feed.title || feed.url}
                                 </a>
 
-                            <tool-tip content=${feed.is_locally_cached === 1 ?
-                                'Switch to on-demand fetching' :
-                                'Switch to local caching'
-                            }>
-                                <button
-                                    class="btn-cache"
-                                    onClick=${(e:Event) => handleToggleCache(feed, e)}
-                                    aria-label=${feed.is_locally_cached === 1 ?
-                                        'Disable local cache' :
-                                        'Enable local cache'}
-                                    disabled=${!isOnline.value}
-                                >
-                                    <${CacheIcon} cached=${feed.is_locally_cached === 1} />
-                                </button>
-                            </tool-tip>
-                            <tool-tip content="Delete feed">
-                                <button
-                                    class="btn-delete"
-                                    onClick=${() => handleDeleteFeed(feed)}
-                                    aria-label="Delete feed"
-                                    disabled=${!isOnline.value}
-                                >
-                                    <${CloseIcon} />
-                                </button>
-                            </tool-tip>
+                            <div class="item-controls">
+                                <tool-tip content=${feed.is_locally_cached === 1 ?
+                                    'Switch to on-demand fetching' :
+                                    'Switch to local caching'
+                                }>
+                                    <button
+                                        class="btn-cache"
+                                        onClick=${(e:Event) => handleToggleCache(feed, e)}
+                                        aria-label=${feed.is_locally_cached === 1 ?
+                                            'Disable local cache' :
+                                            'Enable local cache'}
+                                        disabled=${!isOnline.value}
+                                    >
+                                        <${CacheIcon} cached=${feed.is_locally_cached === 1} />
+                                    </button>
+                                </tool-tip>
+                                <tool-tip content="Delete feed">
+                                    <button
+                                        class="btn-delete"
+                                        onClick=${() => handleDeleteFeed(feed)}
+                                        aria-label="Delete feed"
+                                        disabled=${!isOnline.value}
+                                    >
+                                        <${CloseIcon} />
+                                    </button>
+                                </tool-tip>
+                            </div>
                         </div>
                     `
                         })}
