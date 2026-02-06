@@ -3,20 +3,21 @@ import { useCallback } from 'preact/hooks'
 import { type FunctionComponent } from 'preact'
 import { useComputed, useSignal } from '@preact/signals'
 import { CheckBox } from '@substrate-system/check-box'
+import { match } from '../util.js'
 import { type AppState, State } from '../state.js'
-import Debug from '@substrate-system/debug'
 import '@substrate-system/check-box/css'
 import './settings.css'
-const debug = Debug('rsss:view')
+// import Debug from '@substrate-system/debug'
+// const debug = Debug('rsss:view')
 
 export const SettingsRoute:FunctionComponent<{
     state:AppState
 }> = function (props) {
     const { state } = props
     const { feeds, isOnline } = state
-    const checkResolving = useSignal<string|null>(null)
+    const checkResolving = useSignal<string | null>(null)
 
-    const handleToggleCaching = useCallback(async (ev:InputEvent) => {
+    const handleToggleCaching = useCallback(async (ev: InputEvent) => {
         const box = ev.target as HTMLInputElement
         const isCached = !!box.checked
         const el = match(box, CheckBox.TAG)  // the custom element
@@ -33,61 +34,86 @@ export const SettingsRoute:FunctionComponent<{
         </header>
 
         <section class="settings-section">
-            <h2>Feeds</h2>
+            <h2>This Device</h2>
+            <p class="section-desc">
+                Settings local to this device
+            </p>
+            
             <ul class="settings-feeds-list">
                 ${feeds.value.length === 0 ?
-                    html`
-                        <p class="empty-state">No feeds followed yet.</p>
-                    ` : feeds.value.map(feed => {
+                    html`<p class="empty-state">No feeds followed yet.</p>` :
+                    feeds.value.map(feed => {
                         const isResolving = useComputed(() => {
                             return checkResolving.value === ('' + feed.id)
                         })
 
-                    debug('is resolving...?', isResolving.value, feed.id)
+                const className = ('settings-feed-item' + (isResolving.value ?
+                    ' resolving' :
+                    ''))
 
-                    const className = ('settings-feed-item' + (isResolving.value ?
-                        'resolving' :
-                        ''))
-
-                    return html`
+                return html`
                         <li class="${className}" key=${feed.url}>
-                            <div>
-                                <div class="feed-info">
-                                    <span class="feed-title">
-                                        ${feed.title || feed.url}
-                                    </span>
-                                    <a href="${feed.url}" class="feed-url">
-                                        ${feed.url}
-                                    </a>
-                                </div>
-                                <div class="feed-controls">
-                                    <${CheckBox.TAG}
-                                        checked=${feed.is_locally_cached === 1}
-                                        id=${feed.id}
-                                        onChange=${handleToggleCaching}
-                                        disabled=${!isOnline.value}
-                                    >
-                                        Cache Locally
-                                    <//>
-                                </div>
+                            <div class="feed-info">
+                                <span class="feed-title">
+                                    ${feed.title || feed.url}
+                                </span>
                             </div>
-                            <div>More controls</div>
+                            <div class="feed-controls">
+                                <${CheckBox.TAG}
+                                    checked=${feed.is_locally_cached === 1}
+                                    id=${feed.id}
+                                    onChange=${handleToggleCaching}
+                                    disabled=${false}
+                                >
+                                    Cache Locally
+                                <//>
+                            </div>
                         </li>
                         `
-                    })
-                }
+            })
+        }
+            </ul>
+        </section>
+
+        <section class="settings-section">
+            <h2>Global Settings</h2>
+            <p class="section-desc">
+                Settings that sync across all your devices.
+            </p>
+
+            <h3>Subscribed Feeds</h3>
+            <ul class="settings-feeds-list">
+                ${feeds.value.length === 0 ?
+            html`
+                        <p class="empty-state">No feeds followed yet.</p>
+                    ` : feeds.value.map(feed => {
+                return html`
+                        <li class="settings-feed-item" key=${feed.url + '-global'}>
+                            <div class="feed-info">
+                                <span class="feed-title">
+                                    ${feed.title || feed.url}
+                                </span>
+                                <a href="${feed.url}" class="feed-url">
+                                    ${feed.url}
+                                </a>
+                            </div>
+                            <button 
+                                class="btn-delete"
+                                onClick=${(e: Event) => {
+                                    e.preventDefault()
+                                    if (confirm('Are you sure you want to unfollow this feed?')) {
+                                        State.deleteFeed(state, feed.id)
+                                    }
+                                }}
+                                disabled=${!isOnline.value}
+                            >
+                                Unfollow
+                            </button>
+                        </li>
+                        `
+            })
+        }
             </ul>
         </section>
     </div>`
-}
-
-/**
- * Get the closes parent element matching the given selector.
- * @param el Element to start from
- * @param s Selector for an element
- * @returns {HTMLElement|null} The closes parent element that matches.
- */
-function match (el:HTMLElement, s:string):HTMLElement|null {
-    if (!el.matches) el = el.parentElement!
-    return el.matches(s) ? el : el.closest(s)
 }

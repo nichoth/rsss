@@ -29,3 +29,15 @@ export function sanitizeHtml (html:string):string {
         .replace(/\s*on\w+='[^']*'/gi, '')
         .replace(/javascript:/gi, '')
 }
+
+/**
+ * Get the closes parent element matching the given selector.
+ *
+ * @param el Element to start from
+ * @param s Selector for an element
+ * @returns {HTMLElement|null} The closes parent element that matches.
+ */
+export function match (el:HTMLElement, s:string):HTMLElement|null {
+    if (!el.matches) el = el.parentElement!
+    return el.matches(s) ? el : el.closest(s)
+}

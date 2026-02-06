@@ -1,5 +1,5 @@
 import { type FunctionComponent } from 'preact'
-import { useState, useEffect } from 'preact/hooks'
+import { useState, useEffect, useCallback } from 'preact/hooks'
 import { html } from 'htm/preact'
 import { Button } from './button.js'
 import { type AppState, State } from '../state'
@@ -30,7 +30,8 @@ export const SidebarFooter: FunctionComponent<{
         }
     }, [])
 
-    async function handleSync () {
+    const handleSync = useCallback(async (ev:MouseEvent) => {
+        ev.preventDefault()
         setSyncing(true)
         setSyncError(null)
 
@@ -47,7 +48,7 @@ export const SidebarFooter: FunctionComponent<{
         } finally {
             setSyncing(false)
         }
-    }
+    }, [])
 
     function formatLastSynced (dateStr: string | null): string {
         if (!dateStr) return 'Never'

@@ -64,6 +64,7 @@ export interface DbAdapter {
     getFeeds(): Promise<Feed[]>
     addFeed(url: string): Promise<Feed>
     deleteFeed(id: number): Promise<void>
+    updateFeed(id: number, updates: { is_locally_cached?: number }): Promise<void>
 
     // Items
     getItems(options?: {

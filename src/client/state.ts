@@ -8,70 +8,70 @@ const debug = Debug('rsss:state')
 const USER_STORAGE_KEY = 'rsss_user'
 
 export interface User {
-    did:string
-    handle:string
+    did: string
+    handle: string
 }
 
 export interface Feed {
-    id:number
-    url:string
-    title:string|null
-    description:string|null
-    site_url:string|null
-    last_fetched:string|null
-    is_locally_cached:number
-    created_at:string
+    id: number
+    url: string
+    title: string | null
+    description: string | null
+    site_url: string | null
+    last_fetched: string | null
+    is_locally_cached: number
+    created_at: string
 }
 
 export interface Item {
-    id:number
-    feed_id:number
-    guid:string
-    title:string|null
-    link:string|null
-    description:string|null
-    content:string|null
-    author:string|null
-    pub_date:string|null
-    is_read:number
-    is_starred:number
-    created_at:string
-    feed_title?:string
+    id: number
+    feed_id: number
+    guid: string
+    title: string | null
+    link: string | null
+    description: string | null
+    content: string | null
+    author: string | null
+    pub_date: string | null
+    is_read: number
+    is_starred: number
+    created_at: string
+    feed_title?: string
 }
 
 export interface ItemsResponse {
-    items:Item[]
-    total:number
-    limit:number
-    offset:number
+    items: Item[]
+    total: number
+    limit: number
+    offset: number
 }
 
 export interface CountsResponse {
-    unread:number
-    starred:number
-    total:number
+    unread: number
+    starred: number
+    total: number
 }
 
 export type AppState = {
-    _setRoute:(route:string)=>void,
-    route:Signal<string>,
-    user:Signal<User|null>,
-    authLoading:Signal<boolean>,
-    authError:Signal<string|null>,
-    isOnline:Signal<boolean>,
-    feeds:Signal<Feed[]>,
-    feedsLoading:Signal<boolean>,
-    items:Signal<Item[]>,
-    itemsLoading:Signal<boolean>,
-    itemsTotal:Signal<number>,
-    itemsOffset:Signal<number>,
-    counts:Signal<CountsResponse>,
-    showUnreadOnly:Signal<boolean>,
-    showStarredOnly:Signal<boolean>,
-    isAuthenticated:Signal<boolean>
+    _setRoute: (route: string) => void,
+    route: Signal<string>,
+    user: Signal<User | null>,
+    authLoading: Signal<boolean>,
+    authError: Signal<string | null>,
+    isOnline: Signal<boolean>,
+    feeds: Signal<Feed[]>,
+    feedsLoading: Signal<boolean>,
+    items: Signal<Item[]>,
+    itemsLoading: Signal<boolean>,
+    itemsTotal: Signal<number>,
+    itemsOffset: Signal<number>,
+    counts: Signal<CountsResponse>,
+    showUnreadOnly: Signal<boolean>,
+    showStarredOnly: Signal<boolean>,
+    isAuthenticated: Signal<boolean>
 }
 
-export function State ():AppState {
+export function State(): AppState {
     const onRoute = Route()
 
     // Route state
@@ -111,7 +111,7 @@ export function State ():AppState {
         state.isOnline.value = false
     })
 
-    onRoute((path:string, data) => {
+    onRoute((path: string, data) => {
         state.route.value = path
         // handle scroll position like a browser
         if (data.popstate) {
@@ -174,7 +174,7 @@ State.showStarred = function (state: AppState) {
 /**
  * Check authentication status
  */
-State.checkAuth = async function (state:AppState):Promise<void> {
+State.checkAuth = async function (state: AppState): Promise<void> {
     state.authLoading.value = true
     state.authError.value = null
 
@@ -225,7 +225,7 @@ State.checkAuth = async function (state:AppState):Promise<void> {
 /**
  * Start OAuth login flow
  */
-State.login = async function (state:AppState, handle:string):Promise<void> {
+State.login = async function (state: AppState, handle: string): Promise<void> {
     state.authLoading.value = true
     state.authError.value = null
 
@@ -311,9 +311,9 @@ State.loadFeeds = async function (state: AppState): Promise<void> {
  * Add a new feed (requires online)
  */
 State.addFeed = async function (
-    state:AppState,
-    url:string
-):Promise<Response> {
+    state: AppState,
+    url: string
+): Promise<Response> {
     if (!state.isOnline.value) {
         debug('offline...')
         throw new Error('Cannot add feeds while offline')
@@ -321,7 +321,7 @@ State.addFeed = async function (
 
     const response = await api.post('feeds', { json: { url } })
     debug('got response...', response)
-    const json = await response.json<{ feed:Feed }>()
+    const json = await response.json<{ feed: Feed }>()
     debug('got json...', json)
     state.feeds.value = [
         ...state.feeds.value,
@@ -334,9 +334,9 @@ State.addFeed = async function (
  * Delete a feed (requires online)
  */
 State.deleteFeed = async function (
-    state:AppState,
-    feedId:number
-):Promise<{ success:boolean; error?:string }> {
+    state: AppState,
+    feedId: number
+): Promise<{ success: boolean; error?: string }> {
     if (!state.isOnline.value) {
         return { success: false, error: 'Cannot delete feeds while offline' }
     }
@@ -380,16 +380,16 @@ State.deleteFeed = async function (
  * Toggle whether a feed is locally cached
  */
 State.toggleFeedCached = async function (
-    state:AppState,
-    feedId:number,
-    isCached:boolean
-):Promise<void> {
-    if (!state.isOnline.value) return
-
+    state: AppState,
+    feedId: number,
+    isCached: boolean
+): Promise<void> {
     try {
-        await api.patch(`feeds/${feedId}`, { json: { is_locally_cached: isCached } })
-        // Sync to update local Feed object, then reload items
-        await State.sync(state)
+        await localAdapter.updateFeed(feedId, { is_locally_cached: isCached ? 1 : 0 })
+        // Reload feeds to update UI state
+        await State.loadFeeds(state)
+        // Reload items because visibility might change based on cache status? 
+        // Or if we were filtering. But good to be safe.
         await State.loadItems(state)
     } catch (err) {
         debug('Error toggling feed cache:', err)
@@ -399,7 +399,7 @@ State.toggleFeedCached = async function (
 /**
  * Refresh all feeds (requires online)
  */
-State.refreshFeeds = async function (state:AppState):Promise<void> {
+State.refreshFeeds = async function (state: AppState): Promise<void> {
     if (!state.isOnline.value) return
 
     state.feedsLoading.value = true
@@ -416,17 +416,17 @@ State.refreshFeeds = async function (state:AppState):Promise<void> {
 /**
  * Load items from local IndexedDB with current filters
  */
-State.loadItems = async function (state:AppState):Promise<void> {
+State.loadItems = async function (state: AppState): Promise<void> {
     if (!localAdapter.isAvailable()) return
     state.itemsLoading.value = true
 
     try {
         const options: {
-            feedId?:number
-            isRead?:boolean
-            isStarred?:boolean
-            limit?:number
-            offset?:number
+            feedId?: number
+            isRead?: boolean
+            isStarred?: boolean
+            limit?: number
+            offset?: number
         } = {
             limit: 50,
             offset: state.itemsOffset.value
@@ -497,10 +497,10 @@ State.sync = async function (state: AppState): Promise<void> {
  * Mark item as read/unread (requires online)
  */
 State.toggleItemRead = async function (
-    state:AppState,
-    itemId:number,
-    isRead:boolean
-):Promise<void> {
+    state: AppState,
+    itemId: number,
+    isRead: boolean
+): Promise<void> {
     if (!state.isOnline.value) {
         debug('Cannot toggle read status while offline')
         return
@@ -603,14 +603,14 @@ State.markAllRead = async function (state: AppState, feedId?: number): Promise<v
 /**
  * Strip protocol from a URL (e.g., "https://example.com/path" -> "example.com/path")
  */
-export const stripProtocol = function (url:string):string {
+export const stripProtocol = function (url: string): string {
     return url.replace(/^https?:\/\//, '')
 }
 
 /**
  * Convert an item's link to a route path like /domain.tld/feed/path
  */
-export const itemToRoute = function (item:Item):string|null {
+export const itemToRoute = function (item: Item): string | null {
     if (!item.link) return null
     try {
         const url = new URL(item.link)
@@ -623,14 +623,14 @@ export const itemToRoute = function (item:Item):string|null {
 /**
  * Clear selected item and navigate back to list
  */
-State.clearSelectedItem = function (state:AppState):void {
+State.clearSelectedItem = function (state: AppState): void {
     state._setRoute('/')
 }
 
 /**
  * Check if a route matches an item route pattern (/domain.tld/path)
  */
-export const isItemRoute = function (route:string):boolean {
+export const isItemRoute = function (route: string): boolean {
     // Item routes start with / followed by a domain (contains a dot)
     // but exclude /login and other app routes
     if (
@@ -648,9 +648,9 @@ export const isItemRoute = function (route:string):boolean {
  * Find an item by its link matching the current route
  */
 export const findItemByRoute = function (
-    state:AppState,
-    route:string
-):Item|null {
+    state: AppState,
+    route: string
+): Item | null {
     for (const item of state.items.value) {
         if (itemToRoute(item) === route) {
             return item
