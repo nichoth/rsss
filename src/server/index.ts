@@ -196,6 +196,12 @@ app.get('/oauth/callback', async (c) => {
         // Delete the used state
         await c.env.SESSIONS.delete(stateKey)
 
+        // Track this user in KV for admin tools
+        await c.env.SESSIONS.put(
+            `user:${session.did}`,
+            session.handle
+        )
+
         // Create session cookie
         const sessionCookie = await createSessionCookie(
             session,
@@ -250,15 +256,69 @@ const requireAuth = async (c:Context<{
 /**
  * Get the user's Durable Object
  */
-function getUserDO (env:Env, did:string):DurableObjectStub<UserDO> {
+function getUserDO (
+    env:Env,
+    did:string
+):DurableObjectStub<UserDO> {
     // Use the DID as the DO name for consistent routing
     const id = env.USER_DO.idFromName(did)
     return env.USER_DO.get(id)
 }
 
 /**
- * Proxy requests to user's Durable Object
- * All /api/* routes go to the user's DO
+ * Development mode: mock authentication for testing.
+ * Must be before the /api/* catch-all.
+ */
+app.post('/api/auth/dev-login', async (c) => {
+    // Only allow in development mode
+    if (c.env.NODE_ENV !== 'development') {
+        return c.json(
+            { error: 'Not allowed in production' },
+            403
+        )
+    }
+
+    const body = await c.req.json<{
+        did?:string;
+        handle?:string
+    }>()
+
+    const session:OAuthSession = {
+        did: body.did || 'did:plc:test123',
+        handle: body.handle || 'test.bsky.social',
+        accessToken: 'dev-token',
+        refreshToken: 'dev-refresh',
+        expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000
+    }
+
+    const secret = (
+        c.env.SESSION_SECRET
+            || 'dev-secret-key-32-chars-long!!'
+    )
+    const sessionCookie = await createSessionCookie(
+        session, secret
+    )
+
+    // Track this user in KV for admin tools
+    await c.env.SESSIONS.put(
+        `user:${session.did}`,
+        session.handle
+    )
+
+    setCookie(c, 'session', sessionCookie, {
+        httpOnly: true,
+        secure: false,
+        sameSite: 'Lax',
+        path: '/',
+        maxAge: 30 * 24 * 60 * 60
+    })
+
+    return c.json({ success: true, session })
+})
+
+/**
+ * Proxy requests to user's Durable Object.
+ * All /api/* routes go to the user's DO.
  */
 app.all('/api/*', requireAuth, async (c) => {
     const session = c.get('session')!
@@ -271,45 +331,102 @@ app.all('/api/*', requireAuth, async (c) => {
     doUrl.search = url.search
 
     // Forward the request to the DO
-    const response = await stub.fetch(new Request(doUrl.toString(), {
-        method: c.req.method,
-        headers: c.req.raw.headers,
-        body: c.req.raw.body
-    }))
+    const response = await stub.fetch(
+        new Request(doUrl.toString(), {
+            method: c.req.method,
+            headers: c.req.raw.headers,
+            body: c.req.raw.body
+        })
+    )
 
     return response
 })
 
 /**
- * Development mode: mock authentication for testing
+ * Admin: list all tracked users
  */
-app.post('/api/auth/dev-login', async (c) => {
-    // Only allow in development mode
-    if (c.env.NODE_ENV !== 'development') {
-        return c.json({ error: 'Not allowed in production' }, 403)
-    }
-
-    const body = await c.req.json<{ did?:string; handle?:string }>()
-
-    const session: OAuthSession = {
-        did: body.did || 'did:plc:test123',
-        handle: body.handle || 'test.bsky.social',
-        accessToken: 'dev-token',
-        refreshToken: 'dev-refresh',
-        expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000
-    }
-
-    const sessionCookie = await createSessionCookie(session, c.env.SESSION_SECRET || 'dev-secret-key-32-chars-long!!')
-
-    setCookie(c, 'session', sessionCookie, {
-        httpOnly: true,
-        secure: false,
-        sameSite: 'Lax',
-        path: '/',
-        maxAge: 30 * 24 * 60 * 60
+app.get('/admin/users', async (c) => {
+    const result = await c.env.SESSIONS.list({
+        prefix: 'user:'
     })
+    const users = await Promise.all(
+        result.keys.map(async (key) => {
+            const did = key.name.replace('user:', '')
+            const handle = await c.env.SESSIONS.get(
+                key.name
+            )
+            return { did, handle }
+        })
+    )
+    return c.json({ users })
+})
 
-    return c.json({ success: true, session })
+/**
+ * Admin: refresh all feeds for all tracked users.
+ * Accepts optional `dids` array in body to refresh
+ * specific users only.
+ */
+app.post('/admin/refresh-all', async (c) => {
+    let dids:string[]
+
+    // Check if specific DIDs were provided
+    const body = await c.req.json<{
+        dids?:string[]
+    }>().catch(() => ({ dids: undefined }))
+
+    if (body.dids && body.dids.length > 0) {
+        dids = body.dids
+    } else {
+        // List all tracked users from KV
+        const result = await c.env.SESSIONS.list({
+            prefix: 'user:'
+        })
+        dids = result.keys.map(
+            (key) => key.name.replace('user:', '')
+        )
+    }
+
+    if (dids.length === 0) {
+        return c.json({
+            error: 'No users found. Log in first.',
+            results: []
+        }, 404)
+    }
+
+    const results:Record<string, unknown>[] = []
+    for (const did of dids) {
+        try {
+            const stub = getUserDO(c.env, did)
+            const res = await stub.fetch(
+                new Request(
+                    'http://do/feeds/refresh',
+                    { method: 'POST' }
+                )
+            )
+            const data = await res.json() as Record<
+                string, unknown
+            >
+            const handle = await c.env.SESSIONS.get(
+                `user:${did}`
+            )
+            results.push({
+                did,
+                handle,
+                success: true,
+                ...data
+            })
+        } catch (err) {
+            results.push({
+                did,
+                success: false,
+                error: err instanceof Error
+                    ? err.message
+                    : 'Unknown error'
+            })
+        }
+    }
+
+    return c.json({ results })
 })
 
 /**

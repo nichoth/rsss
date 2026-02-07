@@ -3,21 +3,21 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 
 export interface Env {
-    USER: DurableObjectNamespace<UserDO>
-    SESSIONS: KVNamespace
-    ASSETS: Fetcher
+    USER:DurableObjectNamespace<UserDO>
+    SESSIONS:KVNamespace
+    ASSETS:Fetcher
 }
 
 interface Feed {
-    id: number
-    url: string
-    title: string | null
-    description: string | null
-    site_url: string | null
-    last_fetched: string | null
-    created_at: string
-    updated_at: string
-    is_locally_cached: number
+    id:number
+    url:string
+    title:string|null
+    description:string|null
+    site_url:string|null
+    last_fetched:string|null
+    created_at:string
+    updated_at:string
+    is_locally_cached:number
 }
 
 /**
@@ -415,13 +415,15 @@ export class UserDO extends DurableObject<Env> {
         app.get('/sync', (c) => {
             const since = c.req.query('since')
 
-            let feeds: unknown[]
-            let items: unknown[]
+            let feeds:unknown[]
+            let items:unknown[]
 
             if (since) {
                 // Incremental sync - get only changed records
                 feeds = this.sql.exec(
-                    'SELECT * FROM feeds WHERE updated_at > ? ORDER BY updated_at ASC',
+                    'SELECT * FROM feeds ' +
+                    'WHERE updated_at > ? ' +
+                    'ORDER BY updated_at ASC',
                     since
                 ).toArray()
 
