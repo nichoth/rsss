@@ -4,6 +4,9 @@ import { test } from '@substrate-system/tapzero'
 import './sync.js'
 import './db-adapter.js'
 
-test('example', async t => {
-    t.ok('ok', 'should be an example')
+test('all done', () => {
+    if (window) {
+        // @ts-expect-error tests
+        window.testsFinished = true
+    }
 })
