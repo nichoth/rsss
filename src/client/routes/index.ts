@@ -3,7 +3,7 @@ import { LoginPage } from './login.js'
 import { FeedReader } from './feed-reader.js'
 import { ItemReader } from './item-reader.js'
 import { AboutRoute } from './about.js'
-import { type AppState } from '../state.js'
+import { State, type AppState } from '../state.js'
 import { SettingsRoute } from './settings.js'
 // import Debug from '@substrate-system/debug'
 // const debug = Debug('rsss:routes')
@@ -35,7 +35,13 @@ export default function _Router (state:AppState):InstanceType<typeof Router> {
      * Feed-filtered view
      *   - show items for a single feed, matched by URL
      */
-    router.addRoute('/feed/*', () => {
+    router.addRoute('/feed/*', (match:ReturnType<typeof router.match>) => {
+        const splats = match!.splats
+        const itemUrl = splats[0]
+        const item = state.items.value.find(i => i.link?.includes(itemUrl))
+        if (item && !item.is_read && state.isOnline.value) {
+            State.toggleItemRead(state, item.id, true)
+        }
         return ItemReader
     })
 

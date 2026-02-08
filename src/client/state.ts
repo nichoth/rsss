@@ -71,7 +71,7 @@ export type AppState = {
     isAuthenticated: Signal<boolean>
 }
 
-export function State(): AppState {
+export function State (): AppState {
     const onRoute = Route()
 
     // Route state
@@ -388,7 +388,7 @@ State.toggleFeedCached = async function (
         await localAdapter.updateFeed(feedId, { is_locally_cached: isCached ? 1 : 0 })
         // Reload feeds to update UI state
         await State.loadFeeds(state)
-        // Reload items because visibility might change based on cache status? 
+        // Reload items because visibility might change based on cache status?
         // Or if we were filtering. But good to be safe.
         await State.loadItems(state)
     } catch (err) {
@@ -497,9 +497,9 @@ State.sync = async function (state: AppState): Promise<void> {
  * Mark item as read/unread (requires online)
  */
 State.toggleItemRead = async function (
-    state: AppState,
-    itemId: number,
-    isRead: boolean
+    state:AppState,
+    itemId:number,
+    isRead:boolean
 ): Promise<void> {
     if (!state.isOnline.value) {
         debug('Cannot toggle read status while offline')
