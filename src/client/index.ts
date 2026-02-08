@@ -59,6 +59,8 @@ export const App:FunctionComponent<{
 
     const ChildNode = match.value.action(match.value, state.route.value)
     const { params, splats } = match.value
+    if (!ChildNode) return html`<${NotFound} />`
+
     debug('rendering index...', splats)
     debug('child name', ChildNode.name)
 
