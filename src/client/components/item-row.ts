@@ -96,7 +96,11 @@ export const ItemRow:FunctionComponent<{
                         ${item.is_read ?
                             // is read, so click marks it unread
                             html`
-                                <tool-tip content="Mark unread" placement="left">
+                                <tool-tip
+                                    content="Mark unread"
+                                    delay="500"
+                                    placement="left"
+                                >
                                     <${MailSpark} />
                                 </tool-tip>
                                 <span class="visually-hidden">
@@ -107,6 +111,7 @@ export const ItemRow:FunctionComponent<{
                             html`
                                 <tool-tip
                                     content="Mark as read"
+                                    delay="500"
                                     placement="left-start"
                                 >
                                     <${MailOpened} />

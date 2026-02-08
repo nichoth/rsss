@@ -152,10 +152,13 @@ export const Sidebar:FunctionComponent<{
                                 </a>
 
                             <div class="item-controls">
-                                <tool-tip content=${feed.is_locally_cached === 1 ?
-                                    'Switch to on-demand fetching' :
-                                    'Switch to local caching'
-                                }>
+                                <tool-tip
+                                    content=${feed.is_locally_cached === 1 ?
+                                        'Switch to on-demand fetching' :
+                                        'Switch to local caching'
+                                    }
+                                    delay="500"
+                                >
                                     <button
                                         class="btn-cache"
                                         onClick=${(e:Event) => handleToggleCache(feed, e)}
@@ -167,7 +170,7 @@ export const Sidebar:FunctionComponent<{
                                         <${CacheIcon} cached=${feed.is_locally_cached === 1} />
                                     </button>
                                 </tool-tip>
-                                <tool-tip content="Delete feed">
+                                <tool-tip content="Delete feed" delay="500">
                                     <button
                                         class="btn-delete"
                                         onClick=${() => handleDeleteFeed(feed)}
