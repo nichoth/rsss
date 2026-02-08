@@ -38,8 +38,10 @@ export const AboutRoute:FunctionComponent<{
 
                 <h3>Architecture</h3>
                 <p>
-                    RSSS uses a simple version of local-first architecture.
-                    Your data lives in two places:
+                    RSSS is a simplified local-first app.
+                    The local data is a read-only replica of the feeds,
+                    and there is no notion of synchronizing state between
+                    devices. Your data lives in two places:
                 </p>
                 <ol>
                     <li>
@@ -108,8 +110,8 @@ export const AboutRoute:FunctionComponent<{
             <section>
                 <h2>Open Source</h2>
                 <p>
-                    RSSS is open source. View the code, report issues, or
-                    contribute on <a
+                    RSSS is open source. View the code or report issues
+                    on <a
                         href="https://github.com/nichoth/rsss"
                         target="_blank"
                         rel="noopener"
