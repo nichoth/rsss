@@ -22,8 +22,12 @@ export default defineConfig(({ mode }) => {
         plugins: [
             cloudflare(),
             VitePWA({
+                registerType: 'autoUpdate',
                 devOptions: { enabled: false },
-                injectRegister: null
+                workbox: {
+                    navigateFallback: '/index.html',
+                    navigateFallbackDenylist: [/^\/api\//],
+                },
             }),
             preact({
                 devtoolsInProd: false,

@@ -24,27 +24,10 @@ if (import.meta.env.DEV || import.meta.env.MODE === 'staging') {
 }
 
 /**
- * Service worker -- auto-update when online
+ * Service worker -- registered automatically by
+ * vite-plugin-pwa with registerType: 'autoUpdate'.
+ * New versions activate silently without page reload.
  */
-if (import.meta.env.PROD) {
-    const { registerSW } = await import(
-        'virtual:pwa-register'
-    )
-
-    const updateSW = registerSW({
-        onNeedRefresh () {
-            if (navigator.onLine) {
-                updateSW(true)
-            } else {
-                window.addEventListener(
-                    'online',
-                    () => updateSW(true),
-                    { once: true }
-                )
-            }
-        }
-    })
-}
 
 /**
  * Main app
