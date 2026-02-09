@@ -24,11 +24,41 @@ if (import.meta.env.DEV || import.meta.env.MODE === 'staging') {
 }
 
 /**
- * Service worker
+ * Service worker -- prompt user to reload on update
  */
 if (import.meta.env.PROD) {
-    const { registerSW } = await import('virtual:pwa-register')
-    registerSW({ immediate: true })
+    const { registerSW } = await import(
+        'virtual:pwa-register'
+    )
+
+    const updateSW = registerSW({
+        onNeedRefresh () {
+            const banner = document.createElement('div')
+            banner.className = 'sw-update-banner'
+            banner.innerHTML = `
+                <span>A new version is available.</span>
+                <button class="btn btn-small">Reload</button>
+                <button class="btn-dismiss"
+                    aria-label="Dismiss">&times;</button>
+            `
+
+            const reloadBtn = banner.querySelector(
+                '.btn'
+            ) as HTMLButtonElement
+            const dismissBtn = banner.querySelector(
+                '.btn-dismiss'
+            ) as HTMLButtonElement
+
+            reloadBtn.addEventListener('click', () => {
+                updateSW(true)
+            })
+            dismissBtn.addEventListener('click', () => {
+                banner.remove()
+            })
+
+            document.body.appendChild(banner)
+        }
+    })
 }
 
 /**
