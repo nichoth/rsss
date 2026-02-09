@@ -35,6 +35,14 @@ export default function _Router (state:AppState):InstanceType<typeof Router> {
     })
 
     router.addRoute('/oauth/callback', () => {
+        // If already authenticated, skip the callback
+        // and go home -- the OAuth state in KV is likely
+        // expired or already consumed.
+        if (state.isAuthenticated.value) {
+            state._setRoute('/')
+            return FeedReader
+        }
+
         // Cloudflare's SPA fallback intercepts this path
         // before the Worker runs, so we handle it
         // client-side by POSTing to /api/auth/callback.

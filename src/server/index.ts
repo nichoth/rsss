@@ -151,6 +151,13 @@ app.post('/api/auth/login', async (c) => {
  * the Worker runs.
  */
 app.post('/api/auth/callback', async (c) => {
+    // If already authenticated, no need to process
+    // the callback again -- state is likely expired.
+    const existing = c.get('session')
+    if (existing) {
+        return c.json({ success: true, returnTo: '/' })
+    }
+
     const body = await c.req.json<{
         code?:string;
         state?:string;
