@@ -35,7 +35,11 @@ export default function _Router (state:AppState):InstanceType<typeof Router> {
      * Feed-filtered view
      *   - show items for a single feed, matched by URL
      */
-    router.addRoute('/feed/*', (match:ReturnType<typeof router.match>) => {
+    router.addRoute('/feed/*', () => {
+        return FeedReader
+    })
+
+    router.addRoute('/post/*', (match:ReturnType<typeof router.match>) => {
         const splats = match!.splats
         const itemUrl = splats[0]
         const item = state.items.value.find(i => i.link?.includes(itemUrl))

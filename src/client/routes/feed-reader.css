@@ -1,6 +1,6 @@
 .route.feed-reader {
     flex: 1;
-    min-height: 0;
+    min-height: 100vh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -29,6 +29,30 @@
         flex: 1;
         overflow-y: auto;
         padding: 0;
+    }
+
+    & .pagination {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 1rem;
+        padding: 1rem;
+        border-top: 1px solid var(--color-border, #e0e0e0);
+    }
+
+    & .pagination-info {
+        color: var(--color-text-secondary);
+        font-size: 0.875rem;
+    }
+
+    & .page-size-select {
+        margin-left: auto;
+        padding: 0.25rem 0.5rem;
+        font-size: 0.875rem;
+        border: 1px solid var(--color-border, #e0e0e0);
+        border-radius: 4px;
+        background: var(--color-bg, #fff);
+        color: var(--color-text, #333);
     }
 
     & check-box {

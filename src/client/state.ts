@@ -6,6 +6,7 @@ import { localAdapter } from './db/local-adapter.js'
 const debug = Debug('rsss:state')
 
 const USER_STORAGE_KEY = 'rsss_user'
+export const DEFAULT_PAGE_SIZE = 20
 
 export interface User {
     did: string
@@ -68,6 +69,8 @@ export type AppState = {
     counts: Signal<CountsResponse>,
     showUnreadOnly: Signal<boolean>,
     showStarredOnly: Signal<boolean>,
+    pageSize: Signal<number>,
+    selectedFeedId: Signal<number | null>,
     isAuthenticated: Signal<boolean>
 }
 
@@ -95,6 +98,8 @@ export function State (): AppState {
         counts: signal<CountsResponse>({ unread: 0, starred: 0, total: 0 }),
         showUnreadOnly: signal(false),
         showStarredOnly: signal(false),
+        pageSize: signal(DEFAULT_PAGE_SIZE),
+        selectedFeedId: signal<number | null>(null),
         // Computed: is authenticated
         isAuthenticated: computed(() => state.user.value !== null)
     }
@@ -416,7 +421,7 @@ State.refreshFeeds = async function (state: AppState): Promise<void> {
 /**
  * Load items from local IndexedDB with current filters
  */
-State.loadItems = async function (state: AppState): Promise<void> {
+State.loadItems = async function (state:AppState):Promise<void> {
     if (!localAdapter.isAvailable()) return
     state.itemsLoading.value = true
 
@@ -428,10 +433,13 @@ State.loadItems = async function (state: AppState): Promise<void> {
             limit?: number
             offset?: number
         } = {
-            limit: 50,
+            limit: state.pageSize.value,
             offset: state.itemsOffset.value
         }
 
+        if (state.selectedFeedId.value !== null) {
+            options.feedId = state.selectedFeedId.value
+        }
         if (state.showUnreadOnly.value) {
             options.isRead = false
         }
@@ -467,7 +475,7 @@ State.loadCounts = async function (state: AppState): Promise<void> {
  * Sync data from remote server to local IndexedDB
  * This pulls any changes since the last sync and updates the local cache
  */
-State.sync = async function (state: AppState): Promise<void> {
+State.sync = async function (state:AppState):Promise<void> {
     if (!state.isOnline.value) {
         debug('Cannot sync while offline')
         return
@@ -608,13 +616,13 @@ export const stripProtocol = function (url: string): string {
 }
 
 /**
- * Convert an item's link to a route path like /domain.tld/feed/path
+ * Convert an item's link to a route path like /post/domain.tld/feed/path
  */
 export const itemToRoute = function (item: Item): string | null {
     if (!item.link) return null
     try {
         const url = new URL(item.link)
-        return '/feed/' + url.host + url.pathname + url.search + url.hash
+        return '/post/' + url.host + url.pathname + url.search + url.hash
     } catch {
         return null
     }
@@ -630,7 +638,7 @@ State.clearSelectedItem = function (state: AppState): void {
 /**
  * Check if a route matches an item route pattern (/domain.tld/path)
  */
-export const isItemRoute = function (route: string): boolean {
+export const isItemRoute = function (route:string):boolean {
     // Item routes start with / followed by a domain (contains a dot)
     // but exclude /login and other app routes
     if (
@@ -641,16 +649,16 @@ export const isItemRoute = function (route: string): boolean {
         return false
     }
 
-    return route.includes('/feed/')
+    return route.includes('/post/')
 }
 
 /**
  * Find an item by its link matching the current route
  */
 export const findItemByRoute = function (
-    state: AppState,
-    route: string
-): Item | null {
+    state:AppState,
+    route:string
+):Item|null {
     for (const item of state.items.value) {
         if (itemToRoute(item) === route) {
             return item

@@ -1,9 +1,13 @@
 import { html } from 'htm/preact'
 import { type FunctionComponent } from 'preact'
-import { useCallback, useMemo } from 'preact/hooks'
+import { useCallback, useEffect, useMemo } from 'preact/hooks'
 import '@substrate-system/check-box'
 import '@substrate-system/tool-tip'
-import { State, type AppState, stripProtocol } from '../state.js'
+import {
+    State,
+    type AppState,
+    stripProtocol,
+} from '../state.js'
 import { ItemRow } from '../components/item-row.js'
 import { Sidebar } from '../components/sidebar.js'
 // import Debug from '@substrate-system/debug'
@@ -18,14 +22,15 @@ export const FeedReader:FunctionComponent<{
         items,
         counts,
         itemsLoading,
+        itemsTotal,
+        itemsOffset,
         showUnreadOnly,
         isOnline,
+        pageSize,
     } = state
 
     // Extract feed URL from splats (everything after /feed/)
-    const feedUrl = useMemo(() => {
-        return splats.join('/')
-    }, [splats.join('/')])
+    const feedUrl = useMemo(() => splats.join('/'), [splats.join('/')])
 
     // Find the feed by URL
     const selectedFeed = useMemo(() => {
@@ -33,11 +38,25 @@ export const FeedReader:FunctionComponent<{
         return feeds.value.find(f => stripProtocol(f.url) === feedUrl) || null
     }, [feedUrl, feeds.value])
 
-    // Filter items based on the selected feed (client-side)
-    const filteredItems = useMemo(() => {
-        if (!selectedFeed) return items.value
-        return items.value.filter(item => item.feed_id === selectedFeed.id)
-    }, [items.value, selectedFeed?.id])
+    // Sync selected feed into state so loadItems
+    // filters at the query level
+    useEffect(() => {
+        const newId = selectedFeed?.id ?? null
+        if (state.selectedFeedId.value !== newId) {
+            state.selectedFeedId.value = newId
+            state.itemsOffset.value = 0
+            State.loadItems(state)
+        }
+
+        return () => {
+            // Clear feed filter when leaving this view
+            if (state.selectedFeedId.value !== null) {
+                state.selectedFeedId.value = null
+                state.itemsOffset.value = 0
+                State.loadItems(state)
+            }
+        }
+    }, [selectedFeed?.id])
 
     const handleToggleUnread = useCallback(() => {
         state.showUnreadOnly.value = !state.showUnreadOnly.value
@@ -48,6 +67,35 @@ export const FeedReader:FunctionComponent<{
     const handleMarkAllRead = useCallback(async () => {
         await State.markAllRead(state, selectedFeed?.id)
     }, [])
+
+    const handlePrevPage = useCallback(() => {
+        state.itemsOffset.value = Math.max(
+            0,
+            state.itemsOffset.value - pageSize.value
+        )
+        State.loadItems(state)
+    }, [])
+
+    const handleNextPage = useCallback(() => {
+        state.itemsOffset.value =
+            state.itemsOffset.value + pageSize.value
+        State.loadItems(state)
+    }, [])
+
+    const handlePageSizeChange = useCallback((ev:Event) => {
+        const target = ev.target as HTMLSelectElement
+        state.pageSize.value = parseInt(target.value, 10)
+        state.itemsOffset.value = 0
+        State.loadItems(state)
+    }, [])
+
+    const hasPrev = itemsOffset.value > 0
+    const hasNext = itemsOffset.value + pageSize.value < itemsTotal.value
+    const pageStart = itemsTotal.value === 0 ? 0 : itemsOffset.value + 1
+    const pageEnd = Math.min(
+        itemsOffset.value + pageSize.value,
+        itemsTotal.value
+    )
 
     // Get the feed title for display
     const feedTitle = selectedFeed?.title || feedUrl || 'All Feeds'
@@ -85,11 +133,11 @@ export const FeedReader:FunctionComponent<{
                     </div>
 
                     <ul class="items-list">
-                        ${itemsLoading.value && filteredItems.length === 0 && html`
+                        ${itemsLoading.value && items.value.length === 0 && html`
                             <div class="loading-text">Loading items...</div>
                         `}
 
-                        ${filteredItems.map(item => html`
+                        ${items.value.map(item => html`
                             <li>
                             <${ItemRow}
                                 key=${item.id}
@@ -99,7 +147,7 @@ export const FeedReader:FunctionComponent<{
                             </li>
                         `)}
 
-                        ${!itemsLoading.value && filteredItems.length === 0 && html`
+                        ${!itemsLoading.value && items.value.length === 0 && html`
                             <div class="empty-state">
                                 ${feeds.value.length === 0 ?
                                     'Maybe add some feeds to start reading.' :
@@ -109,6 +157,40 @@ export const FeedReader:FunctionComponent<{
                             </div>
                         `}
                     </ul>
+
+                    ${itemsTotal.value > 0 && html`
+                        <div class="pagination">
+                            <button
+                                class="btn btn-small"
+                                onClick=${handlePrevPage}
+                                disabled=${!hasPrev}
+                            >
+                                Previous
+                            </button>
+                            <span class="pagination-info">
+                                ${pageStart}--${pageEnd}
+                                ${' of '}${itemsTotal.value}
+                            </span>
+                            <button
+                                class="btn btn-small"
+                                onClick=${handleNextPage}
+                                disabled=${!hasNext}
+                            >
+                                Next
+                            </button>
+
+                            <select
+                                class="page-size-select"
+                                value=${pageSize.value}
+                                onChange=${handlePageSizeChange}
+                            >
+                                <option value="20">20</option>
+                                <option value="40">40</option>
+                                <option value="60">60</option>
+                                <option value="100">100</option>
+                            </select>
+                        </div>
+                    `}
                 </main>
             </div>
         </div>

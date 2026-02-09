@@ -23,10 +23,10 @@ let dbPromise: Promise<IDBPDatabase> | null = null
 /**
  * Initialize and get the IndexedDB database
  */
-function getDb(): Promise<IDBPDatabase> {
+function getDb (): Promise<IDBPDatabase> {
     if (!dbPromise) {
         dbPromise = openDB(DB_NAME, DB_VERSION, {
-            upgrade(db) {
+            upgrade (db) {
                 // Feeds store
                 if (!db.objectStoreNames.contains('feeds')) {
                     const feedStore = db.createObjectStore('feeds', { keyPath: 'id' })
@@ -66,11 +66,11 @@ export const localAdapter: DbAdapter & {
     /**
      * Check if IndexedDB is available
      */
-    isAvailable(): boolean {
+    isAvailable (): boolean {
         return typeof indexedDB !== 'undefined'
     },
 
-    async getFeeds(): Promise<Feed[]> {
+    async getFeeds (): Promise<Feed[]> {
         const db = await getDb()
         const feeds = await db.getAll('feeds')
         // Sort by title
@@ -79,7 +79,7 @@ export const localAdapter: DbAdapter & {
         )
     },
 
-    async addFeed(url: string): Promise<Feed> {
+    async addFeed (url: string): Promise<Feed> {
         const db = await getDb()
         const now = new Date().toISOString()
 
@@ -102,7 +102,7 @@ export const localAdapter: DbAdapter & {
         return feed
     },
 
-    async deleteFeed(id: number): Promise<void> {
+    async deleteFeed (id: number): Promise<void> {
         const db = await getDb()
 
         // Delete all items for this feed
@@ -122,7 +122,7 @@ export const localAdapter: DbAdapter & {
         await tx.done
     },
 
-    async updateFeed(
+    async updateFeed (
         id: number,
         updates: { is_locally_cached?: number }
     ): Promise<void> {
@@ -143,7 +143,7 @@ export const localAdapter: DbAdapter & {
         }
     },
 
-    async getItems(options = {}): Promise<ItemsResponse> {
+    async getItems (options = {}): Promise<ItemsResponse> {
         const db = await getDb()
         const { feedId, isRead, isStarred, limit = 50, offset = 0 } = options
 
@@ -175,7 +175,7 @@ export const localAdapter: DbAdapter & {
         return { items: paginated, total, limit, offset }
     },
 
-    async getCounts(): Promise<CountsResponse> {
+    async getCounts (): Promise<CountsResponse> {
         const db = await getDb()
         const items = await db.getAll('items')
 
@@ -186,7 +186,7 @@ export const localAdapter: DbAdapter & {
         }
     },
 
-    async updateItem(
+    async updateItem (
         id: number,
         updates: { is_read?: boolean; is_starred?: boolean }
     ): Promise<void> {
@@ -208,7 +208,7 @@ export const localAdapter: DbAdapter & {
         }
     },
 
-    async markAllRead(feedId?: number): Promise<void> {
+    async markAllRead (feedId?: number): Promise<void> {
         const db = await getDb()
         const now = new Date().toISOString()
 
@@ -231,7 +231,7 @@ export const localAdapter: DbAdapter & {
         await tx.done
     },
 
-    async getSyncState(): Promise<SyncState> {
+    async getSyncState ():Promise<SyncState> {
         const db = await getDb()
         const state = await db.get('sync_state', 1)
 
@@ -240,7 +240,7 @@ export const localAdapter: DbAdapter & {
         }
     },
 
-    async sync(): Promise<SyncResponse> {
+    async sync ():Promise<SyncResponse> {
         const db = await getDb()
 
         // Get last sync time
@@ -268,8 +268,8 @@ export const localAdapter: DbAdapter & {
 
         const data = await response.json() as SyncResponse
 
-        // Upsert feeds; on full sync remove feeds that no longer exist remotely
-        // Upsert feeds; on full sync remove feeds that no longer exist remotely
+        // Upsert feeds
+        // On full sync remove feeds that no longer exist remotely
         const feedTx = db.transaction('feeds', 'readwrite')
         for (const feed of data.feeds) {
             // Check if we have this feed locally to preserve local-only settings
