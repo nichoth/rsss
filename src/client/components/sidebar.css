@@ -36,7 +36,6 @@
     padding: 0.5rem;
 
     & h3 {
-        font-size: 0.75rem;
         text-transform: uppercase;
         letter-spacing: 0.05em;
         color: var(--color-text-secondary);

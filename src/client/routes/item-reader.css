@@ -53,12 +53,10 @@
     display: flex;
     flex-wrap: wrap;
     gap: 1rem;
-    font-size: 0.875rem;
     color: var(--color-text-secondary);
 }
 
 .article-body {
-    font-size: 1.0625rem;
     line-height: 1.7;
 
     & p {
@@ -96,7 +94,6 @@
 
     & code {
         padding: 0.125rem 0.25rem;
-        font-size: 0.875em;
     }
 
     & blockquote {
@@ -121,7 +118,6 @@
 .header-link {
     color: var(--color-text-secondary);
     text-decoration: none;
-    font-size: 0.875rem;
 
     &:hover {
         color: var(--color-primary);
