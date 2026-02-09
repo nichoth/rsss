@@ -117,8 +117,7 @@ export function State (): AppState {
 
     onRoute((path:string, data) => {
         state.route.value = path.split('?').shift()
-        // handle scroll position like a browser
-        if (data.popstate) {
+        if (data.popstate) {  // handle scroll position like a browser
             window.scrollTo(data.scrollX, data.scrollY)
         } else {
             window.scrollTo(0, 0)
