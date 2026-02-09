@@ -8,6 +8,9 @@ import { SettingsRoute } from './settings.js'
 // import Debug from '@substrate-system/debug'
 // const debug = Debug('rsss:routes')
 
+// example callback URL
+// https://rsss.space/oauth/callback?state=b3QtX4H7oVsGPxIBS_A32Q&iss=https%3A%2F%2Fbsky.social&code=cod-4c9603952c0ee8c3119308ddf4fb39a20e73e62f1985d2b8807365e38b4fee5d
+
 export default function _Router (state:AppState):InstanceType<typeof Router> {
     const router = new Router()
 
@@ -29,6 +32,16 @@ export default function _Router (state:AppState):InstanceType<typeof Router> {
 
     router.addRoute('/settings', () => {
         return SettingsRoute
+    })
+
+    router.addRoute('/oauth/callback', () => {
+        // OAuth callback is handled server-side.
+        // If the SPA renders on this path (server handler
+        // failed), check auth and redirect home.
+        State.checkAuth(state).then(() => {
+            state._setRoute('/')
+        })
+        return LoginPage
     })
 
     /**

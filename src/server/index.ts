@@ -147,13 +147,16 @@ app.post('/api/auth/login', async (c) => {
  * OAuth callback - exchanges code for tokens
  */
 app.get('/oauth/callback', async (c) => {
+    console.log('OAuth callback hit:', c.req.url)
+
     const code = c.req.query('code')
     const _stateParam = c.req.query('state')
     const error = c.req.query('error')
     const errorDescription = c.req.query('error_description')
 
     if (error) {
-        return c.redirect(`/login?error=${encodeURIComponent(errorDescription || error)}`)
+        return c.redirect('/login?error=' +
+            encodeURIComponent(errorDescription || error))
     }
 
     if (!code) {

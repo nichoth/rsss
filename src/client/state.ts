@@ -85,6 +85,7 @@ export function State (): AppState {
         user: signal<User | null>(null),
         authLoading: signal(true),
         authError: signal<string | null>(null),
+        isAuthenticated: computed(() => state.user.value !== null),
         // Network state
         isOnline: signal(navigator.onLine),
         // Feeds state
@@ -100,8 +101,6 @@ export function State (): AppState {
         showStarredOnly: signal(false),
         pageSize: signal(DEFAULT_PAGE_SIZE),
         selectedFeedId: signal<number | null>(null),
-        // Computed: is authenticated
-        isAuthenticated: computed(() => state.user.value !== null)
     }
 
     // Listen for online/offline events
