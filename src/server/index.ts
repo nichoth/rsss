@@ -180,8 +180,13 @@ app.post('/api/auth/callback', async (c) => {
         )
 
         if (!storedStateJson) {
+            console.error(
+                'OAuth state not found in KV:',
+                stateKey
+            )
             return c.json({
-                error: 'Invalid or expired state'
+                error: 'Invalid or expired OAuth state'
+                    + ' -- please try logging in again'
             }, 400)
         }
 

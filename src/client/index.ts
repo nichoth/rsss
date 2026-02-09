@@ -31,14 +31,14 @@ if (import.meta.env.PROD) {
         'virtual:pwa-register'
     )
 
-    registerSW({
+    const updateSW = registerSW({
         onNeedRefresh () {
             if (navigator.onLine) {
-                window.location.reload()
+                updateSW(true)
             } else {
                 window.addEventListener(
                     'online',
-                    () => window.location.reload(),
+                    () => updateSW(true),
                     { once: true }
                 )
             }

@@ -350,7 +350,7 @@ State.logout = async function (state: AppState): Promise<void> {
         state.feeds.value = []
         state.items.value = []
     })
-    window.location.href = '/login'
+    state._setRoute('/login')
 }
 
 /**
