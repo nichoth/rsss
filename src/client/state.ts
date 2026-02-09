@@ -384,15 +384,43 @@ State.addFeed = async function (
         throw new Error('Cannot add feeds while offline')
     }
 
-    const response = await api.post('feeds', { json: { url } })
-    debug('got response...', response)
-    const json = await response.json<{ feed: Feed }>()
-    debug('got json...', json)
-    state.feeds.value = [
-        ...state.feeds.value,
-        json.feed
-    ]
-    return response
+    try {
+        const response = await api.post(
+            'feeds',
+            { json: { url } }
+        )
+        debug('got response...', response)
+        const json = await response.json<{ feed: Feed }>()
+        debug('got json...', json)
+        state.feeds.value = [
+            ...state.feeds.value,
+            json.feed
+        ]
+
+        // Reload items and counts -- the server fetches
+        // feed content before responding, so items are
+        // available now.
+        await State.loadItems(state)
+        await State.loadCounts(state)
+
+        return response
+    } catch (err) {
+        // Feed already exists on the server but not
+        // in local state -- sync to pull it down.
+        if (
+            err instanceof Error &&
+            'response' in err &&
+            (err as { response:Response }).response
+                .status === 409
+        ) {
+            debug('Feed already exists, syncing...')
+            await State.sync(state)
+            return (
+                err as { response:Response }
+            ).response
+        }
+        throw err
+    }
 }
 
 /**

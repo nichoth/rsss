@@ -5,6 +5,8 @@ import { Button } from './button.js'
 import { type AppState, State } from '../state'
 import { hasLocalStorage, syncFromRemote, getSyncState } from '../db/index.js'
 import './sidebar-footer.css'
+import Debug from '@substrate-system/debug'
+const debug = Debug('rsss:view:sidebar')
 
 export const SidebarFooter: FunctionComponent<{
     state: AppState
@@ -36,6 +38,7 @@ export const SidebarFooter: FunctionComponent<{
         setSyncError(null)
 
         try {
+            debug('starting sync...')
             const result = await syncFromRemote()
             setLastSynced(result.latestUpdatedAt)
 
@@ -43,6 +46,7 @@ export const SidebarFooter: FunctionComponent<{
             await State.loadFeeds(state)
             await State.loadItems(state)
             await State.loadCounts(state)
+            debug('done syncing')
         } catch (err) {
             setSyncError(err instanceof Error ? err.message : 'Sync failed')
         } finally {
