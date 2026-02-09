@@ -144,56 +144,70 @@ app.post('/api/auth/login', async (c) => {
 })
 
 /**
- * OAuth callback - exchanges code for tokens
+ * OAuth callback -- API endpoint.
+ * The SPA handles the /oauth/callback route client-side
+ * and POSTs the params here, because Cloudflare's
+ * SPA fallback intercepts GET /oauth/callback before
+ * the Worker runs.
  */
-app.get('/oauth/callback', async (c) => {
-    console.log('OAuth callback hit:', c.req.url)
+app.post('/api/auth/callback', async (c) => {
+    const body = await c.req.json<{
+        code?:string;
+        state?:string;
+        iss?:string;
+        error?:string;
+        error_description?:string;
+    }>()
 
-    const code = c.req.query('code')
-    const _stateParam = c.req.query('state')
-    const error = c.req.query('error')
-    const errorDescription = c.req.query('error_description')
-
-    if (error) {
-        return c.redirect('/login?error=' +
-            encodeURIComponent(errorDescription || error))
+    if (body.error) {
+        return c.json({
+            error: body.error_description || body.error
+        }, 400)
     }
 
-    if (!code) {
-        return c.redirect('/login?error=No+authorization+code')
+    if (!body.code) {
+        return c.json({
+            error: 'No authorization code'
+        }, 400)
     }
 
-    // For simplicity, we'll get the state from the cookie set during login
-    // In production, you'd want to validate the state parameter properly
-    const nonce = c.req.query('state') || ''
+    const nonce = body.state || ''
 
     try {
-        // Get stored state from KV
         const stateKey = `oauth:${nonce}`
-        const storedStateJson = await c.env.SESSIONS.get(stateKey)
+        const storedStateJson = await c.env.SESSIONS.get(
+            stateKey
+        )
 
         if (!storedStateJson) {
-            return c.redirect('/login?error=Invalid+or+expired+state')
+            return c.json({
+                error: 'Invalid or expired state'
+            }, 400)
         }
 
-        const storedState = JSON.parse(storedStateJson) as OAuthState
+        const storedState = JSON.parse(
+            storedStateJson
+        ) as OAuthState
 
-        // Get auth server from the issuer in the callback
-        const iss = c.req.query('iss')
-        if (!iss) {
-            return c.redirect('/login?error=Missing+issuer')
+        if (!body.iss) {
+            return c.json({
+                error: 'Missing issuer'
+            }, 400)
         }
 
         const baseUrl = new URL(c.req.url).origin
-        const clientId = c.env.OAUTH_CLIENT_ID || `${baseUrl}/oauth/client-metadata.json`
+        const clientId = (
+            c.env.OAUTH_CLIENT_ID ||
+            `${baseUrl}/oauth/client-metadata.json`
+        )
         const redirectUri = `${baseUrl}/oauth/callback`
 
         const session = await exchangeCode(
-            code,
+            body.code,
             storedState,
             clientId,
             redirectUri,
-            iss
+            body.iss
         )
 
         // Delete the used state
@@ -219,14 +233,17 @@ app.get('/oauth/callback', async (c) => {
             maxAge: 30 * 24 * 60 * 60 // 30 days
         })
 
-        return c.redirect(storedState.returnTo || '/')
+        return c.json({
+            success: true,
+            returnTo: storedState.returnTo || '/'
+        })
     } catch (err) {
         console.error('OAuth callback error:', err)
-        const errMsg = encodeURIComponent(err instanceof Error ?
-            err.message :
-            'Authentication failed'
-        )
-        return c.redirect(`/login?error=${errMsg}`)
+        return c.json({
+            error: err instanceof Error ?
+                err.message :
+                'Authentication failed'
+        }, 500)
     }
 })
 

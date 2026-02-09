@@ -35,12 +35,10 @@ export default function _Router (state:AppState):InstanceType<typeof Router> {
     })
 
     router.addRoute('/oauth/callback', () => {
-        // OAuth callback is handled server-side.
-        // If the SPA renders on this path (server handler
-        // failed), check auth and redirect home.
-        State.checkAuth(state).then(() => {
-            state._setRoute('/')
-        })
+        // Cloudflare's SPA fallback intercepts this path
+        // before the Worker runs, so we handle it
+        // client-side by POSTing to /api/auth/callback.
+        State.handleOAuthCallback(state)
         return LoginPage
     })
 

@@ -100,7 +100,7 @@ export function State (): AppState {
         showUnreadOnly: signal(false),
         showStarredOnly: signal(false),
         pageSize: signal(DEFAULT_PAGE_SIZE),
-        selectedFeedId: signal<number | null>(null),
+        selectedFeedId: signal<number|null>(null),
     }
 
     // Listen for online/offline events
@@ -155,6 +155,68 @@ export function State (): AppState {
 const api = ky.create({
     prefixUrl: '/api',
 })
+
+/**
+ * Handle OAuth callback by POSTing params
+ * to the server API.
+ */
+State.handleOAuthCallback = async function (
+    state:AppState
+):Promise<void> {
+    const params = new URLSearchParams(
+        window.location.search
+    )
+
+    const code = params.get('code')
+    const nonce = params.get('state')
+    const iss = params.get('iss')
+    const error = params.get('error')
+    const errorDescription = params.get('error_description')
+
+    if (error) {
+        state.authError.value = errorDescription || error
+        state._setRoute('/login')
+        return
+    }
+
+    if (!code || !nonce || !iss) {
+        state.authError.value = 'Missing OAuth parameters'
+        state._setRoute('/login')
+        return
+    }
+
+    state.authLoading.value = true
+
+    try {
+        const res = await api.post('auth/callback', {
+            json: { code, state: nonce, iss }
+        })
+
+        const data = await res.json<{
+            success:boolean;
+            returnTo?:string;
+            error?:string;
+        }>()
+
+        if (data.success) {
+            await State.checkAuth(state)
+            state._setRoute(data.returnTo || '/')
+        } else {
+            state.authError.value = (
+                data.error || 'Authentication failed'
+            )
+            state._setRoute('/login')
+        }
+    } catch (err) {
+        debug('OAuth callback error:', err)
+        state.authError.value = err instanceof Error ?
+            err.message :
+            'Authentication failed'
+        state._setRoute('/login')
+    } finally {
+        state.authLoading.value = false
+    }
+}
 
 State.showAll = function (state: AppState) {
     batch(() => {
