@@ -115,8 +115,8 @@ export function State (): AppState {
         state.isOnline.value = false
     })
 
-    onRoute((path: string, data) => {
-        state.route.value = path
+    onRoute((path:string, data) => {
+        state.route.value = path.split('?').shift()
         // handle scroll position like a browser
         if (data.popstate) {
             window.scrollTo(data.scrollX, data.scrollY)
