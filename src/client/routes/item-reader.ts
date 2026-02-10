@@ -17,9 +17,13 @@ export const ItemReader:FunctionComponent<{
 
     debug('reading...', itemUrl)
 
-    const itemSignal = useComputed<undefined|null|Item>(() => {
+    const itemSignal = useComputed<
+        undefined|null|Item
+    >(() => {
         if (!state.items.value.length) return null
-        return state.items.value.find(i => i.link?.includes(itemUrl!))
+        return state.items.value.find(
+            i => i.link?.includes(itemUrl!)
+        )
     })
 
     const item = itemSignal.value
@@ -29,16 +33,21 @@ export const ItemReader:FunctionComponent<{
 
     const isStarred = !!item.is_starred
     const isRead = !!item.is_read
-    const isOnline = state.isOnline.value
 
     const handleStar = useCallback(async () => {
-        if (!isOnline) return
-        await State.toggleItemStarred(state, item!.id, !isStarred)
+        await State.toggleItemStarred(
+            state,
+            item!.id,
+            !isStarred
+        )
     }, [])
 
     async function handleToggleRead () {
-        if (!isOnline) return
-        await State.toggleItemRead(state, item!.id, !isRead)
+        await State.toggleItemRead(
+            state,
+            item!.id,
+            !isRead
+        )
     }
 
     return html`
@@ -49,24 +58,23 @@ export const ItemReader:FunctionComponent<{
                 </a>
                 <div class="reader-actions">
                     <button
-                        class="btn btn-icon ${isStarred ? 'starred' : ''}"
+                        class="btn btn-icon ${
+                            isStarred ? 'starred' : ''
+                        }"
                         onClick=${handleStar}
-                        title=${isOnline ?
-                            (isStarred ? 'Unstar' : 'Star') :
-                            'Cannot star while offline'}
-                        disabled=${!isOnline}
+                        title=${isStarred ?
+                            'Unstar' :
+                            'Star'}
                     >
-                        ${isStarred ? '★' : '☆'}
+                        ${isStarred ? '\u2605' : '\u2606'}
                     </button>
                     <button
                         class="btn btn-small"
                         onClick=${handleToggleRead}
-                        disabled=${!isOnline}
-                        title=${isOnline ?
-                            '' :
-                            'Cannot change read status while offline'}
                     >
-                        ${isRead ? 'Mark unread' : 'Mark read'}
+                        ${isRead ?
+                            'Mark unread' :
+                            'Mark read'}
                     </button>
                     ${item.link && html`
                         <a
@@ -85,7 +93,9 @@ export const ItemReader:FunctionComponent<{
                 <header class="article-header">
                     <h1>${item.title || '(No title)'}</h1>
                     <div class="article-meta">
-                        <span class="article-feed">${item.feed_title}</span>
+                        <span class="article-feed">
+                            ${item.feed_title}
+                        </span>
                             ${item.author && html`<span
                                 class="article-author"
                             >
@@ -102,7 +112,11 @@ export const ItemReader:FunctionComponent<{
                 <div
                     class="article-body"
                     dangerouslySetInnerHTML=${{
-                        __html: sanitizeHtml(item.content || item.description || '')
+                        __html: sanitizeHtml(
+                            item.content ||
+                            item.description ||
+                            ''
+                        )
                     }}
                 ></div>
             </article>

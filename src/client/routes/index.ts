@@ -62,7 +62,7 @@ export default function _Router (state:AppState):InstanceType<typeof Router> {
         const splats = match!.splats
         const itemUrl = splats[0]
         const item = state.items.value.find(i => i.link?.includes(itemUrl))
-        if (item && !item.is_read && state.isOnline.value) {
+        if (item && !item.is_read) {
             State.toggleItemRead(state, item.id, true)
         }
         return ItemReader

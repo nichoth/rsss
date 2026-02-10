@@ -4,23 +4,6 @@
     text-align: center;
 }
 
-.sync-section {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-}
-
-.sync-status {
-    color: var(--color-text-muted);
-}
-
-.sync-error {
-    color: var(--color-danger, #dc3545);
-    background: var(--color-danger-bg, #f8d7da);
-    padding: 0.25rem 0.5rem;
-    border-radius: 4px;
-}
-
 .footer-links {
     margin-top: 1rem;
     padding-top: 0.5rem;

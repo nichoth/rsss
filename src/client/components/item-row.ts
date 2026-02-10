@@ -22,17 +22,21 @@ export const ItemRow:FunctionComponent<{
 }> = function ItemRow ({ item, state }) {
     const isUnread = !item.is_read
     const isStarred = !!item.is_starred
-    const isOnline = state.isOnline.value
 
     const toggleRead = useCallback((ev:MouseEvent) => {
         ev.preventDefault()
         State.toggleItemRead(state, item.id, !item.is_read)
     }, [])
 
-    const handleStar = useCallback(async (ev:MouseEvent) => {
+    const handleStar = useCallback(async (
+        ev:MouseEvent
+    ) => {
         ev.stopPropagation()
-        if (!isOnline) return
-        await State.toggleItemStarred(state, item.id, !isStarred)
+        await State.toggleItemStarred(
+            state,
+            item.id,
+            !isStarred
+        )
     }, [])
 
     const route = itemToRoute(item)
@@ -63,7 +67,9 @@ export const ItemRow:FunctionComponent<{
                     </div>
                     ${item.description && html`
                         <p class="item-excerpt">
-                            ${stripHtml(item.description).slice(0, 200)}
+                            ${stripHtml(
+                                item.description
+                            ).slice(0, 200)}
                         </p>
                     `}
                 </div>
@@ -71,20 +77,27 @@ export const ItemRow:FunctionComponent<{
 
             <div class="item-controls">
                 <div class="item-actions">
-                    <a href="${item.link}" target="_blank" class="icon">
+                    <a
+                        href="${item.link}"
+                        target="_blank"
+                        class="icon"
+                    >
                         <new-tab></new-tab>
-                        <span class="visually-hidden">New Tab</span>
+                        <span class="visually-hidden">
+                            New Tab
+                        </span>
                     </a>
                     <button
-                        class="btn-star ${isStarred ? 'starred' : ''}"
+                        class="btn-star ${isStarred ?
+                            'starred' :
+                            ''}"
                         onClick=${handleStar}
-                        title=${isOnline ?
-                            (isStarred ? 'Unstar' : 'Star') :
-                            'Cannot star while offline'}
-                        disabled=${!isOnline}
+                        title=${isStarred ? 'Unstar' : 'Star'}
                     >
-                        ${isStarred ? '★' : '☆'}
-                        <span class="visually-hidden">star</span>
+                        ${isStarred ? '\u2605' : '\u2606'}
+                        <span class="visually-hidden">
+                            star
+                        </span>
                     </button>
                 </div>
 
@@ -94,7 +107,6 @@ export const ItemRow:FunctionComponent<{
                         onClick=${toggleRead}
                     >
                         ${item.is_read ?
-                            // is read, so click marks it unread
                             html`
                                 <tool-tip
                                     content="Mark unread"
@@ -107,7 +119,6 @@ export const ItemRow:FunctionComponent<{
                                     Mark as unread
                                 </span>
                             ` :
-                            // not read, mark as read
                             html`
                                 <tool-tip
                                     content="Mark as read"

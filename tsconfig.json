@@ -5,13 +5,12 @@
     "target": "ES2022",
     "types": [
       "vite/client",
-      "vite-plugin-pwa/client",
       "@cloudflare/workers-types/2023-07-01"
     ],
     "typeRoots": ["./node_modules"],
     "moduleResolution": "Bundler",
     "esModuleInterop": false,
-    "lib": ["ES2022", "DOM", "WebWorker"],
+    "lib": ["ES2022", "DOM"],
     "allowJs": false,
     "skipLibCheck": true,
     "outDir": "public",

@@ -6,10 +6,14 @@ import { SidebarItem } from './sidebar-item.js'
 import { SidebarFooter } from '../components/sidebar-footer.js'
 import { Button } from '../components/button.js'
 import { CloseIcon } from '../components/close.js'
-import { CacheIcon } from '../components/cache-icon.js'
 import { ELLIPSIS } from '../constants.js'
 import { ButtonIcon } from './button-icon.js'
-import { type Feed, type AppState, State, stripProtocol } from '../state.js'
+import {
+    type Feed,
+    type AppState,
+    State,
+    stripProtocol
+} from '../state.js'
 import './sidebar.css'
 import Debug from '@substrate-system/debug'
 const debug = Debug('rsss:view')
@@ -18,31 +22,32 @@ export const Sidebar:FunctionComponent<{
     state:AppState
 }> = function ({ state }) {
     const {
-        isOnline,
         feedsLoading,
         feeds,
         route,
     } = state
     const [showAddFeed, setShowAddFeed] = useState(false)
     const [addingFeed, setAddingFeed] = useState(false)
-    const [addFeedError, setAddFeedError] = useState<string|null>(null)
+    const [addFeedError, setAddFeedError] = useState<
+        string|null
+    >(null)
 
     async function handleDeleteFeed (feed:Feed) {
-        if (confirm(`Delete "${feed.title || feed.url}"?`)) {
+        if (confirm(
+            `Delete "${feed.title || feed.url}"?`
+        )) {
             debug('deleting feed', feed.id)
             await State.deleteFeed(state, feed.id)
-            debug('done deleting it...', 'feed ID: ' + feed.id)
+            debug(
+                'done deleting it...',
+                'feed ID: ' + feed.id
+            )
         }
     }
 
-    async function handleToggleCache (feed:Feed, e:Event) {
-        e.preventDefault()
-        e.stopPropagation()
-        const newStatus = feed.is_locally_cached === 0
-        await State.toggleFeedCached(state, feed.id, newStatus)
-    }
-
-    const handleAddFeed = useCallback(async (ev:MouseEvent) => {
+    const handleAddFeed = useCallback(async (
+        ev:MouseEvent
+    ) => {
         ev.preventDefault()
         const form = ev.target as HTMLFormElement
         const els = form.elements
@@ -55,14 +60,20 @@ export const Sidebar:FunctionComponent<{
         setAddFeedError(null)
 
         try {
-            const result = await State.addFeed(state, newFeedUrl.trim())
+            const result = await State.addFeed(
+                state,
+                newFeedUrl.trim()
+            )
             debug('done adding feed...', result)
 
             input.value = ''
             setShowAddFeed(false)
         } catch (_err) {
             const err = _err as Error
-            setAddFeedError((err as Error).message || 'Failed to add feed')
+            setAddFeedError(
+                (err as Error).message ||
+                'Failed to add feed'
+            )
         }
 
         setAddingFeed(false)
@@ -90,11 +101,10 @@ export const Sidebar:FunctionComponent<{
                         </a>
                         <${ButtonIcon}
                             class="btn btn-icon"
-                            onClick=${() => setShowAddFeed(!showAddFeed)}
-                            title=${isOnline.value ?
-                                'Add feed' :
-                                'Cannot add feeds while offline'}
-                            disabled=${!isOnline.value}
+                            onClick=${() => setShowAddFeed(
+                                !showAddFeed
+                            )}
+                            title="Add feed"
                         >
                             +
                         <//>
@@ -102,23 +112,20 @@ export const Sidebar:FunctionComponent<{
                 </div>
 
                 ${showAddFeed && html`
-                    <form class="add-feed-form" onSubmit=${handleAddFeed}>
+                    <form
+                        class="add-feed-form"
+                        onSubmit=${handleAddFeed}
+                    >
                         <input
                             type="url"
                             id="new-feed-url"
                             name="new-feed-url"
                             placeholder="https://example.com/feed.xml"
-                            disabled=${addingFeed || !isOnline.value}
+                            disabled=${addingFeed}
                         />
-                        <${Button}
-                            type="submit"
-                            disabled=${!isOnline.value}
-                        >
+                        <${Button} type="submit">
                             ${addingFeed ? '...' : 'Add'}
                         <//>
-                        ${!isOnline.value && html`<div class="form-error">
-                            Offline - cannot add feeds
-                        </div>`}
                         ${addFeedError && html`<div
                             class="form-error"
                         >
@@ -128,20 +135,32 @@ export const Sidebar:FunctionComponent<{
                 `}
 
                 <div class="feeds-list">
-                    <div class="sidebar-item feed-item${allFeeds ? ' active' : ''}">
-                        <a class="feed-select" href="/">All Feeds</a>
+                    <div class="sidebar-item feed-item${
+                        allFeeds ? ' active' : ''
+                    }">
+                        <a class="feed-select" href="/">
+                            All Feeds
+                        </a>
                     </div>
 
-                    ${feedsLoading.value && feeds.value.length === 0 && html`
-                        <div class="loading-text">Loading feeds...</div>
+                    ${feedsLoading.value &&
+                        feeds.value.length === 0 && html`
+                        <div class="loading-text">
+                            Loading feeds...
+                        </div>
                     `}
 
                     ${feeds.value.map(feed => {
-                        const feedPath = stripProtocol(feed.url)
-                        const isActive = route.value === `/feed/${feedPath}`
+                        const feedPath = stripProtocol(
+                            feed.url
+                        )
+                        const isActive = route.value ===
+                            `/feed/${feedPath}`
                         return html`
                             <div
-                                class="sidebar-item feed-item ${isActive ? 'active' : ''}"
+                                class="sidebar-item feed-item ${
+                                    isActive ? 'active' : ''
+                                }"
                                 key=${feed.id}
                             >
                                 <a
@@ -153,29 +172,13 @@ export const Sidebar:FunctionComponent<{
 
                             <div class="item-controls">
                                 <tool-tip
-                                    content=${feed.is_locally_cached === 1 ?
-                                        'Switch to on-demand fetching' :
-                                        'Switch to local caching'
-                                    }
+                                    content="Delete feed"
                                     delay="500"
                                 >
-                                    <button
-                                        class="btn-cache"
-                                        onClick=${(e:Event) => handleToggleCache(feed, e)}
-                                        aria-label=${feed.is_locally_cached === 1 ?
-                                            'Disable local cache' :
-                                            'Enable local cache'}
-                                        disabled=${!isOnline.value}
-                                    >
-                                        <${CacheIcon} cached=${feed.is_locally_cached === 1} />
-                                    </button>
-                                </tool-tip>
-                                <tool-tip content="Delete feed" delay="500">
                                     <button
                                         class="btn-delete"
                                         onClick=${() => handleDeleteFeed(feed)}
                                         aria-label="Delete feed"
-                                        disabled=${!isOnline.value}
                                     >
                                         <${CloseIcon} />
                                     </button>

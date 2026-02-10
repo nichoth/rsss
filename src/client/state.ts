@@ -1,123 +1,113 @@
-import { type Signal, signal, computed, batch, effect } from '@preact/signals'
+import {
+    type Signal,
+    signal,
+    computed,
+    batch,
+    effect
+} from '@preact/signals'
 import Route from 'route-event'
 import ky from 'ky'
 import Debug from '@substrate-system/debug'
-import { localAdapter } from './db/local-adapter.js'
+import { remoteAdapter } from './db/remote-adapter.js'
 const debug = Debug('rsss:state')
 
 const USER_STORAGE_KEY = 'rsss_user'
 export const DEFAULT_PAGE_SIZE = 20
 
 export interface User {
-    did: string
-    handle: string
+    did:string
+    handle:string
 }
 
 export interface Feed {
-    id: number
-    url: string
-    title: string | null
-    description: string | null
-    site_url: string | null
-    last_fetched: string | null
-    is_locally_cached: number
-    created_at: string
+    id:number
+    url:string
+    title:string|null
+    description:string|null
+    site_url:string|null
+    last_fetched:string|null
+    created_at:string
 }
 
 export interface Item {
-    id: number
-    feed_id: number
-    guid: string
-    title: string | null
-    link: string | null
-    description: string | null
-    content: string | null
-    author: string | null
-    pub_date: string | null
-    is_read: number
-    is_starred: number
-    created_at: string
-    feed_title?: string
+    id:number
+    feed_id:number
+    guid:string
+    title:string|null
+    link:string|null
+    description:string|null
+    content:string|null
+    author:string|null
+    pub_date:string|null
+    is_read:number
+    is_starred:number
+    created_at:string
+    feed_title?:string
 }
 
 export interface ItemsResponse {
-    items: Item[]
-    total: number
-    limit: number
-    offset: number
+    items:Item[]
+    total:number
+    limit:number
+    offset:number
 }
 
 export interface CountsResponse {
-    unread: number
-    starred: number
-    total: number
+    unread:number
+    starred:number
+    total:number
 }
 
 export type AppState = {
-    _setRoute: (route: string) => void,
-    route: Signal<string>,
-    user: Signal<User | null>,
-    authLoading: Signal<boolean>,
-    authError: Signal<string | null>,
-    isOnline: Signal<boolean>,
-    feeds: Signal<Feed[]>,
-    feedsLoading: Signal<boolean>,
-    items: Signal<Item[]>,
-    itemsLoading: Signal<boolean>,
-    itemsTotal: Signal<number>,
-    itemsOffset: Signal<number>,
-    counts: Signal<CountsResponse>,
-    showUnreadOnly: Signal<boolean>,
-    showStarredOnly: Signal<boolean>,
-    pageSize: Signal<number>,
-    selectedFeedId: Signal<number | null>,
-    isAuthenticated: Signal<boolean>
+    _setRoute:(route:string) => void,
+    route:Signal<string>,
+    user:Signal<User|null>,
+    authLoading:Signal<boolean>,
+    authError:Signal<string|null>,
+    feeds:Signal<Feed[]>,
+    feedsLoading:Signal<boolean>,
+    items:Signal<Item[]>,
+    itemsLoading:Signal<boolean>,
+    itemsTotal:Signal<number>,
+    itemsOffset:Signal<number>,
+    counts:Signal<CountsResponse>,
+    showUnreadOnly:Signal<boolean>,
+    showStarredOnly:Signal<boolean>,
+    pageSize:Signal<number>,
+    selectedFeedId:Signal<number|null>,
+    isAuthenticated:Signal<boolean>
 }
 
-export function State (): AppState {
+export function State ():AppState {
     const onRoute = Route()
 
-    // Route state
     const state = {
         _setRoute: onRoute.setRoute.bind(onRoute),
         route: signal(location.pathname),
-        // Auth state
-        user: signal<User | null>(null),
+        user: signal<User|null>(null),
         authLoading: signal(true),
-        authError: signal<string | null>(null),
-        isAuthenticated: computed(() => state.user.value !== null),
-        // Network state
-        isOnline: signal(navigator.onLine),
-        // Feeds state
+        authError: signal<string|null>(null),
+        isAuthenticated: computed(
+            () => state.user.value !== null
+        ),
         feeds: signal<Feed[]>([]),
         feedsLoading: signal<boolean>(false),
-        // Items state
         items: signal<Item[]>([]),
         itemsLoading: signal(false),
         itemsTotal: signal(0),
         itemsOffset: signal(0),
-        counts: signal<CountsResponse>({ unread: 0, starred: 0, total: 0 }),
+        counts: signal<CountsResponse>(
+            { unread: 0, starred: 0, total: 0 }
+        ),
         showUnreadOnly: signal(false),
         showStarredOnly: signal(false),
         pageSize: signal(DEFAULT_PAGE_SIZE),
         selectedFeedId: signal<number|null>(null),
     }
 
-    // Listen for online/offline events
-    window.addEventListener('online', () => {
-        state.isOnline.value = true
-        // Sync from remote when coming back online
-        if (state.isAuthenticated.value) {
-            State.sync(state)
-        }
-    })
-    window.addEventListener('offline', () => {
-        state.isOnline.value = false
-    })
-
     onRoute((path:string, data) => {
         state.route.value = path.split('?').shift()
-        if (data.popstate) {  // handle scroll position like a browser
+        if (data.popstate) {
             window.scrollTo(data.scrollX, data.scrollY)
         } else {
             window.scrollTo(0, 0)
@@ -126,23 +116,14 @@ export function State (): AppState {
 
     /**
      * Load data after authentication
-     * 1. Load cached data from IndexedDB immediately
-     * 2. If online, sync from remote (pull any updates)
      */
     effect(() => {
         if (!state.isAuthenticated.value) return
-        // sync from remote if online (will reload data after sync)
-        if (state.isOnline.value) {
-            State.sync(state)
-        }
-
-        // load cached data from IndexedDB
         State.loadFeeds(state)
         State.loadItems(state)
         State.loadCounts(state)
     })
 
-    // Check auth right away
     State.checkAuth(state)
 
     return state
@@ -217,7 +198,7 @@ State.handleOAuthCallback = async function (
     }
 }
 
-State.showAll = function (state: AppState) {
+State.showAll = function (state:AppState) {
     batch(() => {
         state.showStarredOnly.value = false
         state.itemsOffset.value = 0
@@ -226,7 +207,7 @@ State.showAll = function (state: AppState) {
     State.loadItems(state)
 }
 
-State.showStarred = function (state: AppState) {
+State.showStarred = function (state:AppState) {
     batch(() => {
         state.showStarredOnly.value = true
         state.itemsOffset.value = 0
@@ -239,7 +220,9 @@ State.showStarred = function (state: AppState) {
 /**
  * Check authentication status
  */
-State.checkAuth = async function (state:AppState):Promise<void> {
+State.checkAuth = async function (
+    state:AppState
+):Promise<void> {
     state.authLoading.value = true
     state.authError.value = null
 
@@ -248,15 +231,20 @@ State.checkAuth = async function (state:AppState):Promise<void> {
 
         if (response.ok) {
             const data = await response.json<{
-                authenticated: boolean;
-                did: string;
-                handle: string
+                authenticated:boolean;
+                did:string;
+                handle:string
             }>()
             if (data.authenticated) {
-                const user = { did: data.did, handle: data.handle }
+                const user = {
+                    did: data.did,
+                    handle: data.handle
+                }
                 state.user.value = user
-                // Cache user for offline use
-                localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user))
+                localStorage.setItem(
+                    USER_STORAGE_KEY,
+                    JSON.stringify(user)
+                )
             } else {
                 state.user.value = null
                 localStorage.removeItem(USER_STORAGE_KEY)
@@ -266,22 +254,7 @@ State.checkAuth = async function (state:AppState):Promise<void> {
             localStorage.removeItem(USER_STORAGE_KEY)
         }
     } catch {
-        // Network error - check if we're offline
-        if (!navigator.onLine) {
-            // Try to load cached user for offline mode
-            const cachedUser = localStorage.getItem(USER_STORAGE_KEY)
-            if (cachedUser) {
-                try {
-                    state.user.value = JSON.parse(cachedUser) as User
-                    debug('Using cached user for offline mode')
-                } catch {
-                    state.user.value = null
-                }
-            }
-            // Don't clear user if we're offline and have cached data
-        } else {
-            state.user.value = null
-        }
+        state.user.value = null
     } finally {
         state.authLoading.value = false
     }
@@ -290,21 +263,32 @@ State.checkAuth = async function (state:AppState):Promise<void> {
 /**
  * Start OAuth login flow
  */
-State.login = async function (state: AppState, handle: string): Promise<void> {
+State.login = async function (
+    state:AppState,
+    handle:string
+):Promise<void> {
     state.authLoading.value = true
     state.authError.value = null
 
     try {
-        const response = await api.post('auth/login', { json: { handle } })
+        const response = await api.post(
+            'auth/login',
+            { json: { handle } }
+        )
 
         if (!response.ok) {
-            const error = await response.json<{ error: string }>()
-            throw new Error(error.error || 'Login failed')
+            const error = await response.json<{
+                error:string
+            }>()
+            throw new Error(
+                error.error || 'Login failed'
+            )
         }
 
-        const data = await response.json<{ authUrl: string }>()
+        const data = await response.json<{
+            authUrl:string
+        }>()
 
-        // Redirect to OAuth provider
         window.location.href = data.authUrl
     } catch (err) {
         batch(() => {
@@ -319,7 +303,9 @@ State.login = async function (state: AppState, handle: string): Promise<void> {
 /**
  * Dev mode login (for testing)
  */
-State.devLogin = async function (state: AppState): Promise<void> {
+State.devLogin = async function (
+    state:AppState
+):Promise<void> {
     state.authLoading.value = true
 
     try {
@@ -338,11 +324,13 @@ State.devLogin = async function (state: AppState): Promise<void> {
 /**
  * Logout
  */
-State.logout = async function (state: AppState): Promise<void> {
+State.logout = async function (
+    state:AppState
+):Promise<void> {
     try {
         await api.post('auth/logout')
     } catch {
-        // Ignore logout errors (might be offline)
+        // Ignore logout errors
     }
     localStorage.removeItem(USER_STORAGE_KEY)
     batch(() => {
@@ -354,14 +342,15 @@ State.logout = async function (state: AppState): Promise<void> {
 }
 
 /**
- * Load feeds from local IndexedDB
+ * Load feeds from remote DB
  */
-State.loadFeeds = async function (state: AppState): Promise<void> {
-    if (!localAdapter.isAvailable()) return
+State.loadFeeds = async function (
+    state:AppState
+):Promise<void> {
     state.feedsLoading.value = true
 
     try {
-        const feeds = await localAdapter.getFeeds()
+        const feeds = await remoteAdapter.getFeeds()
         batch(() => {
             state.feeds.value = feeds
             state.feedsLoading.value = false
@@ -373,17 +362,12 @@ State.loadFeeds = async function (state: AppState): Promise<void> {
 }
 
 /**
- * Add a new feed (requires online)
+ * Add a new feed
  */
 State.addFeed = async function (
-    state: AppState,
-    url: string
-): Promise<Response> {
-    if (!state.isOnline.value) {
-        debug('offline...')
-        throw new Error('Cannot add feeds while offline')
-    }
-
+    state:AppState,
+    url:string
+):Promise<Response> {
     try {
         const response = await api.post(
             'feeds',
@@ -391,23 +375,20 @@ State.addFeed = async function (
         )
         debug('got response...', response)
 
-        // Server wrote the feed and fetched its items.
-        // Sync to pull everything into IndexedDB, then
-        // reload UI from the local store.
-        await State.sync(state)
+        await State.loadFeeds(state)
+        await State.loadItems(state)
+        await State.loadCounts(state)
 
         return response
     } catch (err) {
-        // Feed already exists on the server but not
-        // in local state -- sync to pull it down.
         if (
             err instanceof Error &&
             'response' in err &&
             (err as { response:Response }).response
                 .status === 409
         ) {
-            debug('Feed already exists, syncing...')
-            await State.sync(state)
+            debug('Feed already exists, reloading...')
+            await State.loadFeeds(state)
             return (
                 err as { response:Response }
             ).response
@@ -417,37 +398,26 @@ State.addFeed = async function (
 }
 
 /**
- * Delete a feed (requires online)
+ * Delete a feed
  */
 State.deleteFeed = async function (
-    state: AppState,
-    feedId: number
-): Promise<{ success: boolean; error?: string }> {
-    if (!state.isOnline.value) {
-        return { success: false, error: 'Cannot delete feeds while offline' }
-    }
-
+    state:AppState,
+    feedId:number
+):Promise<{ success:boolean; error?:string }> {
     try {
-        // Delete from remote API
         await api.delete(`feeds/${feedId}`)
 
-        // Delete from local IndexedDB
-        if (localAdapter.isAvailable()) {
-            await localAdapter.deleteFeed(feedId)
-        }
-
-        // Reload data to update UI
         await State.loadFeeds(state)
         await State.loadItems(state)
         await State.loadCounts(state)
 
         return { success: true }
     } catch (err) {
-        // If the feed doesn't exist remotely (404), clean it up locally
         if (err instanceof Error && 'response' in err) {
-            const response = (err as { response: Response }).response
+            const response = (
+                err as { response:Response }
+            ).response
             if (response.status === 404) {
-                await localAdapter.deleteFeed(feedId)
                 await State.loadFeeds(state)
                 await State.loadItems(state)
                 await State.loadCounts(state)
@@ -457,62 +427,46 @@ State.deleteFeed = async function (
 
         return {
             success: false,
-            error: err instanceof Error ? err.message : 'Failed to delete feed'
+            error: err instanceof Error ?
+                err.message :
+                'Failed to delete feed'
         }
     }
 }
 
 /**
- * Toggle whether a feed is locally cached
+ * Refresh all feeds
  */
-State.toggleFeedCached = async function (
-    state: AppState,
-    feedId: number,
-    isCached: boolean
-): Promise<void> {
-    try {
-        await localAdapter.updateFeed(feedId, { is_locally_cached: isCached ? 1 : 0 })
-        // Reload feeds to update UI state
-        await State.loadFeeds(state)
-        // Reload items because visibility might change based on cache status?
-        // Or if we were filtering. But good to be safe.
-        await State.loadItems(state)
-    } catch (err) {
-        debug('Error toggling feed cache:', err)
-    }
-}
-
-/**
- * Refresh all feeds (requires online)
- */
-State.refreshFeeds = async function (state: AppState): Promise<void> {
-    if (!state.isOnline.value) return
-
+State.refreshFeeds = async function (
+    state:AppState
+):Promise<void> {
     state.feedsLoading.value = true
 
     try {
         await api.post('feeds/refresh')
-        // Sync to update local IndexedDB, then reload UI
-        await State.sync(state)
+        await State.loadFeeds(state)
+        await State.loadItems(state)
+        await State.loadCounts(state)
     } finally {
         state.feedsLoading.value = false
     }
 }
 
 /**
- * Load items from local IndexedDB with current filters
+ * Load items from remote DB with current filters
  */
-State.loadItems = async function (state:AppState):Promise<void> {
-    if (!localAdapter.isAvailable()) return
+State.loadItems = async function (
+    state:AppState
+):Promise<void> {
     state.itemsLoading.value = true
 
     try {
-        const options: {
-            feedId?: number
-            isRead?: boolean
-            isStarred?: boolean
-            limit?: number
-            offset?: number
+        const options:{
+            feedId?:number
+            isRead?:boolean
+            isStarred?:boolean
+            limit?:number
+            offset?:number
         } = {
             limit: state.pageSize.value,
             offset: state.itemsOffset.value
@@ -528,7 +482,7 @@ State.loadItems = async function (state:AppState):Promise<void> {
             options.isStarred = true
         }
 
-        const data = await localAdapter.getItems(options)
+        const data = await remoteAdapter.getItems(options)
         state.items.value = data.items as Item[]
         state.itemsTotal.value = data.total
     } catch (err) {
@@ -539,13 +493,13 @@ State.loadItems = async function (state:AppState):Promise<void> {
 }
 
 /**
- * Load counts from local IndexedDB
+ * Load counts from remote DB
  */
-State.loadCounts = async function (state: AppState): Promise<void> {
-    if (!localAdapter.isAvailable()) return
-
+State.loadCounts = async function (
+    state:AppState
+):Promise<void> {
     try {
-        const counts = await localAdapter.getCounts()
+        const counts = await remoteAdapter.getCounts()
         state.counts.value = counts
     } catch (err) {
         debug('Error loading counts:', err)
@@ -553,67 +507,26 @@ State.loadCounts = async function (state: AppState): Promise<void> {
 }
 
 /**
- * Sync data from remote server to local IndexedDB
- * This pulls any changes since the last sync and updates the local cache
- */
-State.sync = async function (state:AppState):Promise<void> {
-    if (!state.isOnline.value) {
-        debug('Cannot sync while offline')
-        return
-    }
-
-    if (!localAdapter.isAvailable()) {
-        debug('IndexedDB not available')
-        return
-    }
-
-    try {
-        debug('Syncing from remote...')
-        await localAdapter.sync()
-        debug('Sync complete')
-
-        // Reload data from IndexedDB to update UI
-        await State.loadFeeds(state)
-        await State.loadItems(state)
-        await State.loadCounts(state)
-        debug('Sync complete again...', state.feeds.value)
-    } catch (err) {
-        debug('Sync error:', err)
-        // Don't throw - just log the error and continue with cached data
-    }
-}
-
-/**
- * Mark item as read/unread (requires online)
+ * Mark item as read/unread
  */
 State.toggleItemRead = async function (
     state:AppState,
     itemId:number,
     isRead:boolean
-): Promise<void> {
-    if (!state.isOnline.value) {
-        debug('Cannot toggle read status while offline')
-        return
-    }
-
+):Promise<void> {
     try {
         const response = await api.patch(`items/${itemId}`, {
             json: { is_read: isRead }
         })
 
         if (response.ok) {
-            // Update local UI state
-            state.items.value = state.items.value.map(item =>
-                item.id === itemId ? {
+            // Optimistic UI update
+            state.items.value = state.items.value.map(
+                item => item.id === itemId ? {
                     ...item,
                     is_read: isRead ? 1 : 0
                 } : item
             )
-
-            // Update local IndexedDB to keep in sync
-            if (localAdapter.isAvailable()) {
-                await localAdapter.updateItem(itemId, { is_read: isRead })
-            }
 
             await State.loadCounts(state)
         }
@@ -623,38 +536,27 @@ State.toggleItemRead = async function (
 }
 
 /**
- * Toggle item starred (requires online)
+ * Toggle item starred
  */
 State.toggleItemStarred = async function (
-    state: AppState,
-    itemId: number,
-    isStarred: boolean
-): Promise<void> {
-    if (!state.isOnline.value) {
-        debug('Cannot toggle starred status while offline')
-        return
-    }
-
+    state:AppState,
+    itemId:number,
+    isStarred:boolean
+):Promise<void> {
     try {
         const response = await api.patch(`items/${itemId}`, {
             json: { is_starred: isStarred }
         })
 
         if (response.ok) {
-            // Update local UI state immediately for responsiveness
             batch(() => {
-                state.items.value = state.items.value.map(item =>
-                    item.id === itemId ? {
+                state.items.value = state.items.value.map(
+                    item => item.id === itemId ? {
                         ...item,
                         is_starred: isStarred ? 1 : 0
                     } : item
                 )
             })
-
-            // Update local IndexedDB to keep in sync
-            if (localAdapter.isAvailable()) {
-                await localAdapter.updateItem(itemId, { is_starred: isStarred })
-            }
 
             await State.loadCounts(state)
         }
@@ -664,24 +566,20 @@ State.toggleItemStarred = async function (
 }
 
 /**
- * Mark all items as read (requires online)
+ * Mark all items as read
  */
-State.markAllRead = async function (state: AppState, feedId?: number): Promise<void> {
-    if (!state.isOnline.value) {
-        debug('Cannot mark all read while offline')
-        return
-    }
-
+State.markAllRead = async function (
+    state:AppState,
+    feedId?:number
+):Promise<void> {
     try {
         const body = feedId ? { feed_id: feedId } : {}
-        const response = await api.post('items/mark-all-read', { json: body })
+        const response = await api.post(
+            'items/mark-all-read',
+            { json: body }
+        )
 
         if (response.ok) {
-            // Update local IndexedDB to keep in sync
-            if (localAdapter.isAvailable()) {
-                await localAdapter.markAllRead(feedId)
-            }
-
             await State.loadItems(state)
             await State.loadCounts(state)
         }
@@ -691,20 +589,25 @@ State.markAllRead = async function (state: AppState, feedId?: number): Promise<v
 }
 
 /**
- * Strip protocol from a URL (e.g., "https://example.com/path" -> "example.com/path")
+ * Strip protocol from a URL
  */
-export const stripProtocol = function (url: string): string {
+export const stripProtocol = function (
+    url:string
+):string {
     return url.replace(/^https?:\/\//, '')
 }
 
 /**
- * Convert an item's link to a route path like /post/domain.tld/feed/path
+ * Convert an item's link to a route path
  */
-export const itemToRoute = function (item: Item): string | null {
+export const itemToRoute = function (
+    item:Item
+):string|null {
     if (!item.link) return null
     try {
         const url = new URL(item.link)
-        return '/post/' + url.host + url.pathname + url.search + url.hash
+        return '/post/' + url.host +
+            url.pathname + url.search + url.hash
     } catch {
         return null
     }
@@ -713,16 +616,16 @@ export const itemToRoute = function (item: Item): string | null {
 /**
  * Clear selected item and navigate back to list
  */
-State.clearSelectedItem = function (state: AppState): void {
+State.clearSelectedItem = function (state:AppState):void {
     state._setRoute('/')
 }
 
 /**
- * Check if a route matches an item route pattern (/domain.tld/path)
+ * Check if a route matches an item route pattern
  */
-export const isItemRoute = function (route:string):boolean {
-    // Item routes start with / followed by a domain (contains a dot)
-    // but exclude /login and other app routes
+export const isItemRoute = function (
+    route:string
+):boolean {
     if (
         route === '/' ||
         route.startsWith('/login') ||

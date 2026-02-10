@@ -24,12 +24,6 @@ if (import.meta.env.DEV || import.meta.env.MODE === 'staging') {
 }
 
 /**
- * Service worker -- registered automatically by
- * vite-plugin-pwa with registerType: 'autoUpdate'.
- * New versions activate silently without page reload.
- */
-
-/**
  * Main app
  */
 export const App:FunctionComponent<{
