@@ -12,6 +12,8 @@ import type {
     SyncState,
     SyncResponse
 } from './types.js'
+import Debug from '@substrate-system/debug'
+const debug = Debug('rsss:db')
 
 // Database schema version
 const DB_VERSION = 1
@@ -256,17 +258,23 @@ export const localAdapter: DbAdapter & {
 
         // Fetch from remote - credentials included automatically
         // for same-origin
+        debug('starting sync in db...', url.href)
         const response = await fetch(url.toString(), {
             method: 'GET',
             credentials: 'include'
         })
+
+        debug('got a response', response.status)
 
         if (!response.ok) {
             throw new Error(`Sync failed: ${response.status} ` +
                 `${response.statusText}`)
         }
 
-        const data = await response.json() as SyncResponse
+        const json = await response.json()
+        debug('down here', json)
+
+        const data = json as SyncResponse
 
         // Upsert feeds
         // On full sync remove feeds that no longer exist remotely

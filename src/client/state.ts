@@ -583,6 +583,7 @@ State.sync = async function (state:AppState):Promise<void> {
         await State.loadFeeds(state)
         await State.loadItems(state)
         await State.loadCounts(state)
+        debug('Sync complete again...', state.feeds.value)
     } catch (err) {
         debug('Sync error:', err)
         // Don't throw - just log the error and continue with cached data

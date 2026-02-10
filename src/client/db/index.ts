@@ -50,7 +50,7 @@ export async function getLocalAdapter () {
  * Sync from remote server to local IndexedDB
  * Uses the current origin - user is already authenticated via session cookie
  */
-export async function syncFromRemote (): Promise<SyncResponse> {
+export async function syncFromRemote ():Promise<SyncResponse> {
     if (!hasLocalStorage()) {
         throw new Error('IndexedDB not available')
     }
