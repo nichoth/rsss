@@ -66,17 +66,22 @@
 
             &:checked {
                 &::before {
-                    transform: translate(-60%, -47%) rotate(45deg) scale(1);
+                    /* transform: translate(-60%, -47%) rotate(45deg) scale(1); */
+                    transform: translate(-70%, -47%) rotate(45deg) scale(1);
+                }
+
+                &::after {
+                    transform: translate(-65%, -46%) rotate(-45deg) scale(1);
                 }
             }
 
             &::before {
-                top: calc(50%);
-                left: calc(50%);
+                top: 50%;
+                left: 50%;
             }
 
             &::after {
-                top: calc(50%);
+                top: 50%;
             }
         }
     }
