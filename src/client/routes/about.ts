@@ -55,6 +55,22 @@ export const AboutRoute:FunctionComponent<{
             </section>
 
             <section>
+                <h2>Local</h2>
+                <p>
+                    The end-goal for this is to fully support offline
+                    reading. That is, provide and intuitive UI to control
+                    which feeds are saved locally, and which are saved in the
+                    cloud only.
+                </p>
+
+                <p>
+                    That's on the todo list though, because I do not want
+                    to release a bad UX, and it's hard to devote a lot of time
+                    to this, since it is not a job.
+                </p>
+            </section>
+
+            <section>
                 <h2>Privacy</h2>
                 <p>
                     Your feeds and reading history are private
