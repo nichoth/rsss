@@ -26,7 +26,7 @@
     "@substrate-system/routes": "^5.0.0",
     "@substrate-system/state": "^0.0.4",
     "@substrate-system/tool-tip": "^0.0.5",
-    "hono": "^4.11.3",
+    "hono": "^4.11.9",
     "htm": "^3.1.1",
     "ky": "^1.14.1",
     "preact": "^10.28.0",
