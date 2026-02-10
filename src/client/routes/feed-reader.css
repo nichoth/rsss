@@ -64,13 +64,19 @@
             width: 1.2rem;
             height: 1.2rem;
 
+            &:checked {
+                &::before {
+                    transform: translate(-60%, -47%) rotate(45deg) scale(1);
+                }
+            }
+
             &::before {
-                top: calc(50% + 1px);
-                left: calc(50% - 1px);
+                top: calc(50%);
+                left: calc(50%);
             }
 
             &::after {
-                top: calc(50% + 1px);
+                top: calc(50%);
             }
         }
     }
