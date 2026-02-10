@@ -390,18 +390,11 @@ State.addFeed = async function (
             { json: { url } }
         )
         debug('got response...', response)
-        const json = await response.json<{ feed: Feed }>()
-        debug('got json...', json)
-        state.feeds.value = [
-            ...state.feeds.value,
-            json.feed
-        ]
 
-        // Reload items and counts -- the server fetches
-        // feed content before responding, so items are
-        // available now.
-        await State.loadItems(state)
-        await State.loadCounts(state)
+        // Server wrote the feed and fetched its items.
+        // Sync to pull everything into IndexedDB, then
+        // reload UI from the local store.
+        await State.sync(state)
 
         return response
     } catch (err) {
