@@ -245,25 +245,13 @@ export const localAdapter: DbAdapter & {
     async sync ():Promise<SyncResponse> {
         const db = await getDb()
 
-        // Get last sync time
-        const syncState = await this.getSyncState()
-        const since = syncState.lastSyncedAt
-
-        // Build sync URL - use current origin, user is
-        // authenticated via session cookie
+        // Always do a full sync -- the server DO is the
+        // source of truth and personal RSS data is small
+        // enough that incremental sync is unnecessary.
         const url = new URL(
             '/api/sync',
             window.location.origin
         )
-        if (since) {
-            // Normalize to SQLite format so string
-            // comparison works for incremental sync.
-            const normalized = since
-                .replace('T', ' ')
-                .replace('Z', '')
-                .split('.')[0]
-            url.searchParams.set('since', normalized)
-        }
 
         // Fetch from remote - credentials included automatically
         // for same-origin

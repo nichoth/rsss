@@ -191,8 +191,13 @@ export class UserDO extends DurableObject<Env> {
         // Add a new feed
         app.post('/feeds', async (c) => {
             const body = await c.req.json<{ url: string }>()
+            console.log('[DO] POST /feeds', body.url)
+
             if (!body.url) {
-                return c.json({ error: 'URL is required' }, 400)
+                return c.json(
+                    { error: 'URL is required' },
+                    400
+                )
             }
 
             try {
@@ -203,7 +208,14 @@ export class UserDO extends DurableObject<Env> {
                 ).toArray()
 
                 if (existing.length > 0) {
-                    return c.json({ error: 'Feed already exists' }, 409)
+                    console.log(
+                        '[DO] Feed already exists:',
+                        body.url
+                    )
+                    return c.json(
+                        { error: 'Feed already exists' },
+                        409
+                    )
                 }
 
                 // Insert the feed
@@ -211,27 +223,58 @@ export class UserDO extends DurableObject<Env> {
                     'INSERT INTO feeds (url) VALUES (?)',
                     body.url
                 )
+                console.log(
+                    '[DO] Inserted feed:',
+                    body.url
+                )
 
                 const feed = this.sql.exec(
                     'SELECT * FROM feeds WHERE url = ?',
                     body.url
                 ).one()
+                console.log(
+                    '[DO] Feed row:',
+                    JSON.stringify(feed)
+                )
 
-                // Fetch feed content before responding so client sees
-                // items immediately
-                await this.fetchFeed(feed as unknown as Feed)
+                // Fetch feed content before responding
+                // so client sees items immediately
+                await this.fetchFeed(
+                    feed as unknown as Feed
+                )
 
-                // Return updated feed with title/description from fetch
+                // Count items after fetch
+                const itemCount = this.sql.exec(
+                    'SELECT COUNT(*) as count' +
+                    ' FROM items WHERE feed_id = ?',
+                    (feed as unknown as Feed).id
+                ).one()
+                console.log(
+                    '[DO] Items after fetch:',
+                    JSON.stringify(itemCount)
+                )
+
+                // Return updated feed with title/description
                 const updatedFeed = this.sql.exec(
                     'SELECT * FROM feeds WHERE url = ?',
                     body.url
                 ).one()
 
-                return c.json({ feed: updatedFeed }, 201)
+                return c.json(
+                    { feed: updatedFeed },
+                    201
+                )
             } catch (_err) {
                 const err = _err as Error
-                console.log('**error**', err.message)
-                return c.json({ error: 'Failed to add feed' }, 500)
+                console.error(
+                    '[DO] Error adding feed:',
+                    err.message,
+                    err.stack
+                )
+                return c.json(
+                    { error: 'Failed to add feed' },
+                    500
+                )
             }
         })
 
@@ -488,6 +531,10 @@ export class UserDO extends DurableObject<Env> {
      * Fetch and parse an RSS/Atom feed
      */
     private async fetchFeed (feed: Feed): Promise<void> {
+        console.log(
+            '[DO] fetchFeed:',
+            feed.url
+        )
         try {
             const response = await fetch(feed.url, {
                 headers: {
@@ -496,12 +543,25 @@ export class UserDO extends DurableObject<Env> {
             })
 
             if (!response.ok) {
-                console.error(`Failed to fetch feed ${feed.url}: ${response.status}`)
+                console.error(
+                    `[DO] Feed fetch failed` +
+                    ` ${feed.url}: ${response.status}`
+                )
                 return
             }
 
             const text = await response.text()
+            console.log(
+                '[DO] Feed response length:',
+                text.length
+            )
             const parsedFeed = this.parseFeed(text)
+            console.log(
+                '[DO] Parsed items:',
+                parsedFeed.items.length,
+                'title:',
+                parsedFeed.title
+            )
 
             // Update feed metadata
             if (parsedFeed.title || parsedFeed.description || parsedFeed.link) {

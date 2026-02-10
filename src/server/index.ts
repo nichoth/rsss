@@ -362,6 +362,11 @@ app.all('/api/*', requireAuth, async (c) => {
     const doUrl = new URL(doPath || '/', 'http://do')
     doUrl.search = url.search
 
+    console.log(
+        `[proxy] ${c.req.method} ${doPath}` +
+        ` -> DO(${session.did})`
+    )
+
     // Forward the request to the DO
     const response = await stub.fetch(
         new Request(doUrl.toString(), {
@@ -369,6 +374,10 @@ app.all('/api/*', requireAuth, async (c) => {
             headers: c.req.raw.headers,
             body: c.req.raw.body
         })
+    )
+
+    console.log(
+        `[proxy] DO responded ${response.status}`
     )
 
     return response
