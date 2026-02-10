@@ -239,7 +239,7 @@ State.showStarred = function (state: AppState) {
 /**
  * Check authentication status
  */
-State.checkAuth = async function (state: AppState): Promise<void> {
+State.checkAuth = async function (state:AppState):Promise<void> {
     state.authLoading.value = true
     state.authError.value = null
 

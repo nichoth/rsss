@@ -249,11 +249,20 @@ export const localAdapter: DbAdapter & {
         const syncState = await this.getSyncState()
         const since = syncState.lastSyncedAt
 
-        // Build sync URL - use current origin, user is authenticated via
-        // session cookie
-        const url = new URL('/api/sync', window.location.origin)
+        // Build sync URL - use current origin, user is
+        // authenticated via session cookie
+        const url = new URL(
+            '/api/sync',
+            window.location.origin
+        )
         if (since) {
-            url.searchParams.set('since', since)
+            // Normalize to SQLite format so string
+            // comparison works for incremental sync.
+            const normalized = since
+                .replace('T', ' ')
+                .replace('Z', '')
+                .split('.')[0]
+            url.searchParams.set('since', normalized)
         }
 
         // Fetch from remote - credentials included automatically

@@ -454,8 +454,20 @@ export class UserDO extends DurableObject<Env> {
                 'SELECT MAX(updated_at) as latest FROM items'
             ).one() as { latest: string | null }
 
-            const syncedAt = new Date().toISOString()
-            const latestUpdatedAt = [latestFeed?.latest, latestItem?.latest]
+            // Use SQLite-compatible format so string
+            // comparisons work for incremental sync.
+            // SQLite datetime('now') => '2026-02-10 00:08:00'
+            // JS toISOString()       => '2026-02-10T00:08:00.000Z'
+            // Space < 'T' in ASCII, which breaks `>` queries.
+            const syncedAt = new Date()
+                .toISOString()
+                .replace('T', ' ')
+                .replace('Z', '')
+                .split('.')[0]
+            const latestUpdatedAt = [
+                latestFeed?.latest,
+                latestItem?.latest
+            ]
                 .filter(Boolean)
                 .sort()
                 .pop() || syncedAt
