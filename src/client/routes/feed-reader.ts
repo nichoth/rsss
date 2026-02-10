@@ -25,7 +25,6 @@ export const FeedReader:FunctionComponent<{
         itemsTotal,
         itemsOffset,
         showUnreadOnly,
-        isOnline,
         pageSize,
     } = state
 
@@ -123,10 +122,7 @@ export const FeedReader:FunctionComponent<{
                         <button
                             class="btn btn-small"
                             onClick=${handleMarkAllRead}
-                            disabled=${counts.value.unread === 0 || !isOnline.value}
-                            title=${isOnline.value ?
-                                '' :
-                                'Cannot mark read while offline'}
+                            disabled=${counts.value.unread === 0}
                         >
                             Mark all read
                         </button>

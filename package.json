@@ -9,10 +9,7 @@
     "test": "esbuild ./test/index.ts --bundle | tapout",
     "test:sync": "esbuild ./test/sync.ts --bundle | tapout",
     "test:db": "esbuild ./test/db-adapter.ts --bundle | tapout",
-    "build:sw": "esbuild src/sw/sw.ts --bundle --outfile=public/sw.js --format=iife --minify",
-    "build:sw:dev": "esbuild src/sw/sw.ts --bundle --outfile=_public/sw.js --format=iife",
-    "build": "mkdir -p ./public && rm -rf ./public/* && npx vite build $([ \"$NODE_ENV\" != \"production\" ] && echo \"--mode staging\") && npm run build:sw",
-    "prestart": "npm run build:sw:dev",
+    "build": "mkdir -p ./public && rm -rf ./public/* && npx vite build $([ \"$NODE_ENV\" != \"production\" ] && echo \"--mode staging\")",
     "start": "vite",
     "toc": "markdown-toc --maxdepth 3 -i README.md",
     "preversion": "npm run lint",
@@ -31,7 +28,6 @@
     "@substrate-system/tool-tip": "^0.0.5",
     "hono": "^4.11.3",
     "htm": "^3.1.1",
-    "idb": "^8.0.3",
     "ky": "^1.14.1",
     "preact": "^10.28.0",
     "route-event": "^7.4.0"
@@ -58,7 +54,6 @@
     "tap-spec": "^5.0.0",
     "typescript": "^5.9.3",
     "vite": "^7.3.1",
-    "vite-plugin-pwa": "^1.2.0",
     "wrangler": "^4.56.0"
   },
   "author": "nichoth <nichoth@nichoth.com> (https://nichoth.com)"

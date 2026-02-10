@@ -4,7 +4,6 @@ import browserslist from 'browserslist'
 import { browserslistToTargets } from 'lightningcss'
 import preact from '@preact/preset-vite'
 import { cloudflare } from '@cloudflare/vite-plugin'
-import { VitePWA } from 'vite-plugin-pwa'
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
@@ -21,14 +20,6 @@ export default defineConfig(({ mode }) => {
         },
         plugins: [
             cloudflare(),
-            VitePWA({
-                registerType: 'autoUpdate',
-                devOptions: { enabled: false },
-                workbox: {
-                    navigateFallback: '/index.html',
-                    navigateFallbackDenylist: [/^\/api\//],
-                },
-            }),
             preact({
                 devtoolsInProd: false,
                 prefreshEnabled: true,

@@ -2,7 +2,6 @@
 @import url("@substrate-system/a11y");
 @import url("@substrate-system/check-box/css");
 @import url("@substrate-system/tool-tip/css");
-@import url("./components/status-indicator.css");
 @import url("./routes/feed-reader.css");
 
 :root {
