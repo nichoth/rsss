@@ -269,7 +269,6 @@ export const localAdapter: DbAdapter & {
         }
 
         const json = await response.json()
-        debug('down here', json)
 
         const data = json as SyncResponse
 
@@ -332,10 +331,11 @@ export const localAdapter: DbAdapter & {
         }
         await itemTx.done
 
-        // Update sync state
+        // Update sync state with current local time
+        // (used for display only -- syncs are always full)
         await db.put('sync_state', {
             id: 1,
-            last_synced_at: data.latestUpdatedAt
+            last_synced_at: new Date().toISOString()
         })
 
         return data

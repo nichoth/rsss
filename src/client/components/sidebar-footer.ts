@@ -39,8 +39,8 @@ export const SidebarFooter: FunctionComponent<{
 
         try {
             debug('starting sync...')
-            const result = await syncFromRemote()
-            setLastSynced(result.latestUpdatedAt)
+            await syncFromRemote()
+            setLastSynced(new Date().toISOString())
 
             // Reload data after sync
             await State.loadFeeds(state)
