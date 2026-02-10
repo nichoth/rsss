@@ -84,7 +84,7 @@ export const AboutRoute:FunctionComponent<{
 
                 <p>
                     This is considered to be "alpha" quality
-                    software at this point.
+                    software at this point, hence the donation links.
                 </p>
             </section>
         </article>
