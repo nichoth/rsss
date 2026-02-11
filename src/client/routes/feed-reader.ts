@@ -134,12 +134,11 @@ export const FeedReader:FunctionComponent<{
                         `}
 
                         ${items.value.map(item => html`
-                            <li>
-                            <${ItemRow}
-                                key=${item.id}
-                                item=${item}
-                                state=${state}
-                            />
+                            <li key=${item.id}>
+                                <${ItemRow}
+                                    item=${item}
+                                    state=${state}
+                                />
                             </li>
                         `)}
 

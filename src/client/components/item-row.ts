@@ -99,9 +99,7 @@ export const ItemRow:FunctionComponent<{
                             star
                         </span>
                     </button>
-                </div>
 
-                <div class="item-actions">
                     <button
                         class="icon"
                         onClick=${toggleRead}
