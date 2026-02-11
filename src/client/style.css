@@ -2,6 +2,7 @@
 @import url("@substrate-system/a11y");
 @import url("@substrate-system/check-box/css");
 @import url("@substrate-system/tool-tip/css");
+@import url("@substrate-system/hamburger-two/css");
 @import url("./routes/feed-reader.css");
 
 :root {
@@ -57,6 +58,7 @@ button {
     cursor: pointer;
     font-family: inherit;
     font-size: inherit;
+    min-width: 8rem;
 
     &.icon {
         display: flex;
@@ -428,3 +430,8 @@ new-tab {
     }
 }
 
+@media screen and (max-width: 700px) {
+    .fullname {
+        display: none;
+    }
+}

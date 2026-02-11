@@ -22,6 +22,7 @@
     "@substrate-system/a11y": "^0.0.17",
     "@substrate-system/check-box": "^0.0.11",
     "@substrate-system/css-normalize": "^0.0.13",
+    "@substrate-system/hamburger-two": "^0.0.11",
     "@substrate-system/icons": "^0.1.29",
     "@substrate-system/routes": "^5.0.0",
     "@substrate-system/state": "^0.0.4",

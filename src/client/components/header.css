@@ -54,3 +54,110 @@
         }
     }
 }
+
+/* Hamburger -- hidden on desktop, visible on mobile */
+hamburger-two {
+    display: none;
+}
+
+@keyframes fade-in {
+    0% { opacity: 0; }
+    100% { opacity: 0.8; }
+}
+
+@keyframes fade-out {
+    0% { opacity: 0.8; }
+    100% { opacity: 0; }
+}
+
+.mobile-nav-menu {
+    display: none;
+    position: absolute;
+    width: 100vw;
+    height: 100vh;
+    color: white;
+    background-color: black;
+    animation: fade-in var(--fade-in-time, 0.4s);
+
+    & nav, & > div, & > span {
+        max-width: 80vw;
+        margin: 0 auto;
+    }
+
+    & > nav {
+        &:first-child {
+            margin-top: 20vh;
+        }
+    }
+
+    & a {
+        color: white;
+    }
+
+    & button {
+        margin: 0 auto;
+        background: none;
+        border: 1px solid white;
+        color: white;
+        padding: 0.5rem 1rem;
+    }
+
+    & ul {
+        list-style: none;
+        align-items: center;
+        padding: 0;
+        justify-content: center;
+        display: flex;
+        flex-direction: column;
+
+        & a {
+            color: white;
+        }
+        
+        & li {
+            margin: 1.2rem 0;
+        }
+
+        &.controls {
+            color: white;
+
+            & button {
+                border: none;
+                fill: white;
+            }
+
+            & li {
+                display: flex;
+                align-items: center;
+            }
+        }
+    }
+
+    &.open {
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-start;
+        gap: 2rem;
+        z-index: 97;
+        opacity: 0.85;
+        position: fixed;
+        top: 0;
+        left: 0;
+
+        & .burger {
+            & .line {
+                background-color: white;
+            }
+        }
+    }
+}
+
+@media (width < 680px) {
+    hamburger-two {
+        display: block;
+    }
+
+    .desktop-nav {
+        display: none;
+    }
+}

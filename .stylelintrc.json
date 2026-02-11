@@ -1,6 +1,7 @@
 {
     "extends": ["stylelint-config-standard"],
     "rules": {
+        "media-feature-range-notation": null,
         "selector-nested-pattern": "^&",
         "comment-empty-line-before": null,
         "no-descending-specificity": null
