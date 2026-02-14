@@ -4,7 +4,13 @@ import { useCallback } from 'preact/hooks'
 import { useComputed } from '@preact/signals'
 import { NotFound } from '../not-found.js'
 import { formatDate, sanitizeHtml } from '../util.js'
-import { type Item, type AppState, State } from '../state.js'
+import {
+    type Item,
+    type AppState,
+    State,
+    findItemByRoute,
+    isItemRoute
+} from '../state.js'
 import './item-reader.css'
 import Debug from '@substrate-system/debug'
 const debug = Debug('rsss:view')
@@ -12,40 +18,50 @@ const debug = Debug('rsss:view')
 export const ItemReader:FunctionComponent<{
     state:AppState;
     splats:string[];
-}> = function ItemReader ({ state, splats }) {
-    const itemUrl = splats.shift()
-
-    debug('reading...', itemUrl)
+}> = function ItemReader ({ state }) {
+    debug('reading...', state.route.value)
 
     const itemSignal = useComputed<
         undefined|null|Item
     >(() => {
-        if (!state.items.value.length) return null
-        return state.items.value.find(
-            i => i.link?.includes(itemUrl!)
+        if (!isItemRoute(state.route.value)) return null
+        return (
+            findItemByRoute(state, state.route.value) ||
+            state.routeItem.value
         )
     })
 
     const item = itemSignal.value
-    if (!item) {
-        return html`<${NotFound} />`
-    }
+    const isLoadingItem = (
+        state.routeItemLoading.value &&
+        !item
+    )
 
+    if (isLoadingItem) {
+        return html`
+            <div class="route item-reader">
+                <p class="loading-text">Loading post...</p>
+            </div>
+        `
+    }
+    if (!item) return html`<${NotFound} />`
+
+    const itemId = item.id
     const isStarred = !!item.is_starred
     const isRead = !!item.is_read
 
     const handleStar = useCallback(async () => {
         await State.toggleItemStarred(
             state,
-            item!.id,
+            itemId,
             !isStarred
         )
-    }, [])
+    }, [itemId, isStarred])
 
     async function handleToggleRead () {
         await State.toggleItemRead(
             state,
-            item!.id,
+            itemId,
             !isRead
         )
     }

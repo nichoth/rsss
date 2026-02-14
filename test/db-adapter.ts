@@ -90,6 +90,13 @@ function createMockAdapter ():DbAdapter & {
             return { items: paginated, total, limit, offset }
         },
 
+        async getItemByRoute (itemRoute:string): Promise<Item|null> {
+            const item = items.find((entry) =>
+                entry.link?.includes(itemRoute)
+            )
+            return item || null
+        },
+
         async getCounts (): Promise<CountsResponse> {
             return {
                 unread: items.filter(i => i.is_read === 0).length,
@@ -266,6 +273,25 @@ test('adapter - getItems filters by isStarred', async t => {
 
     t.equal(starred.items.length, 1, 'should return 1 starred item')
     t.equal(starred.items[0].is_starred, 1, 'item should be starred')
+})
+
+test('adapter - getItemByRoute finds a matching item', async t => {
+    const adapter = createMockAdapter()
+    const feed = await adapter.addFeed('https://example.com/feed')
+    addMockItem(adapter, feed.id, {
+        link: 'https://example.com/post/alpha'
+    })
+
+    const item = await adapter.getItemByRoute(
+        'example.com/post/alpha'
+    )
+
+    t.ok(item, 'should return the matched item')
+    t.equal(
+        item?.link,
+        'https://example.com/post/alpha',
+        'should return the right link'
+    )
 })
 
 // ============ Update Operations Tests ============

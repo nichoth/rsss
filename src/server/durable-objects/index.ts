@@ -407,6 +407,48 @@ export class UserDO extends DurableObject<Env> {
         })
 
         // Get unread count
+        app.get('/items/by-route', (c) => {
+            const route = c.req.query('route')
+            if (!route) {
+                return c.json(
+                    { error: 'Route is required' },
+                    400
+                )
+            }
+
+            const routeCandidates = this.itemRouteCandidates(route)
+            if (routeCandidates.length === 0) {
+                return c.json(
+                    { error: 'Route is required' },
+                    400
+                )
+            }
+
+            const routeQuery = routeCandidates
+                .map(() => "items.link LIKE ? ESCAPE '\\'")
+                .join(' OR ')
+            const params = routeCandidates.map((candidate) => {
+                return `%${this.escapeLikePattern(candidate)}%`
+            })
+
+            const item = this.sql.exec(
+                `SELECT items.*, feeds.title as feed_title
+                 FROM items
+                 JOIN feeds ON items.feed_id = feeds.id
+                 WHERE items.link IS NOT NULL
+                 AND (${routeQuery})
+                 ORDER BY pub_date DESC, created_at DESC
+                 LIMIT 1`,
+                ...params
+            ).one()
+
+            if (!item) {
+                return c.json({ error: 'Item not found' }, 404)
+            }
+
+            return c.json({ item })
+        })
+
         app.get('/items/count', (c) => {
             const unread = this.sql.exec('SELECT COUNT(*) as count FROM items WHERE is_read = 0').one() as { count: number }
             const starred = this.sql.exec('SELECT COUNT(*) as count FROM items WHERE is_starred = 1').one() as { count: number }
@@ -525,6 +567,33 @@ export class UserDO extends DurableObject<Env> {
         })
 
         return app
+    }
+
+    private itemRouteCandidates (route:string):string[] {
+        const normalizedRoute = route
+            .trim()
+            .replace(/^\/post\//, '')
+            .replace(/^\/+/, '')
+
+        if (!normalizedRoute) return []
+
+        const candidates = new Set<string>()
+        candidates.add(normalizedRoute)
+
+        try {
+            candidates.add(decodeURIComponent(normalizedRoute))
+        } catch {
+            // Ignore malformed URI sequences
+        }
+
+        return Array.from(candidates)
+    }
+
+    private escapeLikePattern (value:string):string {
+        return value
+            .replace(/\\/g, '\\\\')
+            .replace(/%/g, '\\%')
+            .replace(/_/g, '\\_')
     }
 
     /**

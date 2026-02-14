@@ -7,6 +7,7 @@ import ky from 'ky'
 import type {
     DbAdapter,
     Feed,
+    Item,
     ItemsResponse,
     CountsResponse
 } from './types.js'
@@ -62,6 +63,29 @@ export const remoteAdapter:DbAdapter = {
             `items?${params.toString()}`
         )
         return response.json<ItemsResponse>()
+    },
+
+    async getItemByRoute (itemRoute:string):Promise<Item|null> {
+        try {
+            const response = await api.get('items/by-route', {
+                searchParams: { route: itemRoute }
+            })
+
+            const data = await response.json<{
+                item:Item
+            }>()
+            return data.item
+        } catch (err) {
+            if (
+                err instanceof Error &&
+                'response' in err &&
+                (err as { response?:Response }).response?.status === 404
+            ) {
+                return null
+            }
+
+            throw err
+        }
     },
 
     async getCounts ():Promise<CountsResponse> {

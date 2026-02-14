@@ -58,6 +58,7 @@ export interface DbAdapter {
         limit?:number
         offset?:number
     }):Promise<ItemsResponse>
+    getItemByRoute(itemRoute:string):Promise<Item|null>
     getCounts():Promise<CountsResponse>
     updateItem(
         id:number,

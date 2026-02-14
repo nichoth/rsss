@@ -61,6 +61,8 @@ export interface CountsResponse {
 export type AppState = {
     _setRoute:(route:string) => void,
     route:Signal<string>,
+    routeItem:Signal<Item|null>,
+    routeItemLoading:Signal<boolean>,
     user:Signal<User|null>,
     authLoading:Signal<boolean>,
     authError:Signal<string|null>,
@@ -84,6 +86,8 @@ export function State ():AppState {
     const state = {
         _setRoute: onRoute.setRoute.bind(onRoute),
         route: signal(location.pathname),
+        routeItem: signal<Item|null>(null),
+        routeItemLoading: signal(false),
         user: signal<User|null>(null),
         authLoading: signal(true),
         authError: signal<string|null>(null),
@@ -112,6 +116,82 @@ export function State ():AppState {
         } else {
             window.scrollTo(0, 0)
         }
+    })
+
+    let routeItemRequest:string|null = null
+
+    effect(() => {
+        const route = state.route.value
+        const itemFromList = findItemByRoute(state, route)
+
+        if (!isItemRoute(route)) {
+            routeItemRequest = null
+            batch(() => {
+                state.routeItem.value = null
+                state.routeItemLoading.value = false
+            })
+            return
+        }
+
+        if (itemFromList) {
+            routeItemRequest = null
+            batch(() => {
+                state.routeItem.value = itemFromList
+                state.routeItemLoading.value = false
+            })
+
+            if (!itemFromList.is_read) {
+                void State.toggleItemRead(
+                    state,
+                    itemFromList.id,
+                    true
+                )
+            }
+            return
+        }
+
+        if (!state.isAuthenticated.value) {
+            batch(() => {
+                state.routeItem.value = null
+                state.routeItemLoading.value = false
+            })
+            return
+        }
+
+        if (routeItemRequest === route) return
+        routeItemRequest = route
+        state.routeItemLoading.value = true
+
+        void State.loadItemByRoute(state, route)
+            .then((item) => {
+                if (state.route.value !== route) return
+
+                batch(() => {
+                    state.routeItem.value = item
+                    state.routeItemLoading.value = false
+                })
+
+                if (item && !item.is_read) {
+                    void State.toggleItemRead(
+                        state,
+                        item.id,
+                        true
+                    )
+                }
+            })
+            .catch((err) => {
+                debug('Error loading route item:', err)
+                if (state.route.value !== route) return
+                batch(() => {
+                    state.routeItem.value = null
+                    state.routeItemLoading.value = false
+                })
+            })
+            .finally(() => {
+                if (routeItemRequest === route) {
+                    routeItemRequest = null
+                }
+            })
     })
 
     /**
@@ -493,6 +573,27 @@ State.loadItems = async function (
 }
 
 /**
+ * Load a single item that matches a /post/* route
+ */
+State.loadItemByRoute = async function (
+    _state:AppState,
+    route:string
+):Promise<Item|null> {
+    const itemRoute = routeToItemRoute(route)
+    if (!itemRoute) return null
+
+    try {
+        const item = await remoteAdapter.getItemByRoute(
+            itemRoute
+        )
+        return item as Item|null
+    } catch (err) {
+        debug('Error loading item by route:', err)
+        return null
+    }
+}
+
+/**
  * Load counts from remote DB
  */
 State.loadCounts = async function (
@@ -521,12 +622,21 @@ State.toggleItemRead = async function (
 
         if (response.ok) {
             // Optimistic UI update
-            state.items.value = state.items.value.map(
-                item => item.id === itemId ? {
-                    ...item,
-                    is_read: isRead ? 1 : 0
-                } : item
-            )
+            batch(() => {
+                state.items.value = state.items.value.map(
+                    item => item.id === itemId ? {
+                        ...item,
+                        is_read: isRead ? 1 : 0
+                    } : item
+                )
+
+                if (state.routeItem.value?.id === itemId) {
+                    state.routeItem.value = {
+                        ...state.routeItem.value,
+                        is_read: isRead ? 1 : 0
+                    }
+                }
+            })
 
             await State.loadCounts(state)
         }
@@ -556,6 +666,13 @@ State.toggleItemStarred = async function (
                         is_starred: isStarred ? 1 : 0
                     } : item
                 )
+
+                if (state.routeItem.value?.id === itemId) {
+                    state.routeItem.value = {
+                        ...state.routeItem.value,
+                        is_starred: isStarred ? 1 : 0
+                    }
+                }
             })
 
             await State.loadCounts(state)
@@ -626,15 +743,17 @@ State.clearSelectedItem = function (state:AppState):void {
 export const isItemRoute = function (
     route:string
 ):boolean {
-    if (
-        route === '/' ||
-        route.startsWith('/login') ||
-        route.startsWith('/api')
-    ) {
-        return false
-    }
+    return route.startsWith('/post/')
+}
 
-    return route.includes('/post/')
+/**
+ * Convert a /post/* route to the comparable link fragment
+ */
+export const routeToItemRoute = function (
+    route:string
+):string|null {
+    if (!isItemRoute(route)) return null
+    return route.replace(/^\/post\//, '')
 }
 
 /**
@@ -644,8 +763,16 @@ export const findItemByRoute = function (
     state:AppState,
     route:string
 ):Item|null {
+    const itemRoute = routeToItemRoute(route)
+    if (!itemRoute) return null
+
     for (const item of state.items.value) {
-        if (itemToRoute(item) === route) {
+        const itemRoutePath = itemToRoute(item)
+        if (itemRoutePath === route) {
+            return item
+        }
+
+        if (item.link?.includes(itemRoute)) {
             return item
         }
     }
