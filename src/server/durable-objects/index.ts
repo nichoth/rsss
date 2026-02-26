@@ -613,8 +613,7 @@ export class UserDO extends DurableObject<Env> {
 
             if (!response.ok) {
                 console.error(
-                    `[DO] Feed fetch failed` +
-                    ` ${feed.url}: ${response.status}`
+                    `[DO] Feed fetch failed ${feed.url}: ${response.status}`
                 )
                 return
             }

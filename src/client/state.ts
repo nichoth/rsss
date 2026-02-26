@@ -141,7 +141,7 @@ export function State ():AppState {
             })
 
             if (!itemFromList.is_read) {
-                void State.toggleItemRead(
+                State.toggleItemRead(
                     state,
                     itemFromList.id,
                     true
@@ -162,7 +162,7 @@ export function State ():AppState {
         routeItemRequest = route
         state.routeItemLoading.value = true
 
-        void State.loadItemByRoute(state, route)
+        State.loadItemByRoute(state, route)
             .then((item) => {
                 if (state.route.value !== route) return
 
@@ -172,7 +172,7 @@ export function State ():AppState {
                 })
 
                 if (item && !item.is_read) {
-                    void State.toggleItemRead(
+                    State.toggleItemRead(
                         state,
                         item.id,
                         true
