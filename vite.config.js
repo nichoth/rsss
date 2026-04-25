@@ -53,6 +53,18 @@ export default defineConfig(({ mode }) => {
             outDir: './public',
             emptyOutDir: true,
             sourcemap: 'inline',
+        },
+        environments: {
+            client: {
+                build: {
+                    rollupOptions: {
+                        input: {
+                            index: './index.html',
+                            'sqlite-init': './src/client/db/sqlite-init.ts',
+                        },
+                    },
+                },
+            },
         }
     }
 })

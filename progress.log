@@ -50,3 +50,16 @@
   - In Hono, to set headers on the outgoing response after the handler runs, call `await next()` first, then use `c.res.headers.set(...)`.
   - The middleware checks `content-type` to target HTML and JS only, since COOP is only meaningful on documents and COEP on subresources.
 ---
+
+## 2026-04-24 - US-005
+- What was implemented: Installed `@sqlite.org/sqlite-wasm` and created `src/client/db/sqlite-init.ts` exporting `initSqlite()` (dynamic import only). Added `OPFSUnavailableError` typed error class and re-exported types `Sqlite3`/`Sqlite3Db`. Updated `vite.config.js` `environments.client.build.rollupOptions.input` to include `sqlite-init.ts` as an additional entry so Vite emits the sqlite-wasm WASM/JS as separate chunks without static importing it from app code.
+- Files changed:
+  - `src/client/db/sqlite-init.ts` (new)
+  - `src/client/db/index.ts` (re-exports initSqlite and types)
+  - `vite.config.js` (environments.client input for sqlite-init)
+  - `package.json` / `package-lock.json` (@sqlite.org/sqlite-wasm added)
+  - `specs/prd.json` (US-005 passes: true)
+- **Learnings for future iterations:**
+  - To force Vite to emit a lazy-loaded module as a separate chunk without any static import in live code, add it to `environments.client.build.rollupOptions.input` in `vite.config.js`. This does NOT work at the top-level `build.rollupOptions.input` when using `@cloudflare/vite-plugin` (breaks rsss worker build).
+  - The cloudflare vite plugin creates two environments: `rsss` (worker) and `client` (browser). Top-level `build.rollupOptions.input` tries to apply to both and fails.
+---
