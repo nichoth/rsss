@@ -127,3 +127,15 @@
   - Use `db.exec('BEGIN')` / `db.exec('COMMIT')` / `db.exec('ROLLBACK')` for transactions in sqlite-wasm oo1 API. No dedicated transaction helper needed.
   - `crypto.randomUUID()` is available in modern browsers and in the Chromium test environment used by tapout.
 ---
+
+## 2026-04-24 - US-011
+- What was implemented: Created adapter factory in `src/client/db/index.ts`. `getAdapter(did?)` returns `localAdapter` (via `createLocalAdapter(openLocalDb(did))`) only when `syncSubscriptions.value === true` AND `isLocalFirstSupported() === true` AND a `did` is supplied; otherwise returns `remoteAdapter`. `isLocalFirstSupported()` probes `navigator.storage.getDirectory`, `crossOriginIsolated`, and `FileSystemSyncAccessHandle`; result cached for the session. Exported `_resetSupportedCache` and `_resetAdapterCache` for test isolation. Tests in `test/adapter-factory.ts` cover all branches (5 tests).
+- Files changed:
+  - `src/client/db/index.ts` (rewritten with getAdapter, isLocalFirstSupported, cache helpers)
+  - `test/adapter-factory.ts` (new)
+  - `package.json` (added test:adapter-factory script)
+  - `specs/prd.json` (US-011 passes: true)
+- **Learnings for future iterations:**
+  - `getAdapter` needs a `did` param to open the OPFS DB; callers that lack a DID at invocation time will fall back to remoteAdapter automatically.
+  - The cache for the opened DB is keyed by `did`; switching users would open a new DB.
+---
