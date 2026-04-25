@@ -40,6 +40,10 @@ export default defineConfig(({ mode }) => {
             port: 8888,
             host: true,
             open: true,
+            headers: {
+                'Cross-Origin-Opener-Policy': 'same-origin',
+                'Cross-Origin-Embedder-Policy': 'require-corp',
+            },
         },
 
         build: {

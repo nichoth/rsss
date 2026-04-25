@@ -31,3 +31,12 @@
   - The DO's `DELETE /feeds/:id` handler needed to be made `async` to parse the optional JSON body.
   - `npm run test:lww` runs only the LWW tests (16 tests). Full suite is 98 tests.
 ---
+
+## 2026-04-24 - US-003
+- What was implemented: Added COOP/COEP headers to the Vite dev server so `self.crossOriginIsolated` returns `true` in the browser, enabling OPFS sync access handles.
+- Files changed:
+  - `vite.config.js` (added headers to server config)
+  - `specs/prd.json` (US-003 passes: true)
+- **Learnings for future iterations:**
+  - COOP/COEP headers must be set on both the Vite dev server (vite.config.js `server.headers`) and the Cloudflare Worker (US-004) for cross-origin isolation in all environments.
+---
