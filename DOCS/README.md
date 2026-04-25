@@ -34,6 +34,10 @@
 
 SQLite needs to work in a browser/PWA environment. Should use Web Assembly.
 
+* see [sqlite-wasm.md](./sqlite-wasm.md)
+* see [sqlite-cookbook.md](./sqlite-cookbook.md)
+
+
 ### Test
 
 ```sh
