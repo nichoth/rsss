@@ -90,3 +90,16 @@
   - The correct package export path for the wasm file is `@sqlite.org/sqlite-wasm/sqlite3.wasm` (not `/dist/sqlite3.wasm`).
   - sqlite-wasm's default export accepts an options object; `locateFile` overrides how it finds the WASM binary.
 ---
+
+## 2026-04-24 - US-008
+- What was implemented: Created `src/client/db/local-adapter.ts` with `createLocalAdapter(db)` factory returning a `DbAdapter` with read methods: `getFeeds`, `getItems` (with feedId/isRead/isStarred/limit/offset filters), `getItemByRoute` (LIKE-based route matching), `getCounts`. Write methods throw until US-009. Tests in `test/local-adapter.ts` cover all read paths against an in-memory DB.
+- Files changed:
+  - `src/client/db/local-adapter.ts` (new)
+  - `test/local-adapter.ts` (new)
+  - `package.json` (added test:local-adapter script)
+  - `specs/prd.json` (US-008 passes: true)
+- **Learnings for future iterations:**
+  - sqlite-wasm oo1.DB `exec()` with `{rowMode: 'object', resultRows: []}` is the correct API for multi-row queries. `selectObjects(sql, ...params)` exists but spreading individual bind params as variadic args does NOT work — `exec` with `bind: array` is more reliable.
+  - `selectObject` / `selectObjects` take a single `bind` argument (BindingSpec), not spread args.
+  - For tests with WASM, add a dedicated npm script with `--loader:.wasm=dataurl` (do NOT add to test/index.ts which lacks the loader).
+---
