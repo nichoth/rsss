@@ -17,16 +17,17 @@ import type { Context, Next } from 'hono'
 export { UserDO }
 
 export interface Env {
-    USER_DO:DurableObjectNamespace<UserDO>
-    SESSIONS:KVNamespace
-    ASSETS:Fetcher
-    SESSION_SECRET:string
-    OAUTH_CLIENT_ID?:string
-    NODE_ENV:string
+    USER_DO:DurableObjectNamespace<UserDO>;
+    SESSIONS:KVNamespace;
+    ASSETS:Fetcher;
+    SESSION_SECRET:string;
+    OAUTH_CLIENT_ID?:string;
+    AUTUMN_SECRET_KEY:string;
+    NODE_ENV:string;
 }
 
 type Variables = {
-    session:OAuthSession|null
+    session:OAuthSession|null;
 }
 
 const app = new Hono<{ Bindings:Env; Variables:Variables }>()

@@ -60,7 +60,8 @@
 	},
 
 	"vars": {
-		"NODE_ENV": "development"
+		"NODE_ENV": "development",
+		"AUTUMN_SECRET_KEY": ""
 	},
 
 	"observability": {

@@ -36,10 +36,12 @@
     "@substrate-system/routes": "^5.0.0",
     "@substrate-system/state": "^0.0.4",
     "@substrate-system/tool-tip": "^0.0.5",
+    "autumn-js": "^1.2.12",
     "hono": "^4.11.3",
     "htm": "^3.1.1",
     "ky": "^1.14.1",
     "preact": "^10.28.0",
+    "resend": "^6.12.2",
     "route-event": "^7.4.0"
   },
   "devDependencies": {
