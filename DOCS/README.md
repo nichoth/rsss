@@ -32,7 +32,7 @@
 > The use of SQLite in the browser.
 >
 
-SQLite needs to work in a browser/PWA environment.
+SQLite needs to work in a browser/PWA environment. Should use Web Assembly.
 
 ### Test
 
