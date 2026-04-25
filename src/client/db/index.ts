@@ -31,6 +31,7 @@ export {
     bootstrapFeedsCount,
     bootstrapItemsCount,
     bootstrapError,
+    getBootstrappedDb,
     clearBootstrappedDb
 } from './bootstrap.js'
 export { getOutboxCount } from './push-sync.js'

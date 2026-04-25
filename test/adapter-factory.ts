@@ -3,6 +3,7 @@ import { syncSubscriptions } from '../src/client/local-first-settings.js'
 import {
     isLocalFirstSupported,
     getAdapter,
+    getBootstrappedDb,
     _resetSupportedCache,
     _resetAdapterCache
 } from '../src/client/db/index.js'
@@ -72,4 +73,12 @@ test('getAdapter returns remoteAdapter when did is absent', async (t) => {
     // Even if support were true, no did means no local DB to open
     const adapter = await getAdapter(undefined)
     t.equal(adapter, remoteAdapter, 'returns remoteAdapter when did missing')
+})
+
+test('db barrel exports bootstrap DB accessor', (t) => {
+    t.equal(
+        typeof getBootstrappedDb,
+        'function',
+        'getBootstrappedDb is available from db/index'
+    )
 })

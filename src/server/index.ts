@@ -10,6 +10,7 @@ import {
     type OAuthState
 } from './auth/oauth.js'
 import { UserDO } from './durable-objects/index.js'
+import { withIsolationHeaders } from './isolation-headers.js'
 import type { Context, Next } from 'hono'
 
 // Re-export the Durable Object class for Wrangler
@@ -33,21 +34,7 @@ const app = new Hono<{ Bindings:Env; Variables:Variables }>()
 // Cross-origin isolation headers required for OPFS sync access handles
 app.use('*', async (c, next) => {
     await next()
-    const ct = c.res.headers.get('content-type') ?? ''
-    if (
-        ct.includes('text/html') ||
-        ct.includes('javascript') ||
-        ct === ''
-    ) {
-        c.res.headers.set(
-            'Cross-Origin-Opener-Policy',
-            'same-origin'
-        )
-        c.res.headers.set(
-            'Cross-Origin-Embedder-Policy',
-            'require-corp'
-        )
-    }
+    c.res = withIsolationHeaders(c.res)
 })
 
 // CORS for API routes
