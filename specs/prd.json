@@ -1,0 +1,298 @@
+{
+  "project": "RSSS",
+  "branchName": "ralph/local-first-sqlite-opfs",
+  "description": "Local-first mode using SQLite WASM + OPFS in the browser. Per-device opt-in syncs feed subscriptions, items, and read/starred state to a local SQLite database; an optional second toggle stores article content locally. Last-write-wins conflict resolution on `updated_at`, with the Cloudflare Durable Object as the merge point. Falls back transparently to the existing remote adapter on browsers without OPFS support.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Extract shared SQL schema to a single source-of-truth file",
+      "description": "As a developer, I want the table/index/trigger definitions to live in one shared file so the Durable Object and the future browser SQLite database cannot drift.",
+      "acceptanceCriteria": [
+        "New file `src/shared/schema.sql` (or `src/shared/db/schema.ts` exporting a string) contains the `feeds` and `items` CREATE TABLE statements, indexes, and `updated_at` triggers currently inline in `src/server/durable-objects/index.ts`",
+        "`src/server/durable-objects/index.ts` imports and executes the shared schema instead of inline strings; no behavior change",
+        "Server-only `ALTER TABLE` migration block (adding `updated_at` to pre-existing rows) stays in the DO",
+        "`npm run test:db` passes",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Add LWW conflict resolution to server mutating endpoints",
+      "description": "As a developer, I need server endpoints to reject stale writes by comparing `client_updated_at` against the row's current `updated_at`, so multi-device edits converge correctly.",
+      "acceptanceCriteria": [
+        "PATCH /api/items/:id, POST /api/feeds, DELETE /api/feeds/:id, and POST /api/items/mark-all-read accept an optional `client_updated_at` field in the JSON body",
+        "When `client_updated_at` is present and the row's current `updated_at > client_updated_at`, respond 409 with the authoritative current row(s) in the body",
+        "When `client_updated_at` is absent, behavior is unchanged (back-compat for existing clients)",
+        "New tests in `test/db-adapter.ts` (or a new `test/server-lww.ts`) cover: stale write rejected, fresh write accepted, missing field uses old behavior",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Add COOP/COEP headers to the Vite dev server",
+      "description": "As a developer, I need cross-origin isolation in dev so OPFS sync access handles work locally.",
+      "acceptanceCriteria": [
+        "`vite.config.js` `server` config sets `headers: { 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'require-corp' }`",
+        "After `npm start`, evaluating `self.crossOriginIsolated` in the browser console returns `true`",
+        "Existing Bluesky OAuth login flow still completes locally without errors",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Add COOP/COEP headers in the Cloudflare Worker",
+      "description": "As a developer, I need the production Worker to send the same cross-origin isolation headers so OPFS works in deployed builds.",
+      "acceptanceCriteria": [
+        "A Hono middleware in `src/server/index.ts` sets `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` on document and JS responses",
+        "`npm run build` completes; previewing the Worker via wrangler shows the headers on `/` and on emitted JS chunks",
+        "Existing API routes (feeds, items, sync, auth) still respond correctly",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Install sqlite-wasm and add lazy-load init module",
+      "description": "As a developer, I want sqlite-wasm available as a dependency, loaded only via dynamic import, so users with the feature off pay no bundle cost.",
+      "acceptanceCriteria": [
+        "Add `@sqlite.org/sqlite-wasm` to `package.json` dependencies and run `npm install`",
+        "New file `src/client/db/sqlite-init.ts` exports `async function initSqlite()` that does a dynamic `import('@sqlite.org/sqlite-wasm')` and returns the resolved sqlite3 namespace",
+        "`grep -r \"@sqlite.org/sqlite-wasm\" src/client/` finds no static imports, only the dynamic one",
+        "`npm run build` completes and emits sqlite-wasm code in a separate chunk under `public/`",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Add localFirst settings model in localStorage",
+      "description": "As a developer, I want a small reactive settings model so the rest of the app can react to the two local-first toggles.",
+      "acceptanceCriteria": [
+        "New file `src/client/local-first-settings.ts` exports two `@preact/signals` signals: `syncSubscriptions:Signal<boolean>` and `storeContent:Signal<boolean>`, plus `loadLocalFirstSettings()` and `saveLocalFirstSettings()`",
+        "Both signals default to `false`; settings are persisted as a single JSON object under `localStorage` key `rsss.localFirst`",
+        "Helper `setSyncSubscriptions(v:boolean)` uses `batch()` to also force `storeContent` to `false` when `syncSubscriptions` is set to `false`",
+        "New tests cover: load with no stored value, save+load round-trip, dependent-toggle invariant",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Open OPFS-backed SQLite database with shared schema",
+      "description": "As a developer, I need a function that opens (or creates) an OPFS SQLite database scoped to the user and runs the shared schema.",
+      "acceptanceCriteria": [
+        "`src/client/db/sqlite-init.ts` adds `async function openLocalDb(did:string):Promise<Sqlite3Db>` that uses the OPFS-SAH-pool VFS, file name derived from `did`",
+        "On open, runs the shared schema from US-001; idempotent across calls",
+        "Throws a typed error if OPFS is unavailable so callers can fall back",
+        "Tests run against `:memory:` (via a test-mode flag in the same module) and assert that the expected tables and indexes exist after `openLocalDb`",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Implement localAdapter read methods",
+      "description": "As a developer, I need the read half of the local adapter so authenticated reads can be served from SQLite.",
+      "acceptanceCriteria": [
+        "New file `src/client/db/local-adapter.ts` exports `localAdapter:Partial<DbAdapter>` (writes added in US-009) implementing `getFeeds`, `getItems`, `getItemByRoute`, `getCounts`",
+        "Method signatures and return shapes match `remoteAdapter` exactly (verified by assigning to `DbAdapter` after US-009)",
+        "`getItems` honors `feedId`, `isRead`, `isStarred`, `limit`, `offset` filters",
+        "`getCounts` returns `{ unread, starred, total }` computed from the local DB",
+        "New file `test/local-adapter.ts` exercises every read method against a seeded `:memory:` DB",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Implement localAdapter write methods",
+      "description": "As a developer, I need the write half of the local adapter so user actions update the local DB. Outbox wiring comes in US-010.",
+      "acceptanceCriteria": [
+        "Add `addFeed`, `deleteFeed`, `updateItem`, `markAllRead` to `localAdapter` against the OPFS-backed DB",
+        "Each write stamps `updated_at = datetime('now')` on every affected row (or relies on the existing trigger)",
+        "`addFeed` returns the inserted Feed; `deleteFeed`/`updateItem`/`markAllRead` return void as in `remoteAdapter`",
+        "`localAdapter` now satisfies the full `DbAdapter` interface (compile-time check)",
+        "`test/local-adapter.ts` covers each write method, asserting both DB state and return value",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Add outbox table and wire it into local writes",
+      "description": "As a developer, I want every local write to append an outbox row in the same transaction so push-sync (US-015) has work to drain.",
+      "acceptanceCriteria": [
+        "Schema (shared or client-only addendum) adds an `outbox` table with columns `id INTEGER PRIMARY KEY, op TEXT NOT NULL, target_id INTEGER, payload TEXT NOT NULL, client_op_id TEXT NOT NULL UNIQUE, client_updated_at TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT`",
+        "Each `localAdapter` write method inserts the matching outbox row in the same SQLite transaction as the data update",
+        "`client_op_id` is generated client-side (UUID or `crypto.randomUUID`)",
+        "Tests in `test/local-adapter.ts` assert that each write produces one outbox row with the correct `op`, `payload`, and `client_updated_at`",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Implement adapter factory with OPFS detection and fallback",
+      "description": "As a developer, I want a single entry point that chooses `localAdapter` or `remoteAdapter` based on opt-in and browser capability.",
+      "acceptanceCriteria": [
+        "`src/client/db/index.ts` exports `async function getAdapter():Promise<DbAdapter>` returning `localAdapter` only when (a) `syncSubscriptions.value === true` and (b) `isLocalFirstSupported() === true`; otherwise `remoteAdapter`",
+        "`isLocalFirstSupported()` probes `navigator.storage?.getDirectory`, `crossOriginIsolated`, and `typeof FileSystemSyncAccessHandle !== 'undefined'`; result cached for the session",
+        "Both helpers are exported for use by the settings UI",
+        "Tests cover both branches by stubbing globals, including the case where the user has opted in but support is missing (returns `remoteAdapter`)",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Refactor state.ts to use the adapter factory",
+      "description": "As a developer, I want `state.ts` to consume `getAdapter()` so the rest of the app is decoupled from which adapter is in use.",
+      "acceptanceCriteria": [
+        "`src/client/state.ts` no longer imports `remoteAdapter` directly; it calls `await getAdapter()` and caches the result on the State instance",
+        "All existing methods (`loadFeeds`, `addFeed`, `deleteFeed`, `loadItems`, `loadItemByRoute`, `loadCounts`, `toggleItemRead`, `toggleItemStarred`, `markAllRead`) call through the cached adapter",
+        "With local-first off (default) every existing route works exactly as before",
+        "`npm run test` passes",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Add settings panel with two local-first toggles",
+      "description": "As a user, I want a settings page where I can opt in to local subscriptions sync and, separately, local content storage.",
+      "acceptanceCriteria": [
+        "A Settings route (or panel reachable from the header) renders two `@substrate-system/check-box` toggles labelled \"Sync subscriptions and read state to this device\" and \"Store article content locally for offline reading\"",
+        "Toggles are bound to the signals from US-006 and persist via `saveLocalFirstSettings()`",
+        "Content toggle is disabled when subscriptions toggle is off, and disabled+greyed when `isLocalFirstSupported()` returns false",
+        "When `isLocalFirstSupported()` is false, an explanatory note (\"Local storage is not supported in this browser\") appears above the toggles",
+        "Toggling on does NOT yet trigger bootstrap (that wiring is US-016); just saves the setting",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Implement pull-sync (server -> local)",
+      "description": "As a user, I want my local DB to receive changes the server has made since my last sync.",
+      "acceptanceCriteria": [
+        "New module `src/client/db/pull-sync.ts` exports `async function pullSync()` that calls `/api/sync?since=<lastPullAt>` and upserts returned feeds and items into the local DB",
+        "`lastPullAt` is read/written from a `sync_meta` single-row table; first call (no row) omits `since` and treats response as a full snapshot",
+        "When `storeContent.value === false`, item upserts store `NULL` for `content` and `description`",
+        "Hooked to run on app startup when authenticated and `getAdapter()` returned `localAdapter`, and on the window `online` event",
+        "Tests cover delta upsert, content stripping, and `lastPullAt` advancement (using a stubbed `fetch`)",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "Implement push-sync drain",
+      "description": "As a user, I want my offline edits to upload to the server once I'm back online, with sane handling of conflicts and auth failures.",
+      "acceptanceCriteria": [
+        "New module `src/client/db/push-sync.ts` exports `async function pushSync()` that reads outbox rows in `id` order and calls the matching backend endpoint with `client_updated_at` and `client_op_id` in the body",
+        "On 2xx: delete the outbox row",
+        "On 5xx or network error: increment `attempts` and `last_error`; row remains for next cycle",
+        "On 409 (LWW conflict from US-002): upsert the server's authoritative row into the local DB and delete the outbox row",
+        "On 401: halt drain and surface to the auth flow; outbox preserved",
+        "Push runs after every successful pull and on the `online` event",
+        "Tests cover happy path, 5xx retry, 409 reconciliation, and 401 halt",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "First-time bootstrap flow with progress indicator",
+      "description": "As a user enabling local-first for the first time, I want a clear progress experience while my data is downloaded.",
+      "acceptanceCriteria": [
+        "When `syncSubscriptions` flips from `false` to `true`, the app calls `openLocalDb(did)` (US-007), runs an initial `pullSync()` without `since` (US-014), and shows a non-blocking progress UI with running counts of feeds and items as they land",
+        "Reads continue to be served from `remoteAdapter` until bootstrap completes; once done, `getAdapter()` begins returning `localAdapter`",
+        "On bootstrap failure: revert the toggle to `false`, show an error notice, and remove the OPFS file",
+        "Re-running bootstrap on an existing local DB is idempotent (upserts, no duplicates)",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-017",
+      "title": "Implement reset/disable flow",
+      "description": "As a user, I want turning local-first off to delete my local SQLite file, and a separate reset button to wipe and re-bootstrap.",
+      "acceptanceCriteria": [
+        "When `syncSubscriptions` flips from `true` to `false`, a confirmation dialog names what will be deleted (subscriptions cache, items cache, pending offline changes if any)",
+        "On confirm: best-effort `pushSync()` drain; if offline, warn and proceed; remove the OPFS file via `FileSystemDirectoryHandle.removeEntry`; flip the factory to return `remoteAdapter` for the rest of the session",
+        "On cancel: revert the toggle back to `true` without changes",
+        "Settings adds a \"Reset local data\" button that performs a full wipe + immediate re-bootstrap without changing the toggle",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-018",
+      "title": "Add sync status indicator",
+      "description": "As a user, I want to see at a glance whether local-first is online, syncing, or has errors.",
+      "acceptanceCriteria": [
+        "A small status element in the header renders one of: \"Synced HH:MM\", \"Offline - N pending\", \"Syncing...\", \"Sync error\" with a tooltip showing the last error message",
+        "Hidden entirely when `getAdapter()` returns `remoteAdapter`",
+        "Driven by `@preact/signals` updated by `pullSync` and `pushSync`; multi-signal updates wrapped in `batch()`",
+        "Online/offline state tracked via `navigator.onLine` and `online`/`offline` events",
+        "Pending count read from the outbox table",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
