@@ -3,6 +3,7 @@
 - **Schema split pattern**: The shared schema exports `TABLES_SQL`, `INDEXES_SQL`, `TRIGGERS_SQL`, and `SCHEMA_SQL` (combined). The DO must apply them in order: tables → server migrations → indexes/triggers. Client (OPFS) can use `SCHEMA_SQL` directly on a fresh DB.
 - **Test command**: `npm run test:db` runs `test/db-adapter.ts` via esbuild + tapout in a browser (Chromium). All DB adapter interface tests live there.
 - **Import paths**: TypeScript source uses `.js` extensions in imports (e.g. `../../shared/schema.js`) for ESM compatibility with esbuild.
+- **sqlite-wasm in tapout tests**: tapout's HTTP server only serves the test bundle. To use sqlite-wasm in tests, use `--loader:.wasm=dataurl` with esbuild (inlines WASM as base64), import the wasm as `import wasmUrl from '@sqlite.org/sqlite-wasm/sqlite3.wasm'`, and pass `{ locateFile: () => wasmUrl }` to `sqlite3Module.default()`. Use `setTestMode(true, wasmUrl)` before tests to enable in-memory mode.
 
 ---
 
@@ -75,4 +76,17 @@
 - **Learnings for future iterations:**
   - Tests for localStorage-backed signals run fine in Chromium via tapout — `localStorage` is available in the test environment.
   - Dynamic `import()` in tests re-uses the already-loaded module (ES module cache), so signal mutations in one test persist into subsequent tests. Reset signal values explicitly at the start of each test rather than relying on module re-evaluation.
+---
+
+## 2026-04-24 - US-007
+- What was implemented: Added `openLocalDb(did)` to `src/client/db/sqlite-init.ts`. In test mode (toggled via `setTestMode(true, wasmUrl)`), it opens a `:memory:` DB and runs `SCHEMA_SQL`. In production, it uses OPFS-SAH-pool VFS and throws `OPFSUnavailableError` if OPFS is unavailable. Tests in `test/sqlite-init.ts` verify feeds/items tables, indexes, idempotency, and the error class.
+- Files changed:
+  - `src/client/db/sqlite-init.ts` (added `openLocalDb`, `setTestMode`, `isOpfsSupported`)
+  - `test/sqlite-init.ts` (new)
+  - `package.json` (added `test:sqlite-init` script)
+  - `specs/prd.json` (US-007 passes: true)
+- **Learnings for future iterations:**
+  - sqlite-wasm WASM binary cannot be resolved by tapout's HTTP server (which only serves the test bundle). Solution: use `--loader:.wasm=dataurl` in the esbuild command to inline the WASM as a base64 data URL, then pass it to sqlite-wasm via `locateFile: () => wasmUrl`.
+  - The correct package export path for the wasm file is `@sqlite.org/sqlite-wasm/sqlite3.wasm` (not `/dist/sqlite3.wasm`).
+  - sqlite-wasm's default export accepts an options object; `locateFile` overrides how it finds the WASM binary.
 ---
