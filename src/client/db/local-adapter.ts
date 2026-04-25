@@ -67,13 +67,30 @@ export function createLocalAdapter (db:Sqlite3Db):DbAdapter {
             )
         },
 
-        // write methods added in US-009
-        async addFeed (_url:string):Promise<Feed> {
-            throw new Error('addFeed not yet implemented in localAdapter')
+        async addFeed (url:string):Promise<Feed> {
+            const now = new Date().toISOString()
+            db.exec({
+                sql: 'INSERT INTO feeds (url, created_at, updated_at) VALUES (?, ?, ?)',
+                bind: [url, now, now]
+            })
+            const feed = queryOne<Feed>(
+                db,
+                'SELECT * FROM feeds WHERE url = ? ORDER BY id DESC LIMIT 1',
+                [url]
+            )
+            if (!feed) throw new Error('addFeed: insert failed')
+            return feed
         },
 
-        async deleteFeed (_id:number):Promise<void> {
-            throw new Error('deleteFeed not yet implemented in localAdapter')
+        async deleteFeed (id:number):Promise<void> {
+            db.exec({
+                sql: 'DELETE FROM items WHERE feed_id = ?',
+                bind: [id]
+            })
+            db.exec({
+                sql: 'DELETE FROM feeds WHERE id = ?',
+                bind: [id]
+            })
         },
 
         async getItems (options = {}):Promise<ItemsResponse> {
@@ -173,14 +190,41 @@ export function createLocalAdapter (db:Sqlite3Db):DbAdapter {
         },
 
         async updateItem (
-            _id:number,
-            _updates:{ is_read?:boolean; is_starred?:boolean }
+            id:number,
+            updates:{ is_read?:boolean; is_starred?:boolean }
         ):Promise<void> {
-            throw new Error('updateItem not yet implemented in localAdapter')
+            const fields:string[] = []
+            const params:(string|number)[] = []
+
+            if (updates.is_read !== undefined) {
+                fields.push('is_read = ?')
+                params.push(updates.is_read ? 1 : 0)
+            }
+            if (updates.is_starred !== undefined) {
+                fields.push('is_starred = ?')
+                params.push(updates.is_starred ? 1 : 0)
+            }
+            if (fields.length === 0) return
+
+            fields.push("updated_at = datetime('now')")
+            params.push(id)
+            db.exec({
+                sql: `UPDATE items SET ${fields.join(', ')} WHERE id = ?`,
+                bind: params
+            })
         },
 
-        async markAllRead (_feedId?:number):Promise<void> {
-            throw new Error('markAllRead not yet implemented in localAdapter')
+        async markAllRead (feedId?:number):Promise<void> {
+            if (feedId !== undefined) {
+                db.exec({
+                    sql: "UPDATE items SET is_read = 1, updated_at = datetime('now') WHERE feed_id = ? AND is_read = 0",
+                    bind: [feedId]
+                })
+            } else {
+                db.exec({
+                    sql: "UPDATE items SET is_read = 1, updated_at = datetime('now') WHERE is_read = 0"
+                })
+            }
         }
     }
 }

@@ -166,3 +166,98 @@ test('getCounts returns correct unread, starred, total', async (t) => {
         db.close()
     }
 })
+
+test('addFeed inserts a feed and returns it', async (t) => {
+    const db = await openLocalDb('did:test:addfeed')
+    const adapter = createLocalAdapter(db)
+    try {
+        const feed = await adapter.addFeed('https://new.example.com/feed')
+        t.ok(feed.id > 0, 'feed has an id')
+        t.equal(feed.url, 'https://new.example.com/feed', 'url matches')
+        t.ok(feed.created_at, 'created_at is set')
+        t.ok(feed.updated_at, 'updated_at is set')
+
+        const feeds = await adapter.getFeeds()
+        t.equal(feeds.length, 1, 'one feed in db')
+    } finally {
+        db.close()
+    }
+})
+
+test('deleteFeed removes feed and its items', async (t) => {
+    const db = await openLocalDb('did:test:deletefeed')
+    await seedDb(db)
+    const adapter = createLocalAdapter(db)
+    try {
+        await adapter.deleteFeed(1)
+        const feeds = await adapter.getFeeds()
+        t.equal(feeds.length, 1, 'one feed remains')
+        t.equal(feeds[0].title, 'Feed Two', 'feed two remains')
+
+        const items = await adapter.getItems()
+        t.equal(items.total, 1, 'items for deleted feed are gone')
+    } finally {
+        db.close()
+    }
+})
+
+test('updateItem updates is_read and stamps updated_at', async (t) => {
+    const db = await openLocalDb('did:test:updateitem')
+    await seedDb(db)
+    const adapter = createLocalAdapter(db)
+    try {
+        const before = await adapter.getItems({ isRead: false })
+        const itemId = before.items[0].id
+
+        await adapter.updateItem(itemId, { is_read: true })
+
+        const after = await adapter.getItems({ isRead: false })
+        t.equal(after.total, before.total - 1, 'one fewer unread item')
+    } finally {
+        db.close()
+    }
+})
+
+test('updateItem updates is_starred', async (t) => {
+    const db = await openLocalDb('did:test:updateitem-star')
+    await seedDb(db)
+    const adapter = createLocalAdapter(db)
+    try {
+        const items = await adapter.getItems({ isStarred: false })
+        const itemId = items.items[0].id
+
+        await adapter.updateItem(itemId, { is_starred: true })
+
+        const starred = await adapter.getItems({ isStarred: true })
+        t.equal(starred.total, 2, 'now 2 starred items')
+    } finally {
+        db.close()
+    }
+})
+
+test('markAllRead marks all items read', async (t) => {
+    const db = await openLocalDb('did:test:markallread')
+    await seedDb(db)
+    const adapter = createLocalAdapter(db)
+    try {
+        await adapter.markAllRead()
+        const counts = await adapter.getCounts()
+        t.equal(counts.unread, 0, 'no unread items after markAllRead()')
+    } finally {
+        db.close()
+    }
+})
+
+test('markAllRead with feedId marks only that feed read', async (t) => {
+    const db = await openLocalDb('did:test:markallread-feed')
+    await seedDb(db)
+    const adapter = createLocalAdapter(db)
+    try {
+        await adapter.markAllRead(1)
+        const unread = await adapter.getItems({ isRead: false })
+        t.equal(unread.total, 1, 'one unread item remains (from feed 2)')
+        t.equal(unread.items[0].feed_id, 2, 'remaining unread is from feed 2')
+    } finally {
+        db.close()
+    }
+})

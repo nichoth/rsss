@@ -103,3 +103,14 @@
   - `selectObject` / `selectObjects` take a single `bind` argument (BindingSpec), not spread args.
   - For tests with WASM, add a dedicated npm script with `--loader:.wasm=dataurl` (do NOT add to test/index.ts which lacks the loader).
 ---
+
+## 2026-04-24 - US-009
+- What was implemented: Added write methods (`addFeed`, `deleteFeed`, `updateItem`, `markAllRead`) to `createLocalAdapter` in `src/client/db/local-adapter.ts`. Each write stamps `updated_at = datetime('now')`. `addFeed` inserts a minimal feed row (url + timestamps) and returns it. `deleteFeed` removes the feed and all its items. `updateItem` builds a dynamic SET clause. `markAllRead` optionally scopes to a single feed. Tests in `test/local-adapter.ts` now cover all 6 write paths (36 total tests).
+- Files changed:
+  - `src/client/db/local-adapter.ts` (write methods implemented)
+  - `test/local-adapter.ts` (6 new write method tests)
+  - `specs/prd.json` (US-009 passes: true)
+- **Learnings for future iterations:**
+  - sqlite-wasm `db.exec({ sql, bind })` is the reliable call form for parameterized writes; avoid positional-arg shorthands.
+  - `addFeed` in the local adapter does not fetch remote metadata — it inserts a minimal row. Feed metadata arrives via pull-sync (US-014).
+---
