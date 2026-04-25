@@ -63,3 +63,16 @@
   - To force Vite to emit a lazy-loaded module as a separate chunk without any static import in live code, add it to `environments.client.build.rollupOptions.input` in `vite.config.js`. This does NOT work at the top-level `build.rollupOptions.input` when using `@cloudflare/vite-plugin` (breaks rsss worker build).
   - The cloudflare vite plugin creates two environments: `rsss` (worker) and `client` (browser). Top-level `build.rollupOptions.input` tries to apply to both and fails.
 ---
+---
+
+## 2026-04-24 - US-006
+- What was implemented: Created `src/client/local-first-settings.ts` with two `@preact/signals` signals (`syncSubscriptions`, `storeContent`), `loadLocalFirstSettings()`, `saveLocalFirstSettings()`, and `setSyncSubscriptions()`. Settings persisted as JSON under `localStorage` key `rsss.localFirst`. `setSyncSubscriptions(false)` uses `batch()` to also force `storeContent` to `false`.
+- Files changed:
+  - `src/client/local-first-settings.ts` (new)
+  - `test/local-first-settings.ts` (new)
+  - `package.json` (added test:local-first script)
+  - `specs/prd.json` (US-006 passes: true)
+- **Learnings for future iterations:**
+  - Tests for localStorage-backed signals run fine in Chromium via tapout — `localStorage` is available in the test environment.
+  - Dynamic `import()` in tests re-uses the already-loaded module (ES module cache), so signal mutations in one test persist into subsequent tests. Reset signal values explicitly at the start of each test rather than relying on module re-evaluation.
+---

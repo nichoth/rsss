@@ -10,6 +10,7 @@
     "test:sync": "esbuild ./test/sync.ts --bundle | tapout",
     "test:db": "esbuild ./test/db-adapter.ts --bundle | tapout",
     "test:lww": "esbuild ./test/server-lww.ts --bundle | tapout",
+    "test:local-first": "esbuild ./test/local-first-settings.ts --bundle | tapout",
     "build": "mkdir -p ./public && rm -rf ./public/* && npx vite build $([ \"$NODE_ENV\" != \"production\" ] && echo \"--mode staging\")",
     "start": "vite",
     "toc": "markdown-toc --maxdepth 3 -i README.md",
