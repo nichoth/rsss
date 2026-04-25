@@ -1,0 +1,32 @@
+- generic [ref=e2]:
+  - banner [ref=e3]:
+    - generic [ref=e4]:
+      - heading "RSSS" [level=1] [ref=e5]:
+        - link "RSSS" [ref=e6] [cursor=pointer]:
+          - /url: /
+      - generic [ref=e7]: Really Simple Syndication Service
+    - navigation [ref=e8]:
+      - link "About" [ref=e9] [cursor=pointer]:
+        - /url: /about
+    - iframe [ref=e11]:
+      
+  - generic [ref=e37]:
+    - generic [ref=e38]:
+      - heading "RSSS" [level=1] [ref=e39]
+      - paragraph [ref=e40]: Really Simple Syndication Service
+    - generic [ref=e41]:
+      - generic [ref=e42]:
+        - generic [ref=e43]: Bluesky Handle
+        - textbox "Bluesky Handle" [ref=e44]:
+          - /placeholder: yourname.bsky.social
+      - button "Sign in with Bluesky" [disabled] [ref=e45]
+    - generic [ref=e46]:
+      - separator [ref=e47]
+      - paragraph [ref=e48]: "Development mode:"
+      - button "Dev Login (skip OAuth)" [ref=e49] [cursor=pointer]
+    - paragraph [ref=e51]: Sign in with your Bluesky account to access your personal feed reader. Each user gets their own isolated instance.
+  - contentinfo [ref=e34]:
+    - iframe [ref=e35]:
+      - generic [ref=f3e3]:
+        - strong [ref=f3e4]: github.com
+        - text: refused to connect.

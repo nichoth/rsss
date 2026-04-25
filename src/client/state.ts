@@ -9,17 +9,58 @@ import Route from 'route-event'
 import ky from 'ky'
 import Debug from '@substrate-system/debug'
 import { getAdapter, getLocalDb } from './db/index.js'
-import { pullSync } from './db/pull-sync.js'
-import { pushSync, getOutboxCount } from './db/push-sync.js'
+import { pullSync, SyncBillingError } from './db/pull-sync.js'
+import {
+    pushSync,
+    getOutboxCount,
+    PushSyncBillingError
+} from './db/push-sync.js'
 import {
     isLocalFirstActive,
     updateOnlineStatus,
     setSyncOffline
 } from './db/sync-status.js'
+import {
+    type BillingStatus,
+    setBillingStatus,
+    setBillingError,
+    setCheckoutInProgress,
+    resetBilling
+} from './billing-status.js'
 const debug = Debug('rsss:state')
 
 const USER_STORAGE_KEY = 'rsss_user'
+const CHECKOUT_EMAIL_KEY = 'rsss_checkout_email'
 export const DEFAULT_PAGE_SIZE = 20
+
+/**
+ * Stash the email the user entered on /signup so the
+ * /payment-success page can pass it back to the server when
+ * confirming or signalling failure.
+ */
+function saveCheckoutEmail (email:string):void {
+    try {
+        localStorage.setItem(CHECKOUT_EMAIL_KEY, email)
+    } catch {
+        // Ignore quota / private-mode errors.
+    }
+}
+
+function readCheckoutEmail ():string|null {
+    try {
+        return localStorage.getItem(CHECKOUT_EMAIL_KEY)
+    } catch {
+        return null
+    }
+}
+
+function clearCheckoutEmail ():void {
+    try {
+        localStorage.removeItem(CHECKOUT_EMAIL_KEY)
+    } catch {
+        // Ignore.
+    }
+}
 
 export interface User {
     did:string
@@ -64,6 +105,8 @@ export interface CountsResponse {
     starred:number
     total:number
 }
+
+export type { BillingStatus }
 
 export type AppState = {
     _setRoute:(route:string) => void,
@@ -203,22 +246,33 @@ export function State ():AppState {
 
     /**
      * Load data after authentication; run pullSync when
-     * local-first adapter is active.
+     * local-first adapter is active. Billing status is loaded
+     * in parallel so the UI can show free-vs-paid state quickly.
      */
     effect(() => {
         if (!state.isAuthenticated.value) return
         const did = state.user.value?.did
 
+        State.loadBillingStatus(state)
+
         getAdapter(did).then(() => {
             const db = getLocalDb(did)
             if (db) {
                 isLocalFirstActive.value = true
-                pullSync(db).catch(
-                    err => debug('pullSync error:', err)
-                ).then(() => {
-                    pushSync(db).catch(
-                        err => debug('pushSync error:', err)
-                    )
+                pullSync(db).catch((err) => {
+                    if (err instanceof SyncBillingError) {
+                        State.loadBillingStatus(state)
+                        return
+                    }
+                    debug('pullSync error:', err)
+                }).then(() => {
+                    pushSync(db).catch((err) => {
+                        if (err instanceof PushSyncBillingError) {
+                            State.loadBillingStatus(state)
+                            return
+                        }
+                        debug('pushSync error:', err)
+                    })
                     State.loadFeeds(state)
                     State.loadItems(state)
                     State.loadCounts(state)
@@ -237,12 +291,20 @@ export function State ():AppState {
         const did = state.user.value?.did
         const db = getLocalDb(did)
         if (db) {
-            pullSync(db).catch(
-                err => debug('pullSync online error:', err)
-            ).then(() => {
-                pushSync(db).catch(
-                    err => debug('pushSync online error:', err)
-                )
+            pullSync(db).catch((err) => {
+                if (err instanceof SyncBillingError) {
+                    State.loadBillingStatus(state)
+                    return
+                }
+                debug('pullSync online error:', err)
+            }).then(() => {
+                pushSync(db).catch((err) => {
+                    if (err instanceof PushSyncBillingError) {
+                        State.loadBillingStatus(state)
+                        return
+                    }
+                    debug('pushSync online error:', err)
+                })
             })
         }
     })
@@ -452,6 +514,199 @@ State.devLogin = async function (
 }
 
 /**
+ * Load current billing/entitlement status from the server.
+ * Called after auth lands and after returning from checkout.
+ */
+State.loadBillingStatus = async function (
+    _state:AppState
+):Promise<BillingStatus|null> {
+    try {
+        const res = await api.get('billing/status', {
+            throwHttpErrors: false
+        })
+        if (!res.ok) {
+            setBillingError(`status_${res.status}`)
+            return null
+        }
+        const data = await res.json<BillingStatus>()
+        setBillingStatus(data)
+        setBillingError(null)
+        return data
+    } catch (err) {
+        debug('loadBillingStatus error:', err)
+        setBillingError(err instanceof Error ?
+            err.message :
+            'Failed to load billing status')
+        return null
+    }
+}
+
+/**
+ * Start checkout. In live mode this navigates the browser to
+ * the Autumn-hosted checkout page; in dev mode the server
+ * skips checkout and marks the user entitled in one round-trip.
+ *
+ * `email` is collected on the /signup form so the server can
+ * notify the user about success or failure even when Stripe
+ * never sees a confirmed payment.
+ */
+State.startCheckout = async function (
+    state:AppState,
+    planId:string,
+    email?:string
+):Promise<void> {
+    batch(() => {
+        setCheckoutInProgress(true)
+        setBillingError(null)
+    })
+
+    if (email) saveCheckoutEmail(email)
+
+    try {
+        const res = await api.post('billing/checkout', {
+            json: email ? { planId, email } : { planId },
+            throwHttpErrors: false
+        })
+        if (!res.ok) {
+            const body = await res.json<{
+                error?:string
+            }>().catch(() => ({} as { error?:string }))
+            throw new Error(
+                body.error || `checkout_${res.status}`
+            )
+        }
+        const data = await res.json<{
+            paymentUrl:string|null
+            status:string
+            planId:string
+        }>()
+
+        if (data.paymentUrl) {
+            window.location.assign(data.paymentUrl)
+            return
+        }
+
+        // Dev-mode: server already entitled the user.
+        setCheckoutInProgress(false)
+        await State.loadBillingStatus(state)
+        state._setRoute('/')
+    } catch (err) {
+        batch(() => {
+            setCheckoutInProgress(false)
+            setBillingError(err instanceof Error ?
+                err.message :
+                'Checkout failed')
+        })
+    }
+}
+
+/**
+ * Finalize checkout after returning from Autumn. Retries on 402
+ * because Autumn's view of the subscription can lag the redirect
+ * by a couple of seconds.
+ */
+State.finalizeCheckout = async function (
+    state:AppState,
+    planId?:string
+):Promise<{ ok:boolean; error?:string }> {
+    const maxAttempts = 6
+    let lastError = 'payment_incomplete'
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        if (attempt > 0) {
+            const delayMs = Math.min(
+                500 * 2 ** (attempt - 1),
+                4000
+            )
+            await new Promise(r => setTimeout(r, delayMs))
+        }
+
+        try {
+            const res = await api.post(
+                'billing/checkout/return',
+                {
+                    json: planId ? { planId } : {},
+                    throwHttpErrors: false
+                }
+            )
+
+            if (res.ok) {
+                clearCheckoutEmail()
+                await State.loadBillingStatus(state)
+                return { ok: true }
+            }
+
+            const body = await res.json<{
+                error?:string
+            }>().catch(() => ({} as { error?:string }))
+            lastError = body.error || `status_${res.status}`
+
+            if (res.status !== 402) {
+                return { ok: false, error: lastError }
+            }
+            // 402: keep retrying
+        } catch (err) {
+            lastError = err instanceof Error ?
+                err.message :
+                'Network error'
+        }
+    }
+
+    return { ok: false, error: lastError }
+}
+
+/**
+ * Notify the server that the user's checkout attempt did not
+ * confirm an active subscription. The server uses this to send
+ * a "payment didn't go through" email idempotently.
+ */
+State.signalCheckoutFailed = async function (
+    _state:AppState,
+    planId?:string
+):Promise<void> {
+    try {
+        const stashed = readCheckoutEmail()
+        const json:Record<string, string> = {}
+        if (planId) json.planId = planId
+        if (stashed) json.email = stashed
+
+        await api.post('billing/checkout/failed', {
+            json,
+            throwHttpErrors: false
+        })
+    } catch (err) {
+        debug('signalCheckoutFailed error:', err)
+    }
+}
+
+/**
+ * Open the Autumn-hosted customer portal in the same tab.
+ */
+State.openCustomerPortal = async function (
+    _state:AppState
+):Promise<void> {
+    try {
+        const res = await api.post('billing/portal', {
+            throwHttpErrors: false
+        })
+        if (!res.ok) {
+            const body = await res.json<{
+                error?:string
+            }>().catch(() => ({} as { error?:string }))
+            throw new Error(
+                body.error || `portal_${res.status}`
+            )
+        }
+        const data = await res.json<{ url:string }>()
+        window.location.assign(data.url)
+    } catch (err) {
+        setBillingError(err instanceof Error ?
+            err.message :
+            'Failed to open portal')
+    }
+}
+
+/**
  * Logout
  */
 State.logout = async function (
@@ -468,6 +723,7 @@ State.logout = async function (
         state.feeds.value = []
         state.items.value = []
     })
+    resetBilling()
     state._setRoute('/login')
 }
 

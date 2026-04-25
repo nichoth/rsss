@@ -5,6 +5,8 @@ import { ItemReader } from './item-reader.js'
 import { AboutRoute } from './about.js'
 import { State, type AppState } from '../state.js'
 import { SettingsRoute } from './settings.js'
+import { SignupPage } from './signup.js'
+import { PaymentSuccessPage } from './payment-success.js'
 // import Debug from '@substrate-system/debug'
 // const debug = Debug('rsss:routes')
 
@@ -24,6 +26,14 @@ export default function _Router (state:AppState):InstanceType<typeof Router> {
 
     router.addRoute('/login', () => {
         return LoginPage
+    })
+
+    router.addRoute('/signup', () => {
+        return SignupPage
+    })
+
+    router.addRoute('/payment-success', () => {
+        return PaymentSuccessPage
     })
 
     router.addRoute('/about', () => {

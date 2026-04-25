@@ -1,7 +1,9 @@
 import { html } from 'htm/preact'
 import { type FunctionComponent } from 'preact'
 import { useEffect } from 'preact/hooks'
+import { useComputed } from '@preact/signals'
 import { type AppState, State } from '../state.js'
+import { billingStatus } from '../billing-status.js'
 import {
     syncSubscriptions,
     storeContent,
@@ -33,11 +35,27 @@ export const SettingsRoute:FunctionComponent<{
 
     useEffect(() => {
         loadLocalFirstSettings()
+        if (state.isAuthenticated.value) {
+            State.loadBillingStatus(state)
+        }
     }, [])
 
     const supported = isLocalFirstSupported()
     const inProgress = bootstrapInProgress.value
     const bError = bootstrapError.value
+    const billing = useComputed(() => billingStatus.value)
+    const isEntitled = Boolean(billing.value?.entitled)
+    const planLabel = billing.value?.planId ?? 'sync'
+
+    function handleManageSubscription (e:Event) {
+        e.preventDefault()
+        State.openCustomerPortal(state)
+    }
+
+    function handleUpgrade (e:Event) {
+        e.preventDefault()
+        state._setRoute('/signup')
+    }
 
     async function handleSyncChange (ev:Event) {
         const checked = (ev.target as HTMLInputElement).checked
@@ -118,6 +136,34 @@ export const SettingsRoute:FunctionComponent<{
             <a href="/" class="back-link">${'<'} Back to Feeds</a>
             <h1>Settings</h1>
         </header>
+
+        <section class="settings-section subscription-section">
+            <h2>Subscription</h2>
+            ${isEntitled ? html`
+                <p>
+                    You're on the
+                    <strong>${planLabel}</strong> plan. Your feeds
+                    sync across all your devices.
+                </p>
+                <button
+                    class="btn-manage"
+                    onClick=${handleManageSubscription}
+                >
+                    Manage subscription
+                </button>
+            ` : html`
+                <p>
+                    You're on the <strong>Free</strong> plan. Your
+                    feeds and read state stay on this device only.
+                </p>
+                <button
+                    class="btn-upgrade"
+                    onClick=${handleUpgrade}
+                >
+                    Upgrade to Sync
+                </button>
+            `}
+        </section>
 
         <section class="settings-section local-first-section">
             <h2>Local Storage</h2>

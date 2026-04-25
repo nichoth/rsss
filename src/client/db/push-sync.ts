@@ -13,6 +13,13 @@ export class PushSyncAuthError extends Error {
     }
 }
 
+export class PushSyncBillingError extends Error {
+    constructor () {
+        super('pushSync: subscription required — halting drain')
+        this.name = 'PushSyncBillingError'
+    }
+}
+
 interface OutboxRow {
     id:number
     op:string
@@ -221,6 +228,10 @@ export async function pushSync (
                 throw new PushSyncAuthError()
             }
 
+            if (res.status === 402) {
+                throw new PushSyncBillingError()
+            }
+
             if (res.status === 409) {
                 const body = await res.json() as Record<string, unknown>
                 db.exec('BEGIN')
@@ -262,6 +273,7 @@ export async function pushSync (
             )
         } catch (err) {
             if (err instanceof PushSyncAuthError) throw err
+            if (err instanceof PushSyncBillingError) throw err
             const errMsg = err instanceof Error ? err.message : String(err)
             incrementAttempt(db, row.id, errMsg)
             if (trackStatus) setSyncError(errMsg)

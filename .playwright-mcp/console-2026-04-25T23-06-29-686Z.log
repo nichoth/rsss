@@ -1,0 +1,19 @@
+[     293ms] [ERROR] Failed to load resource: the server responded with a status of 402 (Payment Required) @ http://localhost:8888/api/items/count:0
+[     293ms] [LOG] %crsss:state %cError loading counts:%c +55ms color: #cc0000 color: inherit color: #cc0000 HTTPError: Request failed with status code 402 Payment Required: GET http://localhost:8888/api/items/count
+    at function_ (http://localhost:8888/node_modules/.vite/deps/ky.js?v=32b8ce6e:531:21)
+    at async #retry (http://localhost:8888/node_modules/.vite/deps/ky.js?v=32b8ce6e:738:14)
+    at async Object.getCounts (http://localhost:8888/src/client/db/remote-adapter.ts:63:22)
+    at async State.loadCounts (http://localhost:8888/src/client/state.ts:520:20) @ http://localhost:8888/node_modules/.vite/deps/@substrate-system_debug.js?v=32b8ce6e:269
+[     295ms] [ERROR] Failed to load resource: the server responded with a status of 402 (Payment Required) @ http://localhost:8888/api/feeds:0
+[     296ms] [LOG] %crsss:state %cError loading feeds:%c +57ms color: #cc0000 color: inherit color: #cc0000 HTTPError: Request failed with status code 402 Payment Required: GET http://localhost:8888/api/feeds
+    at function_ (http://localhost:8888/node_modules/.vite/deps/ky.js?v=32b8ce6e:531:21)
+    at async #retry (http://localhost:8888/node_modules/.vite/deps/ky.js?v=32b8ce6e:738:14)
+    at async Object.getFeeds (http://localhost:8888/src/client/db/remote-adapter.ts:7:22)
+    at async State.loadFeeds (http://localhost:8888/src/client/state.ts:414:19) @ http://localhost:8888/node_modules/.vite/deps/@substrate-system_debug.js?v=32b8ce6e:269
+[     297ms] [ERROR] Failed to load resource: the server responded with a status of 402 (Payment Required) @ http://localhost:8888/api/items?limit=20&offset=0:0
+[     297ms] [LOG] %crsss:state %cError loading items:%c +59ms color: #cc0000 color: inherit color: #cc0000 HTTPError: Request failed with status code 402 Payment Required: GET http://localhost:8888/api/items?limit=20&offset=0
+    at function_ (http://localhost:8888/node_modules/.vite/deps/ky.js?v=32b8ce6e:531:21)
+    at async #retry (http://localhost:8888/node_modules/.vite/deps/ky.js?v=32b8ce6e:738:14)
+    at async Object.getItems (http://localhost:8888/src/client/db/remote-adapter.ts:43:22)
+    at async State.loadItems (http://localhost:8888/src/client/state.ts:496:18) @ http://localhost:8888/node_modules/.vite/deps/@substrate-system_debug.js?v=32b8ce6e:269
+[   36928ms] [LOG] [vite] server connection lost. Polling for restart... @ http://localhost:8888/@vite/client:864

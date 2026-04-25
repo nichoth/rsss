@@ -7,6 +7,7 @@ import {
     syncPending,
     isLocalFirstActive
 } from '../db/sync-status.js'
+import { billingStatus } from '../billing-status.js'
 import './sync-status.css'
 
 function formatTime (date:Date):string {
@@ -18,6 +19,22 @@ function formatTime (date:Date):string {
 
 export const SyncStatus:FunctionComponent = function () {
     const active = isLocalFirstActive.value
+    const billing = billingStatus.value
+
+    // Free plan: show a local-only indicator with an upgrade CTA,
+    // regardless of sync activity (sync is gated to 402 anyway).
+    if (billing && !billing.entitled) {
+        return html`
+            <span
+                class="sync-status free"
+                title="Free plan -- changes stay on this device"
+            >
+                Local only ·${' '}
+                <a href="/signup">Upgrade</a>
+            </span>
+        `
+    }
+
     if (!active) return null
 
     const status = syncStatus.value

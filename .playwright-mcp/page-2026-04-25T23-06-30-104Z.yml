@@ -1,0 +1,51 @@
+- generic [ref=e2]:
+  - banner [ref=e3]:
+    - generic [ref=e4]:
+      - heading "RSSS" [level=1] [ref=e5]:
+        - link "RSSS" [ref=e6] [cursor=pointer]:
+          - /url: /
+      - generic [ref=e7]: Really Simple Syndication Service
+    - navigation [ref=e8]:
+      - link "About" [ref=e9] [cursor=pointer]:
+        - /url: /about
+    - iframe [ref=e11]:
+      
+    - generic [ref=e12]:
+      - generic "Free plan -- changes stay on this device" [ref=e13]:
+        - text: Local only ·
+        - link "Upgrade" [ref=e14] [cursor=pointer]:
+          - /url: /signup
+      - link "@test.bsky.social" [ref=e16] [cursor=pointer]:
+        - /url: /settings
+        - code [ref=e17]: "@test.bsky.social"
+      - button "Logout" [ref=e18] [cursor=pointer]
+  - generic [ref=e19]:
+    - banner [ref=e20]:
+      - link "< Back to Feeds" [ref=e21] [cursor=pointer]:
+        - /url: /
+      - heading "Settings" [level=1] [ref=e22]
+    - generic [ref=e23]:
+      - heading "Subscription" [level=2] [ref=e24]
+      - paragraph [ref=e25]:
+        - text: You're on the
+        - strong [ref=e26]: Free
+        - text: plan. Your feeds and read state stay on this device only.
+      - button "Upgrade to Sync" [ref=e27] [cursor=pointer]
+    - generic [ref=e28]:
+      - heading "Local Storage" [level=2] [ref=e29]
+      - paragraph [ref=e30]: Local storage is not supported in this browser.
+      - generic [ref=e33] [cursor=pointer]:
+        - checkbox "Sync subscriptions and read state to this device" [disabled] [ref=e34]
+        - generic [ref=e35]: Sync subscriptions and read state to this device
+      - generic [ref=e38] [cursor=pointer]:
+        - checkbox "Store article content locally for offline reading" [disabled] [ref=e39]
+        - generic [ref=e40]: Store article content locally for offline reading
+    - generic [ref=e41]:
+      - heading "Subscribed Feeds" [level=2] [ref=e42]
+      - list [ref=e43]:
+        - paragraph [ref=e44]: No feeds followed yet.
+  - contentinfo [ref=e45]:
+    - iframe [ref=e46]:
+      - generic [ref=f9e3]:
+        - strong [ref=f9e4]: github.com
+        - text: refused to connect.

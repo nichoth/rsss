@@ -1,0 +1,59 @@
+- generic [ref=e2]:
+  - banner [ref=e52]:
+    - generic [ref=e53]:
+      - heading "RSSS" [level=1] [ref=e54]:
+        - link "RSSS" [ref=e55] [cursor=pointer]:
+          - /url: /
+      - generic [ref=e56]: Really Simple Syndication Service
+    - navigation [ref=e57]:
+      - link "About" [ref=e58] [cursor=pointer]:
+        - /url: /about
+    - iframe [ref=e60]:
+      
+    - generic [ref=e61]:
+      - generic "Free plan -- changes stay on this device" [ref=e62]:
+        - text: Local only ·
+        - link "Upgrade" [ref=e63] [cursor=pointer]:
+          - /url: /signup
+      - link "@test.bsky.social" [ref=e65] [cursor=pointer]:
+        - /url: /settings
+        - code [ref=e66]: "@test.bsky.social"
+      - button "Logout" [ref=e67] [cursor=pointer]
+  - generic [ref=e69]:
+    - complementary [ref=e70]:
+      - generic [ref=e71]:
+        - button "All Items 0" [ref=e72] [cursor=pointer]:
+          - generic [ref=e73]: All Items
+          - generic [ref=e74]: "0"
+        - button "Starred 0" [ref=e75] [cursor=pointer]:
+          - generic [ref=e76]: Starred
+          - generic [ref=e77]: "0"
+      - generic [ref=e78]:
+        - generic [ref=e79]:
+          - heading "Feeds" [level=3] [ref=e80]
+          - generic [ref=e81]:
+            - link [ref=e82] [cursor=pointer]:
+              - /url: /settings
+              - img [ref=e83]
+            - button "+" [ref=e87] [cursor=pointer]
+        - generic [ref=e88]:
+          - link "All Feeds" [ref=e90] [cursor=pointer]:
+            - /url: /
+          - generic [ref=e91]: No feeds yet…
+      - generic [ref=e92]:
+        - button "Refresh Feeds" [ref=e93] [cursor=pointer]
+        - link "Settings" [ref=e95] [cursor=pointer]:
+          - /url: /settings
+    - main [ref=e96]:
+      - generic [ref=e97]:
+        - generic [ref=e100] [cursor=pointer]:
+          - checkbox "Unread only" [ref=e101]
+          - generic [ref=e102]: Unread only
+        - button "Mark all read" [disabled] [ref=e103]
+      - list [ref=e104]:
+        - generic [ref=e105]: Maybe add some feeds to start reading.
+  - contentinfo [ref=e106]:
+    - iframe [ref=e107]:
+      - generic [ref=f6e3]:
+        - strong [ref=f6e4]: github.com
+        - text: refused to connect.

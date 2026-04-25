@@ -1,0 +1,38 @@
+- generic [ref=e2]:
+  - banner [ref=e3]:
+    - generic [ref=e4]:
+      - heading "RSSS" [level=1] [ref=e5]:
+        - link "RSSS" [ref=e6] [cursor=pointer]:
+          - /url: /
+      - generic [ref=e7]: Really Simple Syndication Service
+    - navigation [ref=e8]:
+      - link "About" [ref=e9] [cursor=pointer]:
+        - /url: /about
+    - iframe [ref=e11]:
+      
+  - generic [ref=e13]:
+    - banner [ref=e14]:
+      - heading "Choose a plan" [level=1] [ref=e15]
+      - paragraph [ref=e16]: RSSS is free to use on a single device. To sync your feeds, read state, and starred items across machines, subscribe to Sync.
+    - generic [ref=e17]:
+      - article [ref=e18]:
+        - heading "Free" [level=2] [ref=e19]
+        - paragraph [ref=e20]: $0
+        - list [ref=e21]:
+          - listitem [ref=e22]: Use on one device
+          - listitem [ref=e23]: Local storage in your browser
+          - listitem [ref=e24]: Works offline
+        - button "Get started" [ref=e25] [cursor=pointer]
+      - article [ref=e26]:
+        - heading "Sync" [level=2] [ref=e27]
+        - paragraph [ref=e28]: $10/month
+        - list [ref=e29]:
+          - listitem [ref=e30]: Everything in Free
+          - listitem [ref=e31]: Sync across all your devices
+          - listitem [ref=e32]: Server-side feed polling
+        - button "Sign in & subscribe" [ref=e33] [cursor=pointer]
+  - contentinfo [ref=e34]:
+    - iframe [ref=e35]:
+      - generic [ref=f3e3]:
+        - strong [ref=f3e4]: github.com
+        - text: refused to connect.

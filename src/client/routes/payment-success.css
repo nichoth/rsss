@@ -1,0 +1,44 @@
+.route.payment-success {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem 1rem;
+    min-height: 60vh;
+
+    & .payment-success-container {
+        width: 100%;
+        max-width: 32rem;
+        text-align: center;
+    }
+
+    & .payment-pending,
+    & .payment-confirmed,
+    & .payment-error {
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        padding: 2.5rem 2rem;
+
+        & h1 {
+            font-size: 1.5rem;
+            margin: 1rem 0 0.5rem;
+        }
+
+        & p {
+            color: var(--color-text-secondary);
+            margin: 0.5rem 0;
+        }
+
+        & .loading-spinner {
+            margin: 0 auto;
+        }
+
+        & .error-message {
+            color: var(--color-error);
+        }
+
+        & a {
+            color: var(--color-primary);
+            text-decoration: underline;
+        }
+    }
+}

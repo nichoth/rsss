@@ -20,4 +20,13 @@
         color: var(--color-error, #dc2626);
         cursor: help;
     }
+
+    &.free {
+        color: var(--color-text-secondary, #666);
+
+        & a {
+            color: var(--color-primary);
+            text-decoration: underline;
+        }
+    }
 }

@@ -11,6 +11,21 @@ import {
 } from './auth/oauth.js'
 import { UserDO } from './durable-objects/index.js'
 import { withIsolationHeaders } from './isolation-headers.js'
+import {
+    BILLING_PLAN_IDS,
+    isValidPlanId,
+    useLive as billingUseLive,
+    getOrCreateCustomer,
+    getCustomerEmail,
+    attachCheckout,
+    verifySubscription,
+    getCustomerPortalUrl,
+    type BillingPlanId
+} from './autumn-billing.js'
+import {
+    sendSubscriptionStarted,
+    sendPaymentFailed
+} from './email.js'
 import type { Context, Next } from 'hono'
 
 // Re-export the Durable Object class for Wrangler
@@ -22,8 +37,145 @@ export interface Env {
     ASSETS:Fetcher;
     SESSION_SECRET:string;
     OAUTH_CLIENT_ID?:string;
-    AUTUMN_SECRET_KEY:string;
+    AUTUMN_SECRET_KEY?:string;
+    AUTUMN_DISABLED?:string;
+    RESEND_API_KEY?:string;
+    RESEND_DISABLED?:string;
+    RESEND_FROM?:string;
     NODE_ENV:string;
+}
+
+interface CachedBilling {
+    planId:string;
+    status:'active'|'scheduled'|'none';
+    refreshedAt:number;
+}
+
+const BILLING_CACHE_TTL_SECONDS = 600
+const DEFAULT_PLAN_ID:BillingPlanId = 'sync'
+
+function billingCacheKey (did:string):string {
+    return `billing:${did}`
+}
+
+function pendingEmailKey (did:string):string {
+    return `billing_pending_email:${did}`
+}
+
+const PENDING_EMAIL_TTL_SECONDS = 60 * 60 * 24 * 2  // 2 days
+
+async function stashPendingEmail (
+    env:Env,
+    did:string,
+    email:string
+):Promise<void> {
+    await env.SESSIONS.put(
+        pendingEmailKey(did),
+        email,
+        { expirationTtl: PENDING_EMAIL_TTL_SECONDS }
+    )
+}
+
+async function readPendingEmail (
+    env:Env,
+    did:string
+):Promise<string|null> {
+    return env.SESSIONS.get(pendingEmailKey(did))
+}
+
+/**
+ * Resolve the user's contact email for billing notifications.
+ * Prefer the authoritative value Autumn has on the customer; fall
+ * back to the email the user entered on /signup (stashed in KV)
+ * when Autumn isn't live or hasn't been told yet.
+ */
+async function resolveContactEmail (
+    env:Env,
+    did:string
+):Promise<string|null> {
+    if (billingUseLive(env)) {
+        try {
+            const fromAutumn = await getCustomerEmail(env, did)
+            if (fromAutumn) return fromAutumn
+        } catch (err) {
+            console.error('getCustomerEmail error:', err)
+        }
+    }
+    return readPendingEmail(env, did)
+}
+
+function isProbablyEmail (s:unknown):s is string {
+    return typeof s === 'string'
+        && s.length > 3
+        && s.length < 320
+        && /.+@.+\..+/.test(s)
+}
+
+async function readCachedBilling (
+    env:Env,
+    did:string
+):Promise<CachedBilling|null> {
+    const raw = await env.SESSIONS.get(billingCacheKey(did))
+    if (!raw) return null
+    try {
+        return JSON.parse(raw) as CachedBilling
+    } catch {
+        return null
+    }
+}
+
+async function writeCachedBilling (
+    env:Env,
+    did:string,
+    value:CachedBilling
+):Promise<void> {
+    await env.SESSIONS.put(
+        billingCacheKey(did),
+        JSON.stringify(value),
+        { expirationTtl: BILLING_CACHE_TTL_SECONDS }
+    )
+}
+
+function isEntitled (b:CachedBilling|null):boolean {
+    if (!b) return false
+    return b.status === 'active' || b.status === 'scheduled'
+}
+
+/**
+ * Resolve current entitlement, refreshing from Autumn when there's
+ * no cached value. Local dev (no Autumn key) treats the cached value
+ * as authoritative -- /api/billing/checkout writes 'active' directly.
+ */
+async function resolveBilling (
+    env:Env,
+    did:string,
+    planId:BillingPlanId = DEFAULT_PLAN_ID
+):Promise<CachedBilling> {
+    const cached = await readCachedBilling(env, did)
+    if (cached) return cached
+
+    if (!billingUseLive(env)) {
+        // No Autumn configured -- treat as not entitled. Dev path
+        // creates entitlement explicitly via /api/billing/checkout.
+        const fresh:CachedBilling = {
+            planId,
+            status: 'none',
+            refreshedAt: Date.now()
+        }
+        await writeCachedBilling(env, did, fresh)
+        return fresh
+    }
+
+    const verified = await verifySubscription(env, did, planId)
+    const fresh:CachedBilling = {
+        planId,
+        status: verified ?
+            (verified.status as 'active'|'scheduled') :
+            'none',
+        refreshedAt: Date.now()
+    }
+    await writeCachedBilling(env, did, fresh)
+    return fresh
 }
 
 type Variables = {
@@ -357,10 +509,355 @@ app.post('/api/auth/dev-login', async (c) => {
 })
 
 /**
+ * Billing: get current entitlement.
+ * Returns cached value if fresh; refreshes from Autumn on miss.
+ */
+app.get('/api/billing/status', requireAuth, async (c) => {
+    const session = c.get('session')!
+    try {
+        const billing = await resolveBilling(c.env, session.did)
+        return c.json({
+            entitled: isEntitled(billing),
+            planId: billing.planId,
+            status: billing.status,
+            refreshedAt: billing.refreshedAt,
+            useLive: billingUseLive(c.env)
+        })
+    } catch (err) {
+        console.error('billing/status error:', err)
+        return c.json({
+            error: 'billing_unavailable'
+        }, 503)
+    }
+})
+
+/**
+ * Billing: start checkout for a plan.
+ * In live mode, returns an Autumn-hosted checkout URL.
+ * In dev mode (no Autumn key), marks the user entitled directly
+ * so the rest of the flow can be exercised without a real card.
+ */
+app.post('/api/billing/checkout', requireAuth, async (c) => {
+    const session = c.get('session')!
+    const body = await c.req.json<{
+        planId?:string
+        email?:string
+    }>().catch(() => ({
+        planId: undefined,
+        email: undefined
+    }))
+
+    const planId = body.planId ?? DEFAULT_PLAN_ID
+    if (!isValidPlanId(planId)) {
+        return c.json({
+            error: 'invalid_plan_id',
+            allowed: BILLING_PLAN_IDS
+        }, 400)
+    }
+
+    const email = isProbablyEmail(body.email) ? body.email : null
+    if (email) {
+        await stashPendingEmail(c.env, session.did, email)
+    }
+
+    // Dev mode: no Autumn -- mark entitled directly. Triggering
+    // the success email here exercises the full Resend path
+    // without a real card.
+    if (!billingUseLive(c.env)) {
+        const billing:CachedBilling = {
+            planId,
+            status: 'active',
+            refreshedAt: Date.now()
+        }
+        await writeCachedBilling(c.env, session.did, billing)
+
+        if (email) {
+            try {
+                await sendSubscriptionStarted(
+                    c.env,
+                    c.env.SESSIONS,
+                    {
+                        to: email,
+                        did: session.did,
+                        planId,
+                        handle: session.handle
+                    }
+                )
+            } catch (err) {
+                console.error(
+                    'sendSubscriptionStarted (dev) error:',
+                    err
+                )
+            }
+        }
+
+        return c.json({
+            paymentUrl: null,
+            status: 'entitled',
+            planId
+        })
+    }
+
+    try {
+        await getOrCreateCustomer(
+            c.env,
+            session.did,
+            session.handle,
+            email ?? undefined
+        )
+        const baseUrl = new URL(c.req.url).origin
+        const successUrl =
+            `${baseUrl}/payment-success?checkout=return`
+        const { paymentUrl } = await attachCheckout(
+            c.env,
+            session.did,
+            planId,
+            successUrl
+        )
+        return c.json({
+            paymentUrl,
+            status: 'payment_pending',
+            planId
+        })
+    } catch (err) {
+        console.error('billing/checkout error:', err)
+        return c.json({
+            error: 'billing_unavailable'
+        }, 503)
+    }
+})
+
+/**
+ * Billing: finalize checkout after Autumn redirect.
+ * Re-fetches the customer and asserts an active subscription.
+ * Caches the entitlement on success.
+ */
+app.post(
+    '/api/billing/checkout/return',
+    requireAuth,
+    async (c) => {
+        const session = c.get('session')!
+        const body = await c.req.json<{
+            planId?:string
+        }>().catch(() => ({ planId: undefined }))
+
+        const planId = body.planId ?? DEFAULT_PLAN_ID
+        if (!isValidPlanId(planId)) {
+            return c.json({
+                error: 'invalid_plan_id'
+            }, 400)
+        }
+
+        // Dev mode: there is no Autumn round-trip, just confirm
+        // whatever's already cached.
+        if (!billingUseLive(c.env)) {
+            const cached = await readCachedBilling(
+                c.env,
+                session.did
+            )
+            if (cached && isEntitled(cached)) {
+                return c.json({
+                    status: 'entitled',
+                    planId: cached.planId
+                })
+            }
+            return c.json({
+                error: 'payment_incomplete'
+            }, 402)
+        }
+
+        try {
+            const verified = await verifySubscription(
+                c.env,
+                session.did,
+                planId
+            )
+            if (!verified) {
+                return c.json({
+                    error: 'payment_incomplete'
+                }, 402)
+            }
+            const billing:CachedBilling = {
+                planId: verified.planId,
+                status: verified.status as 'active'|'scheduled',
+                refreshedAt: Date.now()
+            }
+            await writeCachedBilling(
+                c.env,
+                session.did,
+                billing
+            )
+
+            // Best-effort welcome email; failures shouldn't block
+            // the entitlement response.
+            try {
+                const to = await resolveContactEmail(
+                    c.env,
+                    session.did
+                )
+                if (to) {
+                    await sendSubscriptionStarted(
+                        c.env,
+                        c.env.SESSIONS,
+                        {
+                            to,
+                            did: session.did,
+                            planId: verified.planId,
+                            handle: session.handle
+                        }
+                    )
+                }
+            } catch (err) {
+                console.error(
+                    'sendSubscriptionStarted error:',
+                    err
+                )
+            }
+
+            return c.json({
+                status: 'entitled',
+                planId: verified.planId
+            })
+        } catch (err) {
+            console.error(
+                'billing/checkout/return error:',
+                err
+            )
+            return c.json({
+                error: 'billing_unavailable'
+            }, 503)
+        }
+    }
+)
+
+/**
+ * Billing: client-driven failure signal. Called by the
+ * /payment-success page after finalizeCheckout retries are
+ * exhausted without confirming a subscription. Sends the
+ * "payment didn't go through" email (idempotently).
+ */
+app.post(
+    '/api/billing/checkout/failed',
+    requireAuth,
+    async (c) => {
+        const session = c.get('session')!
+        const body = await c.req.json<{
+            planId?:string
+            email?:string
+        }>().catch(() => ({
+            planId: undefined,
+            email: undefined
+        }))
+
+        const planId = body.planId ?? DEFAULT_PLAN_ID
+        if (!isValidPlanId(planId)) {
+            return c.json({
+                error: 'invalid_plan_id'
+            }, 400)
+        }
+
+        // Stash the email in case the client supplied a fresh one.
+        if (isProbablyEmail(body.email)) {
+            await stashPendingEmail(
+                c.env,
+                session.did,
+                body.email
+            )
+        }
+
+        let to:string|null = null
+        try {
+            to = await resolveContactEmail(c.env, session.did)
+        } catch (err) {
+            console.error('resolveContactEmail error:', err)
+        }
+
+        if (!to) {
+            return c.json({
+                emailed: false,
+                reason: 'no_contact_email'
+            })
+        }
+
+        try {
+            const baseUrl = new URL(c.req.url).origin
+            const result = await sendPaymentFailed(
+                c.env,
+                c.env.SESSIONS,
+                {
+                    to,
+                    did: session.did,
+                    planId,
+                    handle: session.handle,
+                    signupUrl: `${baseUrl}/signup`
+                }
+            )
+            return c.json({
+                emailed: result.sent,
+                deduped: result.deduped
+            })
+        } catch (err) {
+            console.error('sendPaymentFailed error:', err)
+            return c.json({
+                error: 'email_failed'
+            }, 503)
+        }
+    }
+)
+
+/**
+ * Billing: open the Autumn-hosted customer portal.
+ * Used for cancelling, updating payment method, etc.
+ */
+app.post('/api/billing/portal', requireAuth, async (c) => {
+    const session = c.get('session')!
+
+    if (!billingUseLive(c.env)) {
+        return c.json({
+            error: 'portal_unavailable_in_dev'
+        }, 503)
+    }
+
+    try {
+        const baseUrl = new URL(c.req.url).origin
+        const url = await getCustomerPortalUrl(
+            c.env,
+            session.did,
+            `${baseUrl}/settings`
+        )
+        return c.json({ url })
+    } catch (err) {
+        console.error('billing/portal error:', err)
+        return c.json({
+            error: 'billing_unavailable'
+        }, 503)
+    }
+})
+
+/**
+ * Entitlement gate for proxied DO requests. Free users get a 402;
+ * the client falls back to local-only mode.
+ */
+const requireEntitlement = async (
+    c:Context<{ Bindings:Env; Variables:Variables }>,
+    next:Next
+) => {
+    const session = c.get('session')!
+    const billing = await resolveBilling(c.env, session.did)
+    if (!isEntitled(billing)) {
+        return c.json({
+            error: 'sync_required_subscription',
+            planId: billing.planId
+        }, 402)
+    }
+    await next()
+}
+
+/**
  * Proxy requests to user's Durable Object.
  * All /api/* routes go to the user's DO.
  */
-app.all('/api/*', requireAuth, async (c) => {
+app.all('/api/*', requireAuth, requireEntitlement, async (c) => {
     const session = c.get('session')!
     const stub = getUserDO(c.env, session.did)
 

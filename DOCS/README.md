@@ -27,6 +27,13 @@
 3. Installable: Users can install as PWA from browser menu
 4. Offline capable: Service worker caches the app shell
 
+>
+> !NOTE
+> The use of SQLite in the browser.
+>
+
+SQLite needs to work in a browser/PWA environment.
+
 ### Test
 
 ```sh

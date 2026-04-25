@@ -7,6 +7,13 @@ import {
     isLocalFirstActive
 } from './sync-status.js'
 
+export class SyncBillingError extends Error {
+    constructor () {
+        super('Sync requires an active subscription')
+        this.name = 'SyncBillingError'
+    }
+}
+
 export interface SyncResponse {
     feeds:Record<string, unknown>[]
     items:Record<string, unknown>[]
@@ -138,6 +145,13 @@ export async function pullSync (
             )
         }
         throw err
+    }
+
+    if (res.status === 402) {
+        // Subscription required -- swallow silently so the
+        // local-only fallback is quiet rather than spammy.
+        if (trackStatus) setSyncDone(0)
+        throw new SyncBillingError()
     }
 
     if (!res.ok) {
