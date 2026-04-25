@@ -1,9 +1,10 @@
-study NOTES/architecture.md
-study NOTES/product.md
+study DOCS/README.md
 
 # MISSION
 
-Write some tests for this serverside rendered app template.
+Create a production-ready PWA (progressive web app) that uses Cloudflare
+Durable Objects as the backend. This is a local-first PWA, with the app
+using SQLite and OPFS locally. There is 1 user per Durable Object.
 
 ## Important
 
