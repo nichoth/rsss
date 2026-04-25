@@ -10,7 +10,12 @@ import ky from 'ky'
 import Debug from '@substrate-system/debug'
 import { getAdapter, getLocalDb } from './db/index.js'
 import { pullSync } from './db/pull-sync.js'
-import { pushSync } from './db/push-sync.js'
+import { pushSync, getOutboxCount } from './db/push-sync.js'
+import {
+    isLocalFirstActive,
+    updateOnlineStatus,
+    setSyncOffline
+} from './db/sync-status.js'
 const debug = Debug('rsss:state')
 
 const USER_STORAGE_KEY = 'rsss_user'
@@ -207,6 +212,7 @@ export function State ():AppState {
         getAdapter(did).then(() => {
             const db = getLocalDb(did)
             if (db) {
+                isLocalFirstActive.value = true
                 pullSync(db).catch(
                     err => debug('pullSync error:', err)
                 ).then(() => {
@@ -218,6 +224,7 @@ export function State ():AppState {
                     State.loadCounts(state)
                 })
             } else {
+                isLocalFirstActive.value = false
                 State.loadFeeds(state)
                 State.loadItems(state)
                 State.loadCounts(state)
@@ -226,6 +233,7 @@ export function State ():AppState {
     })
 
     window.addEventListener('online', () => {
+        updateOnlineStatus()
         const did = state.user.value?.did
         const db = getLocalDb(did)
         if (db) {
@@ -237,6 +245,13 @@ export function State ():AppState {
                 )
             })
         }
+    })
+
+    window.addEventListener('offline', () => {
+        const did = state.user.value?.did
+        const db = getLocalDb(did)
+        const pending = db ? getOutboxCount(db) : 0
+        setSyncOffline(pending)
     })
 
     State.checkAuth(state)

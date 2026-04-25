@@ -4,6 +4,7 @@ import { type FunctionComponent } from 'preact'
 import { HamburgerTwo } from '@substrate-system/hamburger-two'
 import { type AppState } from '../state.js'
 import { State } from '../state.js'
+import { SyncStatus } from './sync-status.js'
 import './header.css'
 
 HamburgerTwo.define()
@@ -91,6 +92,7 @@ export const Header:FunctionComponent<{
             </div>
 
             <div class="header header-right desktop-nav">
+                <${SyncStatus} />
                 ${user.value && html`
                     <span class="user-handle">
                         <a href="/settings">

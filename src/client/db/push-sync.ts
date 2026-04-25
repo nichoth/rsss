@@ -1,4 +1,10 @@
 import type { Sqlite3Db } from './sqlite-init.js'
+import {
+    setSyncSyncing,
+    setSyncDone,
+    setSyncError,
+    isLocalFirstActive
+} from './sync-status.js'
 
 export class PushSyncAuthError extends Error {
     constructor () {
@@ -187,7 +193,9 @@ export async function pushSync (
     db:Sqlite3Db,
     fetchFn:FetchLike = fetch as unknown as FetchLike
 ):Promise<void> {
+    const trackStatus = isLocalFirstActive.value
     const rows = getOutboxRows(db)
+    if (trackStatus && rows.length > 0) setSyncSyncing()
 
     for (const row of rows) {
         const req = buildRequest(row)
@@ -254,11 +262,14 @@ export async function pushSync (
             )
         } catch (err) {
             if (err instanceof PushSyncAuthError) throw err
-            incrementAttempt(
-                db,
-                row.id,
-                err instanceof Error ? err.message : String(err)
-            )
+            const errMsg = err instanceof Error ? err.message : String(err)
+            incrementAttempt(db, row.id, errMsg)
+            if (trackStatus) setSyncError(errMsg)
         }
+    }
+
+    if (trackStatus) {
+        const pending = getOutboxCount(db)
+        setSyncDone(pending)
     }
 }

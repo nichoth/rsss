@@ -1,0 +1,23 @@
+.sync-status {
+    font-size: 1rem;
+    padding: 0.2rem 0.6rem;
+    border-radius: 0.75rem;
+    white-space: nowrap;
+
+    &.idle {
+        color: var(--color-text-muted, #666);
+    }
+
+    &.syncing {
+        color: var(--color-primary, #0070f3);
+    }
+
+    &.offline {
+        color: var(--color-warning, #f59e0b);
+    }
+
+    &.error {
+        color: var(--color-error, #dc2626);
+        cursor: help;
+    }
+}

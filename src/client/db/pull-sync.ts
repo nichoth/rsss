@@ -1,5 +1,11 @@
 import type { Sqlite3Db } from './sqlite-init.js'
 import { storeContent } from '../local-first-settings.js'
+import {
+    setSyncSyncing,
+    setSyncDone,
+    setSyncError,
+    isLocalFirstActive
+} from './sync-status.js'
 
 export interface SyncResponse {
     feeds:Record<string, unknown>[]
@@ -114,14 +120,30 @@ export async function pullSync (
     fetchFn:typeof fetch = fetch,
     opts:PullSyncOptions = {}
 ):Promise<void> {
+    const trackStatus = isLocalFirstActive.value
+    if (trackStatus) setSyncSyncing()
+
     const lastPullAt = getLastPullAt(db)
     const url = lastPullAt
         ? `/api/sync?since=${encodeURIComponent(lastPullAt)}`
         : '/api/sync'
 
-    const res = await fetchFn(url)
+    let res:Response
+    try {
+        res = await fetchFn(url)
+    } catch (err) {
+        if (trackStatus) {
+            setSyncError(
+                err instanceof Error ? err.message : String(err)
+            )
+        }
+        throw err
+    }
+
     if (!res.ok) {
-        throw new Error(`pullSync: server returned ${res.status}`)
+        const msg = `pullSync: server returned ${res.status}`
+        if (trackStatus) setSyncError(msg)
+        throw new Error(msg)
     }
 
     const data = (await res.json()) as SyncResponse
@@ -145,6 +167,13 @@ export async function pullSync (
         db.exec('COMMIT')
     } catch (err) {
         db.exec('ROLLBACK')
+        if (trackStatus) {
+            setSyncError(
+                err instanceof Error ? err.message : String(err)
+            )
+        }
         throw err
     }
+
+    if (trackStatus) setSyncDone(0)
 }

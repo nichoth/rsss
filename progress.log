@@ -227,3 +227,24 @@
   - The `op` field in outbox rows maps: `add_feed` → POST /api/feeds, `delete_feed` → DELETE /api/feeds/:id, `update_item` → PATCH /api/items/:id, `mark_all_read` → POST /api/items/mark-all-read.
   - 409 body from the server may be a single object (for item/feed) or an array (for mark-all-read); handle both shapes.
 ---
+
+## 2026-04-24 - US-018
+- What was implemented: Sync status indicator in the header.
+  - New `src/client/db/sync-status.ts` exports signals: `syncStatus` (idle/syncing/error/offline), `syncedAt`, `syncError`, `syncPending`, `isLocalFirstActive`, and helpers `setSyncSyncing`, `setSyncDone`, `setSyncError`, `setSyncOffline`, `updateOnlineStatus`.
+  - `pull-sync.ts` and `push-sync.ts` updated to call these helpers at start, success, and error paths. Only fires when `isLocalFirstActive.value === true`.
+  - `state.ts` sets `isLocalFirstActive.value` when getAdapter resolves to a local DB, registers `offline` listener calling `setSyncOffline(pending)`, and `online` listener calling `updateOnlineStatus()`.
+  - New `src/client/components/sync-status.ts` renders one of: "Synced HH:MM", "Offline – N pending", "Offline", "Syncing...", "Sync error" (with tooltip). Returns null when `isLocalFirstActive.value === false`.
+  - Header imports and renders `<SyncStatus />` in the desktop header-right section.
+- Files changed:
+  - `src/client/db/sync-status.ts` (new)
+  - `src/client/components/sync-status.ts` (new)
+  - `src/client/components/sync-status.css` (new)
+  - `src/client/db/pull-sync.ts` (status signals wiring)
+  - `src/client/db/push-sync.ts` (status signals wiring)
+  - `src/client/state.ts` (isLocalFirstActive, offline/online listeners)
+  - `src/client/components/header.ts` (include SyncStatus)
+  - `specs/prd.json` (US-018 passes: true)
+- **Learnings for future iterations:**
+  - Keep sync-status signals in their own module (`sync-status.ts`) to avoid circular imports between pull-sync, push-sync, and state.
+  - `isLocalFirstActive` must be set in `state.ts` when `getLocalDb()` returns non-null; pull/push-sync check it before updating status to avoid polluting non-local-first sessions.
+---
