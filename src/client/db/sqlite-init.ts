@@ -92,10 +92,30 @@ export async function openLocalDb (did:string):Promise<Sqlite3Db> {
         }
     ).installOpfsSAHPoolVfs({ directory: 'rsss-db' })
 
-    const filename = `rsss-${did.replace(/[^a-z0-9]/gi, '_')}.db`
+    const filename = getOpfsFilename(did)
     const db = new poolUtil.OpfsSAHPoolDb(filename)
     db.exec(SCHEMA_SQL)
     db.exec(OUTBOX_SQL)
     db.exec(SYNC_META_SQL)
     return db
+}
+
+export function getOpfsFilename (did:string):string {
+    return `rsss-${did.replace(/[^a-z0-9]/gi, '_')}.db`
+}
+
+/**
+ * Remove the OPFS SQLite file for `did`.
+ * Best-effort — resolves even if the file does not exist.
+ */
+export async function removeOpfsDb (did:string):Promise<void> {
+    try {
+        const root = await navigator.storage.getDirectory()
+        const dir = await root.getDirectoryHandle('rsss-db', {
+            create: false
+        })
+        await dir.removeEntry(getOpfsFilename(did))
+    } catch {
+        // file may not exist; ignore
+    }
 }

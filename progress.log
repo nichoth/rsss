@@ -1,3 +1,21 @@
+## 2026-04-24 - US-016
+- What was implemented: First-time bootstrap flow with progress indicator. When `syncSubscriptions` flips to `true` in Settings, `bootstrapLocalDb(did)` is called: opens the OPFS DB, runs a full `pullSync` (no `since`), and updates `bootstrapInProgress`/`bootstrapFeedsCount`/`bootstrapItemsCount`/`bootstrapError` signals live. `getAdapter()` returns `remoteAdapter` while bootstrap is in progress. On failure: reverts `syncSubscriptions` to false, saves settings, removes the OPFS file. Settings UI shows running counts and error message.
+- Files changed:
+  - `src/client/db/sqlite-init.ts` (added `getOpfsFilename`, `removeOpfsDb`)
+  - `src/client/db/pull-sync.ts` (added `PullSyncOptions` with `onFeedUpserted`/`onItemUpserted` callbacks)
+  - `src/client/db/bootstrap.ts` (new — bootstrap signals and `bootstrapLocalDb`)
+  - `src/client/db/index.ts` (import + re-export bootstrap; guard `getAdapter()` on `!bootstrapInProgress`)
+  - `src/client/routes/settings.ts` (wire bootstrap on toggle-on; show progress/error UI)
+  - `src/client/routes/settings.css` (bootstrap-progress and bootstrap-error styles)
+  - `test/bootstrap.ts` (new — 14 tests)
+  - `package.json` (added test:bootstrap script)
+  - `specs/prd.json` (US-016 passes: true)
+- **Learnings for future iterations:**
+  - `bootstrapLocalDb` lives in its own module (`bootstrap.ts`) to avoid circular imports between `index.ts` (which imports it) and the settings/state layers.
+  - `getBootstrappedDb()` / `clearBootstrappedDb()` let `getAdapter()` reuse the DB opened during bootstrap without re-opening it.
+  - `pullSync` progress callbacks fire inside the transaction loop — useful for live UI but note the DB is mid-transaction when callbacks fire.
+---
+
 ## Codebase Patterns
 
 - **Schema split pattern**: The shared schema exports `TABLES_SQL`, `INDEXES_SQL`, `TRIGGERS_SQL`, and `SCHEMA_SQL` (combined). The DO must apply them in order: tables → server migrations → indexes/triggers. Client (OPFS) can use `SCHEMA_SQL` directly on a fresh DB.

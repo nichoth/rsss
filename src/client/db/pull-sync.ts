@@ -99,6 +99,11 @@ function upsertItem (
     })
 }
 
+export interface PullSyncOptions {
+    onFeedUpserted?:(count:number) => void
+    onItemUpserted?:(count:number) => void
+}
+
 /**
  * Pull changes from the server into the local DB.
  * Reads `lastPullAt` from `sync_meta`; first call omits `since`
@@ -106,7 +111,8 @@ function upsertItem (
  */
 export async function pullSync (
     db:Sqlite3Db,
-    fetchFn:typeof fetch = fetch
+    fetchFn:typeof fetch = fetch,
+    opts:PullSyncOptions = {}
 ):Promise<void> {
     const lastPullAt = getLastPullAt(db)
     const url = lastPullAt
@@ -123,11 +129,17 @@ export async function pullSync (
 
     db.exec('BEGIN')
     try {
+        let feedCount = 0
         for (const feed of data.feeds) {
             upsertFeed(db, feed)
+            feedCount++
+            opts.onFeedUpserted?.(feedCount)
         }
+        let itemCount = 0
         for (const item of data.items) {
             upsertItem(db, item, keepContent)
+            itemCount++
+            opts.onItemUpserted?.(itemCount)
         }
         setLastPullAt(db, data.latestUpdatedAt)
         db.exec('COMMIT')

@@ -9,7 +9,14 @@ import {
     saveLocalFirstSettings,
     loadLocalFirstSettings
 } from '../local-first-settings.js'
-import { isLocalFirstSupported } from '../db/index.js'
+import {
+    isLocalFirstSupported,
+    bootstrapLocalDb,
+    bootstrapInProgress,
+    bootstrapFeedsCount,
+    bootstrapItemsCount,
+    bootstrapError
+} from '../db/index.js'
 import '@substrate-system/check-box'
 import './settings.css'
 
@@ -24,11 +31,22 @@ export const SettingsRoute:FunctionComponent<{
     }, [])
 
     const supported = isLocalFirstSupported()
+    const inProgress = bootstrapInProgress.value
+    const bError = bootstrapError.value
 
     function handleSyncChange (ev:Event) {
         const checked = (ev.target as HTMLInputElement).checked
-        setSyncSubscriptions(checked)
-        saveLocalFirstSettings()
+        if (checked) {
+            setSyncSubscriptions(true)
+            saveLocalFirstSettings()
+            const did = state.user.value?.did
+            if (did) {
+                bootstrapLocalDb(did)
+            }
+        } else {
+            setSyncSubscriptions(false)
+            saveLocalFirstSettings()
+        }
     }
 
     function handleContentChange (ev:Event) {
@@ -54,7 +72,7 @@ export const SettingsRoute:FunctionComponent<{
                 <check-box
                     name="sync-subscriptions"
                     checked=${syncSubscriptions.value || undefined}
-                    disabled=${!supported || undefined}
+                    disabled=${(!supported || inProgress) || undefined}
                     onChange=${handleSyncChange}
                 >
                     Sync subscriptions and read state to this device
@@ -64,13 +82,29 @@ export const SettingsRoute:FunctionComponent<{
                 <check-box
                     name="store-content"
                     checked=${storeContent.value || undefined}
-                    disabled=${(!supported || !syncSubscriptions.value) ||
-                        undefined}
+                    disabled=${(!supported || !syncSubscriptions.value ||
+                        inProgress) || undefined}
                     onChange=${handleContentChange}
                 >
                     Store article content locally for offline reading
                 </check-box>
             </div>
+            ${inProgress && html`
+                <div class="bootstrap-progress">
+                    <p class="bootstrap-status">
+                        Setting up local storage...
+                    </p>
+                    <p class="bootstrap-counts">
+                        ${bootstrapFeedsCount.value} feeds,
+                        ${bootstrapItemsCount.value} items synced
+                    </p>
+                </div>
+            `}
+            ${bError && html`
+                <p class="bootstrap-error">
+                    Setup failed: ${bError}
+                </p>
+            `}
         </section>
 
         <section class="settings-section">
