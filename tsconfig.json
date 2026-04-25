@@ -9,7 +9,6 @@
     ],
     "typeRoots": ["./node_modules"],
     "moduleResolution": "Bundler",
-    "esModuleInterop": false,
     "lib": ["ES2022", "DOM"],
     "allowJs": false,
     "skipLibCheck": true,
