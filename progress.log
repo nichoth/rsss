@@ -162,3 +162,20 @@
   - Pass `disabled={undefined}` (not `false`) to suppress the attribute in preact — using `|| undefined` pattern: `disabled=${condition || undefined}`.
   - `isLocalFirstSupported()` is called at render time (cached after first call), so it's safe to call in the component body without `useMemo`.
 ---
+
+## 2026-04-24 - US-014
+- What was implemented: Created `src/client/db/pull-sync.ts` with `pullSync(db, fetchFn?)` that reads `lastPullAt` from a new `sync_meta` single-row table, calls `/api/sync?since=<lastPullAt>` (or `/api/sync` on first call), upserts feeds and items inside a transaction, and advances `lastPullAt` to `latestUpdatedAt` from the server response. When `storeContent.value === false`, `content` and `description` are stored as NULL. Added `SYNC_META_SQL` to `sqlite-init.ts` and applied it in `openLocalDb`. Added `getLocalDb(did?)` to `db/index.ts` to expose the cached DB for sync calls. Wired pullSync into `state.ts`: runs after `getAdapter()` resolves on startup (if local DB is active) and on the `window.online` event.
+- Files changed:
+  - `src/client/db/pull-sync.ts` (new)
+  - `src/client/db/sqlite-init.ts` (added SYNC_META_SQL, applied in openLocalDb)
+  - `src/client/db/index.ts` (added _cachedDb, getLocalDb, updated _resetAdapterCache)
+  - `src/client/state.ts` (import pullSync/getLocalDb, wired auth effect and online event)
+  - `test/pull-sync.ts` (new — 5 tests)
+  - `package.json` (added test:pull-sync script)
+  - `specs/prd.json` (US-014 passes: true)
+- **Learnings for future iterations:**
+  - `pullSync` takes an explicit `Sqlite3Db` argument (not DID) — the caller must resolve the DB first via `getLocalDb()`.
+  - `getLocalDb(did)` returns the cached DB only when `syncSubscriptions.value && isLocalFirstSupported() && _cachedAdapterDid === did`. Call `getAdapter(did)` first to warm the cache.
+  - `sync_meta` is client-only like `outbox` — do NOT add it to the shared `SCHEMA_SQL`.
+  - Stubbing `fetch` in tapout tests: return a plain object matching `{ ok, status, json }` — no need for a real `Response`.
+---

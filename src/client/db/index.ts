@@ -3,6 +3,7 @@ import { remoteAdapter } from './remote-adapter.js'
 import { createLocalAdapter } from './local-adapter.js'
 import { openLocalDb, OPFSUnavailableError } from './sqlite-init.js'
 import type { DbAdapter } from './types.js'
+import type { Sqlite3Db } from './sqlite-init.js'
 
 export { remoteAdapter } from './remote-adapter.js'
 export { initSqlite, OPFSUnavailableError } from './sqlite-init.js'
@@ -32,6 +33,7 @@ export function _resetSupportedCache ():void {
 
 let _cachedAdapter:DbAdapter|null = null
 let _cachedAdapterDid:string|null = null
+let _cachedDb:Sqlite3Db|null = null
 
 /**
  * Returns `localAdapter` when the user has opted in AND the browser
@@ -46,6 +48,7 @@ export async function getAdapter (did?:string):Promise<DbAdapter> {
         }
         try {
             const db = await openLocalDb(did)
+            _cachedDb = db
             _cachedAdapter = createLocalAdapter(db)
             _cachedAdapterDid = did
             return _cachedAdapter
@@ -59,8 +62,25 @@ export async function getAdapter (did?:string):Promise<DbAdapter> {
     return remoteAdapter
 }
 
+/**
+ * Returns the cached local DB if local-first is active,
+ * null otherwise. Useful for pull/push-sync operations.
+ */
+export function getLocalDb (did?:string):Sqlite3Db|null {
+    if (
+        syncSubscriptions.value &&
+        isLocalFirstSupported() &&
+        did &&
+        _cachedAdapterDid === did
+    ) {
+        return _cachedDb
+    }
+    return null
+}
+
 /** Reset adapter cache (for tests). */
 export function _resetAdapterCache ():void {
     _cachedAdapter = null
     _cachedAdapterDid = null
+    _cachedDb = null
 }

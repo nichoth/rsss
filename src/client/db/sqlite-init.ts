@@ -1,5 +1,13 @@
 import { SCHEMA_SQL } from '../../shared/schema.js'
 
+export const SYNC_META_SQL = `
+    CREATE TABLE IF NOT EXISTS sync_meta (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        last_pull_at TEXT
+    );
+    INSERT OR IGNORE INTO sync_meta (id, last_pull_at) VALUES (1, NULL);
+`
+
 const OUTBOX_SQL = `
     CREATE TABLE IF NOT EXISTS outbox (
         id INTEGER PRIMARY KEY,
@@ -66,6 +74,7 @@ export async function openLocalDb (did:string):Promise<Sqlite3Db> {
         const db = new sqlite3.oo1.DB(':memory:')
         db.exec(SCHEMA_SQL)
         db.exec(OUTBOX_SQL)
+        db.exec(SYNC_META_SQL)
         return db as Sqlite3Db
     }
 
@@ -87,5 +96,6 @@ export async function openLocalDb (did:string):Promise<Sqlite3Db> {
     const db = new poolUtil.OpfsSAHPoolDb(filename)
     db.exec(SCHEMA_SQL)
     db.exec(OUTBOX_SQL)
+    db.exec(SYNC_META_SQL)
     return db
 }

@@ -8,7 +8,8 @@ import {
 import Route from 'route-event'
 import ky from 'ky'
 import Debug from '@substrate-system/debug'
-import { getAdapter } from './db/index.js'
+import { getAdapter, getLocalDb } from './db/index.js'
+import { pullSync } from './db/pull-sync.js'
 const debug = Debug('rsss:state')
 
 const USER_STORAGE_KEY = 'rsss_user'
@@ -195,13 +196,39 @@ export function State ():AppState {
     })
 
     /**
-     * Load data after authentication
+     * Load data after authentication; run pullSync when
+     * local-first adapter is active.
      */
     effect(() => {
         if (!state.isAuthenticated.value) return
-        State.loadFeeds(state)
-        State.loadItems(state)
-        State.loadCounts(state)
+        const did = state.user.value?.did
+
+        getAdapter(did).then(() => {
+            const db = getLocalDb(did)
+            if (db) {
+                pullSync(db).catch(
+                    err => debug('pullSync error:', err)
+                ).then(() => {
+                    State.loadFeeds(state)
+                    State.loadItems(state)
+                    State.loadCounts(state)
+                })
+            } else {
+                State.loadFeeds(state)
+                State.loadItems(state)
+                State.loadCounts(state)
+            }
+        })
+    })
+
+    window.addEventListener('online', () => {
+        const did = state.user.value?.did
+        const db = getLocalDb(did)
+        if (db) {
+            pullSync(db).catch(
+                err => debug('pullSync online error:', err)
+            )
+        }
     })
 
     State.checkAuth(state)
