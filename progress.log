@@ -1,3 +1,19 @@
+## 2026-04-24 - US-017
+- What was implemented: Reset/disable flow for local-first mode.
+  - Disabling `syncSubscriptions` toggle shows a confirmation dialog listing what will be deleted (subscriptions cache, items cache, pending offline changes count). On confirm: best-effort pushSync drain, OPFS file removed, adapter cache cleared, toggle flipped to false. On cancel: toggle reverted to `true`.
+  - If offline with pending changes, an additional warning is shown before proceeding.
+  - "Reset local data" button in Settings (visible when local-first is on and not bootstrapping) wipes OPFS + re-bootstraps without changing the toggle. Also best-effort pushSync before wiping.
+- Files changed:
+  - `src/client/db/push-sync.ts` (added exported `getOutboxCount`)
+  - `src/client/db/index.ts` (added `disableLocalFirst`, `resetLocalFirst`, re-exports `getOutboxCount`)
+  - `src/client/routes/settings.ts` (updated `handleSyncChange` to async with confirmation; added `handleReset`; added reset button in template)
+  - `src/client/routes/settings.css` (added `.reset-local-data` and `.btn-reset` styles)
+  - `specs/prd.json` (US-017 passes: true)
+- **Learnings for future iterations:**
+  - `disableLocalFirst` / `resetLocalFirst` live in `index.ts` (not `bootstrap.ts`) to avoid circular imports — `bootstrap.ts` is imported by `index.ts`, so the disable logic that uses both adapter cache and bootstrap state goes in `index.ts`.
+  - `getOutboxCount` exported from `push-sync.ts` lets the UI show pending count without re-opening the DB.
+---
+
 ## 2026-04-24 - US-016
 - What was implemented: First-time bootstrap flow with progress indicator. When `syncSubscriptions` flips to `true` in Settings, `bootstrapLocalDb(did)` is called: opens the OPFS DB, runs a full `pullSync` (no `since`), and updates `bootstrapInProgress`/`bootstrapFeedsCount`/`bootstrapItemsCount`/`bootstrapError` signals live. `getAdapter()` returns `remoteAdapter` while bootstrap is in progress. On failure: reverts `syncSubscriptions` to false, saves settings, removes the OPFS file. Settings UI shows running counts and error message.
 - Files changed:

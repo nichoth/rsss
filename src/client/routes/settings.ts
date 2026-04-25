@@ -15,7 +15,12 @@ import {
     bootstrapInProgress,
     bootstrapFeedsCount,
     bootstrapItemsCount,
-    bootstrapError
+    bootstrapError,
+    disableLocalFirst,
+    resetLocalFirst,
+    getBootstrappedDb,
+    getLocalDb,
+    getOutboxCount
 } from '../db/index.js'
 import '@substrate-system/check-box'
 import './settings.css'
@@ -34,19 +39,72 @@ export const SettingsRoute:FunctionComponent<{
     const inProgress = bootstrapInProgress.value
     const bError = bootstrapError.value
 
-    function handleSyncChange (ev:Event) {
+    async function handleSyncChange (ev:Event) {
         const checked = (ev.target as HTMLInputElement).checked
+        const did = state.user.value?.did
         if (checked) {
             setSyncSubscriptions(true)
             saveLocalFirstSettings()
-            const did = state.user.value?.did
             if (did) {
                 bootstrapLocalDb(did)
             }
         } else {
-            setSyncSubscriptions(false)
-            saveLocalFirstSettings()
+            if (!did) {
+                setSyncSubscriptions(false)
+                saveLocalFirstSettings()
+                return
+            }
+            const db = getBootstrappedDb() ?? getLocalDb(did)
+            const pending = db ? getOutboxCount(db) : 0
+            const lines = [
+                'This will delete your local data on this device:',
+                '  - Subscriptions cache',
+                '  - Items cache'
+            ]
+            if (pending > 0) {
+                lines.push(
+                    `  - ${pending} pending offline change` +
+                    (pending === 1 ? '' : 's') +
+                    ' (not yet synced to server)'
+                )
+            }
+            lines.push('\nContinue?')
+            const confirmed = confirm(lines.join('\n'))
+            if (!confirmed) {
+                // revert toggle
+                setSyncSubscriptions(true)
+                saveLocalFirstSettings()
+                ;(ev.target as HTMLInputElement).checked = true
+                return
+            }
+            if (!navigator.onLine && pending > 0) {
+                alert(
+                    'You are offline. Pending changes cannot be ' +
+                    'synced and will be discarded. Proceeding anyway.'
+                )
+            }
+            await disableLocalFirst(did)
         }
+    }
+
+    async function handleReset () {
+        const did = state.user.value?.did
+        if (!did) return
+        const db = getBootstrappedDb() ?? getLocalDb(did)
+        const pending = db ? getOutboxCount(db) : 0
+        const lines = [
+            'This will wipe and re-download all local data.'
+        ]
+        if (pending > 0) {
+            lines.push(
+                `${pending} pending offline change` +
+                (pending === 1 ? '' : 's') +
+                ' will be synced before wiping.'
+            )
+        }
+        lines.push('Continue?')
+        if (!confirm(lines.join('\n'))) return
+        await resetLocalFirst(did)
     }
 
     function handleContentChange (ev:Event) {
@@ -104,6 +162,19 @@ export const SettingsRoute:FunctionComponent<{
                 <p class="bootstrap-error">
                     Setup failed: ${bError}
                 </p>
+            `}
+            ${syncSubscriptions.value && !inProgress && html`
+                <div class="reset-local-data">
+                    <button
+                        class="btn-reset"
+                        onClick=${handleReset}
+                    >
+                        Reset local data
+                    </button>
+                    <p class="reset-desc">
+                        Wipe all local data and re-download from server.
+                    </p>
+                </div>
             `}
         </section>
 

@@ -85,6 +85,39 @@
         color: var(--color-danger, #d32f2f);
         font-size: 1rem;
     }
+
+    .reset-local-data {
+        margin-top: 1.5rem;
+        padding-top: 1rem;
+        border-top: 1px solid var(--color-border-subtle);
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+
+        .reset-desc {
+            margin: 0;
+            color: var(--color-text-secondary);
+        }
+    }
+}
+
+.btn-reset {
+    background-color: transparent;
+    color: var(--color-danger, #d32f2f);
+    border: 1px solid var(--color-danger, #d32f2f);
+    padding: 0.4rem 0.8rem;
+    cursor: pointer;
+    flex-shrink: 0;
+
+    &:hover {
+        background-color: var(--color-danger, #d32f2f);
+        color: #fff;
+    }
+
+    &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
 }
 
 .local-first-toggle {

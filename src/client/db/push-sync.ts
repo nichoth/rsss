@@ -18,6 +18,16 @@ interface OutboxRow {
     last_error:string|null
 }
 
+export function getOutboxCount (db:Sqlite3Db):number {
+    const rows:Array<{ n:number }> = []
+    db.exec({
+        sql: 'SELECT COUNT(*) AS n FROM outbox',
+        rowMode: 'object',
+        resultRows: rows as unknown[]
+    })
+    return rows[0]?.n ?? 0
+}
+
 function getOutboxRows (db:Sqlite3Db):OutboxRow[] {
     const rows:OutboxRow[] = []
     db.exec({

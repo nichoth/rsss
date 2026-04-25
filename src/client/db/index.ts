@@ -1,8 +1,23 @@
-import { syncSubscriptions } from '../local-first-settings.js'
+import { batch } from '@preact/signals'
+import {
+    syncSubscriptions,
+    setSyncSubscriptions,
+    saveLocalFirstSettings
+} from '../local-first-settings.js'
 import { remoteAdapter } from './remote-adapter.js'
 import { createLocalAdapter } from './local-adapter.js'
-import { openLocalDb, OPFSUnavailableError } from './sqlite-init.js'
-import { bootstrapInProgress, getBootstrappedDb } from './bootstrap.js'
+import {
+    openLocalDb,
+    OPFSUnavailableError,
+    removeOpfsDb
+} from './sqlite-init.js'
+import {
+    bootstrapInProgress,
+    getBootstrappedDb,
+    clearBootstrappedDb,
+    bootstrapLocalDb
+} from './bootstrap.js'
+import { pushSync } from './push-sync.js'
 import type { DbAdapter } from './types.js'
 import type { Sqlite3Db } from './sqlite-init.js'
 
@@ -18,6 +33,7 @@ export {
     bootstrapError,
     clearBootstrappedDb
 } from './bootstrap.js'
+export { getOutboxCount } from './push-sync.js'
 
 let _supportedCache:boolean|null = null
 
@@ -99,4 +115,54 @@ export function _resetAdapterCache ():void {
     _cachedAdapter = null
     _cachedAdapterDid = null
     _cachedDb = null
+}
+
+/**
+ * Disable local-first for `did`:
+ * 1. Best-effort pushSync drain (skipped if offline).
+ * 2. Removes the OPFS file.
+ * 3. Clears in-memory adapter/DB caches.
+ * 4. Flips syncSubscriptions to false and persists.
+ */
+export async function disableLocalFirst (
+    did:string,
+    fetchFn:typeof fetch = fetch
+):Promise<void> {
+    const db = getBootstrappedDb() ?? _cachedDb
+    if (db && navigator.onLine) {
+        try {
+            await pushSync(db, fetchFn as Parameters<typeof pushSync>[1])
+        } catch (_) {
+            // best-effort — ignore errors
+        }
+    }
+    clearBootstrappedDb()
+    _resetAdapterCache()
+    await removeOpfsDb(did)
+    batch(() => {
+        setSyncSubscriptions(false)
+    })
+    saveLocalFirstSettings()
+}
+
+/**
+ * Reset local data for `did`: wipe the OPFS file and immediately
+ * re-bootstrap without changing the toggle.
+ */
+export async function resetLocalFirst (
+    did:string,
+    fetchFn:typeof fetch = fetch
+):Promise<void> {
+    const db = getBootstrappedDb() ?? _cachedDb
+    if (db && navigator.onLine) {
+        try {
+            await pushSync(db, fetchFn as Parameters<typeof pushSync>[1])
+        } catch (_) {
+            // best-effort
+        }
+    }
+    clearBootstrappedDb()
+    _resetAdapterCache()
+    await removeOpfsDb(did)
+    await bootstrapLocalDb(did, fetchFn)
 }
