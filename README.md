@@ -11,7 +11,7 @@ See [rsss.space](https://rsss.space/).
 - [Develop](#develop)
 - [Architecture](#architecture)
   * [Local First](#local-first)
-  * [Sync (remote -> local)](#sync-remote---local)
+  * [Sync (remote <-> local)](#sync-remote---local)
   * [Worker (Hono) - Main entry point](#worker-hono---main-entry-point)
   * [Durable Object per user (UserDO)](#durable-object-per-user-userdo)
   * [Frontend](#frontend)
@@ -36,20 +36,28 @@ npm start
 
 ### Local First
 
-Reads are always via `IndexedDB`.
+Local-first reads use a `SQLite` database (`@sqlite.org/sqlite-wasm`)
+persisted to `OPFS` via `FileSystemSyncAccessHandle`.
 
-* `loadFeeds()`, `loadItems()`, `loadCounts()` read exclusively
-  from `IndexedDB`.
-* Works identically whether online or offline
+* `loadFeeds()`, `loadItems()`, `loadCounts()` read from the local
+  SQLite DB through `localAdapter`.
+* Works identically whether online or offline.
+* Opt-in and gated on capability: requires the `syncSubscriptions`
+  setting plus a cross-origin-isolated context with OPFS support.
+  When either is missing, `getAdapter()` falls back to `remoteAdapter`,
+  which calls the user's Durable Object directly.
 
+### Sync (remote <-> local)
 
-### Sync (remote -> local)
-
-- `State.sync()` calls `localAdapter.sync()` which hits
-  `/api/sync?since=<lastSyncTime>` and upserts any new/updated feeds and items
-  into `IndexedDB`
-- Called automatically on app startup (when authenticated + online)
-- Called automatically when the browser comes back online (online event)
+- **Bootstrap** (`bootstrapLocalDb`) seeds the OPFS database on first
+  use by paging through `/api/sync` and writing rows into SQLite.
+- **Pull sync** (`pullSync`) hits `/api/sync?since=<lastSyncTime>` and
+  upserts any new/updated feeds and items into the local SQLite DB.
+- **Push sync** (`pushSync`) drains a local outbox of pending writes
+  (read/star toggles, feed add/delete, etc.) back to the server.
+- `State.sync()` triggers pull + push automatically on app startup
+  (when authenticated + online) and when the browser fires the
+  `online` event.
 
 
 ### Worker (Hono) - Main entry point
@@ -83,13 +91,20 @@ Reads are always via `IndexedDB`.
 src/
 ├── server/
 │   ├── index.ts                    # Main Hono worker
-│   ├── auth/oauth.ts               # Bluesky OAuth implementation
+│   ├── auth/                       # Bluesky OAuth implementation
 │   └── durable-objects/
-│       └── collie-user.ts          # Per-user DO with SQLite
+│       └── index.ts                # Per-user DO (UserDO) with SQLite
 └── client/
     ├── index.ts                    # Main Preact entry
     ├── state.ts                    # State management & API client
     ├── style.css                   # All styles
+    ├── db/                         # Local-first SQLite (OPFS) layer
+    │   ├── sqlite-init.ts          # wa-sqlite + OPFS open/remove
+    │   ├── local-adapter.ts        # Reads/writes against local DB
+    │   ├── remote-adapter.ts       # Fallback: calls the DO directly
+    │   ├── bootstrap.ts            # First-run seed of local DB
+    │   ├── pull-sync.ts            # Server -> local
+    │   └── push-sync.ts            # Local outbox -> server
     └── routes/
         ├── login.ts                # Login page component
         └── feed-reader.ts          # Main feed reader UI
