@@ -61,7 +61,7 @@ while [ $ITERATION -lt $MAX_ITERATIONS ]; do
 
     # 4. Execute
     TMP_CAPTURE=$(mktemp)
-    cat "$TMP_CONTEXT" | claude -p --effort "$REASONING_LEVEL" --dangerously-skip-permissions | tee "$TMP_CAPTURE"
+    cat "$TMP_CONTEXT" | claude -p --model sonnet --effort "$REASONING_LEVEL" --dangerously-skip-permissions | tee "$TMP_CAPTURE"
     RESPONSE=$(cat "$TMP_CAPTURE")
 
     # 5. Progress Detection (Commit OR File Changes)
