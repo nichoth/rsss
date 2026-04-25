@@ -150,3 +150,15 @@
   - `toggleItemRead`/`toggleItemStarred` no longer check `response.ok` since `adapter.updateItem` throws on failure — simplifies optimistic update logic.
   - `State.addFeed` return type changed from `Promise<Response>` to `Promise<void>`; the sidebar already ignored the return value.
 ---
+
+## 2026-04-24 - US-013
+- What was implemented: Added a "Local Storage" settings section to `src/client/routes/settings.ts` with two `@substrate-system/check-box` toggles — "Sync subscriptions and read state to this device" (bound to `syncSubscriptions`) and "Store article content locally for offline reading" (bound to `storeContent`). Toggles persist via `saveLocalFirstSettings()`. Content toggle is disabled when subscriptions toggle is off or when `isLocalFirstSupported()` returns false. When unsupported, an explanatory note appears. Settings are loaded on mount via `useEffect`. CSS added for toggle layout and disabled state.
+- Files changed:
+  - `src/client/routes/settings.ts` (added local-first section with check-box toggles)
+  - `src/client/routes/settings.css` (added `.local-first-section` and `.local-first-toggle` styles)
+  - `specs/prd.json` (US-013 passes: true)
+- **Learnings for future iterations:**
+  - `check-box` web component uses `onChange` in preact/htm (same as native inputs). The event target is the `<input>` inside the component, so cast to `HTMLInputElement` to read `.checked`.
+  - Pass `disabled={undefined}` (not `false`) to suppress the attribute in preact — using `|| undefined` pattern: `disabled=${condition || undefined}`.
+  - `isLocalFirstSupported()` is called at render time (cached after first call), so it's safe to call in the component body without `useMemo`.
+---

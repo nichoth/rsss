@@ -53,6 +53,26 @@
     font-style: italic;
 }
 
+.local-first-section {
+    .unsupported-note {
+        color: var(--color-text-secondary);
+        margin: 0 0 1rem;
+        font-style: italic;
+    }
+}
+
+.local-first-toggle {
+    padding: 0.5rem 0;
+
+    & check-box {
+        display: block;
+    }
+
+    & check-box[disabled] {
+        opacity: 0.5;
+    }
+}
+
 .settings-feeds-list {
     display: flex;
     flex-direction: column;
