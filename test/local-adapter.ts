@@ -248,6 +248,118 @@ test('markAllRead marks all items read', async (t) => {
     }
 })
 
+type OutboxRow = {
+    id:number
+    op:string
+    target_id:number|null
+    payload:string
+    client_op_id:string
+    client_updated_at:string
+    attempts:number
+    last_error:string|null
+}
+
+function getOutbox (db:Sqlite3Db):OutboxRow[] {
+    const rows:OutboxRow[] = []
+    db.exec({
+        sql: 'SELECT * FROM outbox ORDER BY id ASC',
+        rowMode: 'object',
+        resultRows: rows as unknown[]
+    })
+    return rows
+}
+
+test('addFeed creates an outbox row', async (t) => {
+    const db = await openLocalDb('did:test:outbox-addfeed')
+    const adapter = createLocalAdapter(db)
+    try {
+        const feed = await adapter.addFeed('https://outbox.example.com/feed')
+        const rows = getOutbox(db)
+        t.equal(rows.length, 1, 'one outbox row')
+        t.equal(rows[0].op, 'add_feed', 'op is add_feed')
+        t.equal(rows[0].target_id, feed.id, 'target_id is feed id')
+        const payload = JSON.parse(rows[0].payload)
+        t.equal(
+            payload.url,
+            'https://outbox.example.com/feed',
+            'payload contains url'
+        )
+        t.ok(rows[0].client_op_id, 'client_op_id is set')
+        t.ok(rows[0].client_updated_at, 'client_updated_at is set')
+        t.equal(rows[0].attempts, 0, 'attempts defaults to 0')
+    } finally {
+        db.close()
+    }
+})
+
+test('deleteFeed creates an outbox row', async (t) => {
+    const db = await openLocalDb('did:test:outbox-deletefeed')
+    await seedDb(db)
+    const adapter = createLocalAdapter(db)
+    try {
+        await adapter.deleteFeed(1)
+        const rows = getOutbox(db)
+        t.equal(rows.length, 1, 'one outbox row')
+        t.equal(rows[0].op, 'delete_feed', 'op is delete_feed')
+        t.equal(rows[0].target_id, 1, 'target_id is feed id')
+        const payload = JSON.parse(rows[0].payload)
+        t.equal(payload.id, 1, 'payload contains id')
+    } finally {
+        db.close()
+    }
+})
+
+test('updateItem creates an outbox row', async (t) => {
+    const db = await openLocalDb('did:test:outbox-updateitem')
+    await seedDb(db)
+    const adapter = createLocalAdapter(db)
+    try {
+        const items = await adapter.getItems({ isRead: false })
+        const itemId = items.items[0].id
+        await adapter.updateItem(itemId, { is_read: true })
+        const rows = getOutbox(db)
+        t.equal(rows.length, 1, 'one outbox row')
+        t.equal(rows[0].op, 'update_item', 'op is update_item')
+        t.equal(rows[0].target_id, itemId, 'target_id is item id')
+        const payload = JSON.parse(rows[0].payload)
+        t.equal(payload.is_read, true, 'payload contains is_read')
+        t.ok(rows[0].client_updated_at, 'client_updated_at is set')
+    } finally {
+        db.close()
+    }
+})
+
+test('markAllRead creates an outbox row (global)', async (t) => {
+    const db = await openLocalDb('did:test:outbox-markallread')
+    await seedDb(db)
+    const adapter = createLocalAdapter(db)
+    try {
+        await adapter.markAllRead()
+        const rows = getOutbox(db)
+        t.equal(rows.length, 1, 'one outbox row')
+        t.equal(rows[0].op, 'mark_all_read', 'op is mark_all_read')
+        t.equal(rows[0].target_id, null, 'target_id is null for global')
+    } finally {
+        db.close()
+    }
+})
+
+test('markAllRead creates outbox row with feedId', async (t) => {
+    const db = await openLocalDb('did:test:outbox-markallread-feed')
+    await seedDb(db)
+    const adapter = createLocalAdapter(db)
+    try {
+        await adapter.markAllRead(2)
+        const rows = getOutbox(db)
+        t.equal(rows.length, 1, 'one outbox row')
+        t.equal(rows[0].target_id, 2, 'target_id is feedId')
+        const payload = JSON.parse(rows[0].payload)
+        t.equal(payload.feedId, 2, 'payload contains feedId')
+    } finally {
+        db.close()
+    }
+})
+
 test('markAllRead with feedId marks only that feed read', async (t) => {
     const db = await openLocalDb('did:test:markallread-feed')
     await seedDb(db)

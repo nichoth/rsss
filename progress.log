@@ -114,3 +114,16 @@
   - sqlite-wasm `db.exec({ sql, bind })` is the reliable call form for parameterized writes; avoid positional-arg shorthands.
   - `addFeed` in the local adapter does not fetch remote metadata — it inserts a minimal row. Feed metadata arrives via pull-sync (US-014).
 ---
+
+## 2026-04-24 - US-010
+- What was implemented: Added `outbox` table (client-only) in `sqlite-init.ts` via `OUTBOX_SQL`. Each write method in `local-adapter.ts` now runs inside `BEGIN`/`COMMIT`/`ROLLBACK` transactions and inserts a matching outbox row with `op`, `target_id`, `payload` (JSON), `client_op_id` (crypto.randomUUID()), and `client_updated_at`. Added 5 new outbox assertion tests in `test/local-adapter.ts` (total 58 tests, full suite 98).
+- Files changed:
+  - `src/client/db/sqlite-init.ts` (added OUTBOX_SQL, applied in openLocalDb)
+  - `src/client/db/local-adapter.ts` (insertOutbox helper, transactions on all 4 write methods)
+  - `test/local-adapter.ts` (5 new outbox tests)
+  - `specs/prd.json` (US-010 passes: true)
+- **Learnings for future iterations:**
+  - The outbox table is client-only — do NOT add it to `SCHEMA_SQL` (shared), only apply it in `openLocalDb` after the shared schema.
+  - Use `db.exec('BEGIN')` / `db.exec('COMMIT')` / `db.exec('ROLLBACK')` for transactions in sqlite-wasm oo1 API. No dedicated transaction helper needed.
+  - `crypto.randomUUID()` is available in modern browsers and in the Chromium test environment used by tapout.
+---

@@ -7,6 +7,27 @@ import type {
     CountsResponse
 } from './types.js'
 
+function insertOutbox (
+    db:Sqlite3Db,
+    op:string,
+    targetId:number|null,
+    payload:Record<string, unknown>,
+    clientUpdatedAt:string
+):void {
+    db.exec({
+        sql: `INSERT INTO outbox
+            (op, target_id, payload, client_op_id, client_updated_at)
+            VALUES (?, ?, ?, ?, ?)`,
+        bind: [
+            op,
+            targetId,
+            JSON.stringify(payload),
+            crypto.randomUUID(),
+            clientUpdatedAt
+        ]
+    })
+}
+
 function escapeLike (value:string):string {
     return value
         .replace(/\\/g, '\\\\')
@@ -69,28 +90,47 @@ export function createLocalAdapter (db:Sqlite3Db):DbAdapter {
 
         async addFeed (url:string):Promise<Feed> {
             const now = new Date().toISOString()
-            db.exec({
-                sql: 'INSERT INTO feeds (url, created_at, updated_at) VALUES (?, ?, ?)',
-                bind: [url, now, now]
-            })
-            const feed = queryOne<Feed>(
-                db,
-                'SELECT * FROM feeds WHERE url = ? ORDER BY id DESC LIMIT 1',
-                [url]
-            )
-            if (!feed) throw new Error('addFeed: insert failed')
-            return feed
+            db.exec('BEGIN')
+            try {
+                db.exec({
+                    sql: 'INSERT INTO feeds (url, created_at, updated_at)' +
+                        ' VALUES (?, ?, ?)',
+                    bind: [url, now, now]
+                })
+                const feed = queryOne<Feed>(
+                    db,
+                    'SELECT * FROM feeds WHERE url = ?' +
+                        ' ORDER BY id DESC LIMIT 1',
+                    [url]
+                )
+                if (!feed) throw new Error('addFeed: insert failed')
+                insertOutbox(db, 'add_feed', feed.id, { url }, now)
+                db.exec('COMMIT')
+                return feed
+            } catch (err) {
+                db.exec('ROLLBACK')
+                throw err
+            }
         },
 
         async deleteFeed (id:number):Promise<void> {
-            db.exec({
-                sql: 'DELETE FROM items WHERE feed_id = ?',
-                bind: [id]
-            })
-            db.exec({
-                sql: 'DELETE FROM feeds WHERE id = ?',
-                bind: [id]
-            })
+            const now = new Date().toISOString()
+            db.exec('BEGIN')
+            try {
+                db.exec({
+                    sql: 'DELETE FROM items WHERE feed_id = ?',
+                    bind: [id]
+                })
+                db.exec({
+                    sql: 'DELETE FROM feeds WHERE id = ?',
+                    bind: [id]
+                })
+                insertOutbox(db, 'delete_feed', id, { id }, now)
+                db.exec('COMMIT')
+            } catch (err) {
+                db.exec('ROLLBACK')
+                throw err
+            }
         },
 
         async getItems (options = {}):Promise<ItemsResponse> {
@@ -206,24 +246,55 @@ export function createLocalAdapter (db:Sqlite3Db):DbAdapter {
             }
             if (fields.length === 0) return
 
+            const now = new Date().toISOString()
             fields.push("updated_at = datetime('now')")
             params.push(id)
-            db.exec({
-                sql: `UPDATE items SET ${fields.join(', ')} WHERE id = ?`,
-                bind: params
-            })
+
+            db.exec('BEGIN')
+            try {
+                db.exec({
+                    sql: `UPDATE items SET ${fields.join(', ')} WHERE id = ?`,
+                    bind: params
+                })
+                insertOutbox(db, 'update_item', id, {
+                    id,
+                    ...updates
+                }, now)
+                db.exec('COMMIT')
+            } catch (err) {
+                db.exec('ROLLBACK')
+                throw err
+            }
         },
 
         async markAllRead (feedId?:number):Promise<void> {
-            if (feedId !== undefined) {
-                db.exec({
-                    sql: "UPDATE items SET is_read = 1, updated_at = datetime('now') WHERE feed_id = ? AND is_read = 0",
-                    bind: [feedId]
-                })
-            } else {
-                db.exec({
-                    sql: "UPDATE items SET is_read = 1, updated_at = datetime('now') WHERE is_read = 0"
-                })
+            const now = new Date().toISOString()
+            db.exec('BEGIN')
+            try {
+                if (feedId !== undefined) {
+                    db.exec({
+                        sql: 'UPDATE items SET is_read = 1,' +
+                            " updated_at = datetime('now')" +
+                            ' WHERE feed_id = ? AND is_read = 0',
+                        bind: [feedId]
+                    })
+                } else {
+                    db.exec({
+                        sql: 'UPDATE items SET is_read = 1,' +
+                            " updated_at = datetime('now') WHERE is_read = 0"
+                    })
+                }
+                insertOutbox(
+                    db,
+                    'mark_all_read',
+                    feedId ?? null,
+                    feedId !== undefined ? { feedId } : {},
+                    now
+                )
+                db.exec('COMMIT')
+            } catch (err) {
+                db.exec('ROLLBACK')
+                throw err
             }
         }
     }

@@ -1,5 +1,18 @@
 import { SCHEMA_SQL } from '../../shared/schema.js'
 
+const OUTBOX_SQL = `
+    CREATE TABLE IF NOT EXISTS outbox (
+        id INTEGER PRIMARY KEY,
+        op TEXT NOT NULL,
+        target_id INTEGER,
+        payload TEXT NOT NULL,
+        client_op_id TEXT NOT NULL UNIQUE,
+        client_updated_at TEXT NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT
+    );
+`
+
 export class OPFSUnavailableError extends Error {
     constructor () {
         super('OPFS is not available in this browser')
@@ -52,6 +65,7 @@ export async function openLocalDb (did:string):Promise<Sqlite3Db> {
     if (_testMode) {
         const db = new sqlite3.oo1.DB(':memory:')
         db.exec(SCHEMA_SQL)
+        db.exec(OUTBOX_SQL)
         return db as Sqlite3Db
     }
 
@@ -72,5 +86,6 @@ export async function openLocalDb (did:string):Promise<Sqlite3Db> {
     const filename = `rsss-${did.replace(/[^a-z0-9]/gi, '_')}.db`
     const db = new poolUtil.OpfsSAHPoolDb(filename)
     db.exec(SCHEMA_SQL)
+    db.exec(OUTBOX_SQL)
     return db
 }
