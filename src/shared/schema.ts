@@ -1,0 +1,70 @@
+/**
+ * Shared SQLite schema for feeds and items tables.
+ * Used by both the Cloudflare Durable Object (server) and
+ * the browser's OPFS-backed SQLite database (client).
+ *
+ * Server-only ALTER TABLE migrations (adding updated_at to
+ * pre-existing rows) remain in the Durable Object and must
+ * run between TABLES_SQL and INDEXES_SQL.
+ */
+export const TABLES_SQL = `
+    CREATE TABLE IF NOT EXISTS feeds (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        url TEXT NOT NULL UNIQUE,
+        title TEXT,
+        description TEXT,
+        site_url TEXT,
+        last_fetched TEXT,
+        is_locally_cached INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        feed_id INTEGER NOT NULL,
+        guid TEXT NOT NULL,
+        title TEXT,
+        link TEXT,
+        description TEXT,
+        content TEXT,
+        author TEXT,
+        pub_date TEXT,
+        is_read INTEGER DEFAULT 0,
+        is_starred INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (feed_id) REFERENCES feeds(id) ON DELETE CASCADE,
+        UNIQUE(feed_id, guid)
+    );
+`
+
+export const INDEXES_SQL = `
+    CREATE INDEX IF NOT EXISTS idx_items_feed_id ON items(feed_id);
+    CREATE INDEX IF NOT EXISTS idx_items_is_read ON items(is_read);
+    CREATE INDEX IF NOT EXISTS idx_items_is_starred ON items(is_starred);
+    CREATE INDEX IF NOT EXISTS idx_items_pub_date ON items(pub_date DESC);
+    CREATE INDEX IF NOT EXISTS idx_items_updated_at ON items(updated_at);
+    CREATE INDEX IF NOT EXISTS idx_feeds_updated_at ON feeds(updated_at);
+`
+
+export const TRIGGERS_SQL = `
+    CREATE TRIGGER IF NOT EXISTS feeds_updated_at
+    AFTER UPDATE ON feeds
+    FOR EACH ROW
+    WHEN OLD.updated_at = NEW.updated_at OR NEW.updated_at IS NULL
+    BEGIN
+        UPDATE feeds SET updated_at = datetime('now') WHERE id = NEW.id;
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS items_updated_at
+    AFTER UPDATE ON items
+    FOR EACH ROW
+    WHEN OLD.updated_at = NEW.updated_at OR NEW.updated_at IS NULL
+    BEGIN
+        UPDATE items SET updated_at = datetime('now') WHERE id = NEW.id;
+    END;
+`
+
+/** Full schema: tables + indexes + triggers. Suitable for fresh databases. */
+export const SCHEMA_SQL = TABLES_SQL + INDEXES_SQL + TRIGGERS_SQL

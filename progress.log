@@ -1,0 +1,19 @@
+## Codebase Patterns
+
+- **Schema split pattern**: The shared schema exports `TABLES_SQL`, `INDEXES_SQL`, `TRIGGERS_SQL`, and `SCHEMA_SQL` (combined). The DO must apply them in order: tables → server migrations → indexes/triggers. Client (OPFS) can use `SCHEMA_SQL` directly on a fresh DB.
+- **Test command**: `npm run test:db` runs `test/db-adapter.ts` via esbuild + tapout in a browser (Chromium). All DB adapter interface tests live there.
+- **Import paths**: TypeScript source uses `.js` extensions in imports (e.g. `../../shared/schema.js`) for ESM compatibility with esbuild.
+
+---
+
+## 2026-04-24 - US-001
+- What was implemented: Extracted shared SQL schema (feeds/items CREATE TABLE, indexes, triggers) from the Durable Object into `src/shared/schema.ts`. Exports `TABLES_SQL`, `INDEXES_SQL`, `TRIGGERS_SQL`, and combined `SCHEMA_SQL`. The DO now imports and applies these in order, with server-only ALTER TABLE migrations running between table creation and index creation.
+- Files changed:
+  - `src/shared/schema.ts` (new)
+  - `src/server/durable-objects/index.ts` (updated initDatabase to use shared schema)
+  - `specs/prd.json` (US-001 passes: true)
+- **Learnings for future iterations:**
+  - The DO's `initDatabase` must run in this order: CREATE TABLE → server migrations (ALTER TABLE) → CREATE INDEX/TRIGGER. The updated_at index requires the column to exist first.
+  - Splitting SCHEMA_SQL into TABLES_SQL + INDEXES_SQL + TRIGGERS_SQL lets the DO interleave server-only migration steps.
+  - `npm run test:db` passes 35 tests (all mock-adapter interface tests).
+---

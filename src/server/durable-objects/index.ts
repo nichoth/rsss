@@ -1,6 +1,7 @@
 import { DurableObject } from 'cloudflare:workers'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import { TABLES_SQL, INDEXES_SQL, TRIGGERS_SQL } from '../../shared/schema.js'
 
 export interface Env {
     USER:DurableObjectNamespace<UserDO>
@@ -51,81 +52,18 @@ export class UserDO extends DurableObject<Env> {
     }
 
     private initDatabase () {
-        // Create feeds table
-        this.sql.exec(`
-            CREATE TABLE IF NOT EXISTS feeds (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                url TEXT NOT NULL UNIQUE,
-                title TEXT,
-                description TEXT,
-                site_url TEXT,
-                last_fetched TEXT,
-                is_locally_cached INTEGER DEFAULT 1,
-                created_at TEXT DEFAULT (datetime('now')),
-                updated_at TEXT DEFAULT (datetime('now'))
-            )
-        `)
+        // 1. Create tables (shared schema)
+        this.sql.exec(TABLES_SQL)
 
-        // Create items table
-        this.sql.exec(`
-            CREATE TABLE IF NOT EXISTS items (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                feed_id INTEGER NOT NULL,
-                guid TEXT NOT NULL,
-                title TEXT,
-                link TEXT,
-                description TEXT,
-                content TEXT,
-                author TEXT,
-                pub_date TEXT,
-                is_read INTEGER DEFAULT 0,
-                is_starred INTEGER DEFAULT 0,
-                created_at TEXT DEFAULT (datetime('now')),
-                updated_at TEXT DEFAULT (datetime('now')),
-                FOREIGN KEY (feed_id) REFERENCES feeds(id) ON DELETE CASCADE,
-                UNIQUE(feed_id, guid)
-            )
-        `)
-
-        // Create indexes (excluding updated_at - added after migration)
-        this.sql.exec(`
-            CREATE INDEX IF NOT EXISTS idx_items_feed_id ON items(feed_id);
-            CREATE INDEX IF NOT EXISTS idx_items_is_read ON items(is_read);
-            CREATE INDEX IF NOT EXISTS idx_items_is_starred ON items(is_starred);
-            CREATE INDEX IF NOT EXISTS idx_items_pub_date ON items(pub_date DESC);
-        `)
-
-        // Migration: Add updated_at column to existing tables if missing
+        // 2. Server-only migrations: backfill updated_at and is_locally_cached
+        // on rows that existed before those columns were added.
+        // Must run after table creation but before updated_at indexes.
         this.migrateAddUpdatedAt()
         this.migrateAddIsLocallyCached()
 
-        // Create indexes on updated_at (after migration ensures column exists)
-        this.sql.exec(`
-            CREATE INDEX IF NOT EXISTS idx_items_updated_at ON items(updated_at);
-            CREATE INDEX IF NOT EXISTS idx_feeds_updated_at ON feeds(updated_at);
-        `)
-
-        // Create triggers to auto-update updated_at
-        // Using WHEN clause to prevent infinite recursion
-        this.sql.exec(`
-            CREATE TRIGGER IF NOT EXISTS feeds_updated_at
-            AFTER UPDATE ON feeds
-            FOR EACH ROW
-            WHEN OLD.updated_at = NEW.updated_at OR NEW.updated_at IS NULL
-            BEGIN
-                UPDATE feeds SET updated_at = datetime('now') WHERE id = NEW.id;
-            END
-        `)
-
-        this.sql.exec(`
-            CREATE TRIGGER IF NOT EXISTS items_updated_at
-            AFTER UPDATE ON items
-            FOR EACH ROW
-            WHEN OLD.updated_at = NEW.updated_at OR NEW.updated_at IS NULL
-            BEGIN
-                UPDATE items SET updated_at = datetime('now') WHERE id = NEW.id;
-            END
-        `)
+        // 3. Create indexes and triggers (shared schema) - idempotent
+        this.sql.exec(INDEXES_SQL)
+        this.sql.exec(TRIGGERS_SQL)
     }
 
     /**
