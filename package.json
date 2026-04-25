@@ -15,6 +15,7 @@
     "test:local-adapter": "esbuild ./test/local-adapter.ts --bundle --loader:.wasm=dataurl | tapout",
     "test:adapter-factory": "esbuild ./test/adapter-factory.ts --bundle | tapout",
     "test:pull-sync": "esbuild ./test/pull-sync.ts --bundle --loader:.wasm=dataurl | tapout",
+    "test:push-sync": "esbuild ./test/push-sync.ts --bundle --loader:.wasm=dataurl | tapout",
     "build": "mkdir -p ./public && rm -rf ./public/* && npx vite build $([ \"$NODE_ENV\" != \"production\" ] && echo \"--mode staging\")",
     "start": "vite",
     "toc": "markdown-toc --maxdepth 3 -i README.md",

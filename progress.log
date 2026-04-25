@@ -179,3 +179,17 @@
   - `sync_meta` is client-only like `outbox` — do NOT add it to the shared `SCHEMA_SQL`.
   - Stubbing `fetch` in tapout tests: return a plain object matching `{ ok, status, json }` — no need for a real `Response`.
 ---
+
+## 2026-04-24 - US-015
+- What was implemented: Created `src/client/db/push-sync.ts` exporting `pushSync(db, fetchFn?)` and `PushSyncAuthError`. Drains outbox rows in `id` order, mapping each `op` to the correct REST endpoint. 2xx → delete row; 5xx/network error → increment `attempts`/`last_error`; 409 → upsert server's authoritative row then delete; 401 → throw `PushSyncAuthError` and halt. Wired `pushSync` into `state.ts` to run after every successful `pullSync` and on the `online` event.
+- Files changed:
+  - `src/client/db/push-sync.ts` (new)
+  - `src/client/state.ts` (import and wire pushSync)
+  - `test/push-sync.ts` (new — 5 tests: happy path, 5xx retry, 409 reconcile, 401 halt, network error)
+  - `package.json` (added test:push-sync script)
+  - `specs/prd.json` (US-015 passes: true)
+- **Learnings for future iterations:**
+  - `pushSync` uses the same `FetchLike` stub pattern as `pullSync` — plain object `{ ok, status, json }` is sufficient.
+  - The `op` field in outbox rows maps: `add_feed` → POST /api/feeds, `delete_feed` → DELETE /api/feeds/:id, `update_item` → PATCH /api/items/:id, `mark_all_read` → POST /api/items/mark-all-read.
+  - 409 body from the server may be a single object (for item/feed) or an array (for mark-all-read); handle both shapes.
+---

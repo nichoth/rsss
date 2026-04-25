@@ -1,0 +1,278 @@
+import { test } from '@substrate-system/tapzero'
+// @ts-expect-error -- no type declarations for .wasm imports
+import wasmUrl from '@sqlite.org/sqlite-wasm/sqlite3.wasm'
+import {
+    openLocalDb,
+    setTestMode
+} from '../src/client/db/sqlite-init.js'
+import {
+    pushSync,
+    PushSyncAuthError
+} from '../src/client/db/push-sync.js'
+import type { Sqlite3Db } from '../src/client/db/sqlite-init.js'
+
+setTestMode(true, wasmUrl as string)
+
+type FakeFetch = (
+    url:string,
+    init?:RequestInit
+) => Promise<{ ok:boolean; status:number; json:() => Promise<unknown> }>
+
+function makeFetch (
+    status:number,
+    body:unknown = {}
+):FakeFetch {
+    return async (_url, _init) => ({
+        ok: status >= 200 && status < 300,
+        status,
+        json: async () => body
+    })
+}
+
+function queryOne<T> (
+    db:Sqlite3Db,
+    sql:string,
+    bind?:unknown[]
+):T|undefined {
+    const rows:T[] = []
+    db.exec({
+        sql,
+        bind: bind as Parameters<typeof db.exec>[0]['bind'],
+        rowMode: 'object',
+        resultRows: rows as unknown[]
+    })
+    return rows[0]
+}
+
+function queryAll<T> (
+    db:Sqlite3Db,
+    sql:string,
+    bind?:unknown[]
+):T[] {
+    const rows:T[] = []
+    db.exec({
+        sql,
+        bind: bind as Parameters<typeof db.exec>[0]['bind'],
+        rowMode: 'object',
+        resultRows: rows as unknown[]
+    })
+    return rows
+}
+
+function seedFeed (db:Sqlite3Db):number {
+    db.exec({
+        sql: `INSERT INTO feeds (url, created_at, updated_at)
+              VALUES ('https://example.com/feed',
+                '2026-01-01 00:00:00', '2026-01-01 00:00:00')`
+    })
+    const row = queryOne<{ id:number }>(
+        db,
+        'SELECT id FROM feeds ORDER BY id DESC LIMIT 1'
+    )
+    return row!.id
+}
+
+function seedItem (db:Sqlite3Db, feedId:number):number {
+    db.exec({
+        sql: `INSERT INTO items
+            (feed_id, guid, title, link, is_read, is_starred,
+             created_at, updated_at)
+            VALUES (?, 'guid-1', 'Item 1', 'https://example.com/1',
+                0, 0, '2026-01-01 00:00:00', '2026-01-01 00:00:00')`,
+        bind: [feedId]
+    })
+    const row = queryOne<{ id:number }>(
+        db,
+        'SELECT id FROM items ORDER BY id DESC LIMIT 1'
+    )
+    return row!.id
+}
+
+// ── happy path ────────────────────────────────────────────────────────────────
+
+test('pushSync: happy path deletes outbox row on 2xx', async (t) => {
+    const db = await openLocalDb('did:test:push-happy')
+    try {
+        const feedId = seedFeed(db)
+        const itemId = seedItem(db, feedId)
+
+        // Insert a manual outbox row (update_item)
+        db.exec({
+            sql: `INSERT INTO outbox
+                (op, target_id, payload, client_op_id, client_updated_at)
+                VALUES ('update_item', ?, ?, ?, ?)`,
+            bind: [
+                itemId,
+                JSON.stringify({ id: itemId, is_read: true }),
+                'op-uuid-1',
+                '2026-01-02 00:00:00'
+            ]
+        })
+
+        let capturedUrl = ''
+        let capturedBody = ''
+        const okFetch:FakeFetch = async (url, init) => {
+            capturedUrl = url
+            capturedBody = init?.body as string
+            return { ok: true, status: 200, json: async () => ({}) }
+        }
+
+        await pushSync(db, okFetch)
+
+        t.ok(capturedUrl.includes('/api/items/'), 'called correct endpoint')
+        const parsed = JSON.parse(capturedBody) as Record<string, unknown>
+        t.equal(parsed.client_op_id, 'op-uuid-1', 'client_op_id in body')
+        t.equal(
+            parsed.client_updated_at,
+            '2026-01-02 00:00:00',
+            'client_updated_at in body'
+        )
+
+        const row = queryOne(db, 'SELECT * FROM outbox WHERE id IS NOT NULL')
+        t.equal(row, undefined, 'outbox row deleted on 2xx')
+    } finally {
+        db.close()
+    }
+})
+
+// ── 5xx retry ─────────────────────────────────────────────────────────────────
+
+test('pushSync: 5xx increments attempts and preserves row', async (t) => {
+    const db = await openLocalDb('did:test:push-5xx')
+    try {
+        db.exec({
+            sql: `INSERT INTO outbox
+                (op, target_id, payload, client_op_id, client_updated_at)
+                VALUES ('add_feed', NULL, ?, 'op-uuid-2', '2026-01-01 00:00:00')`,
+            bind: [JSON.stringify({ url: 'https://ex.com/feed' })]
+        })
+
+        await pushSync(db, makeFetch(500))
+
+        const row = queryOne<{
+            attempts:number
+            last_error:string
+        }>(db, 'SELECT attempts, last_error FROM outbox LIMIT 1')
+        t.equal(row?.attempts, 1, 'attempts incremented to 1')
+        t.ok(
+            row?.last_error?.includes('500'),
+            'last_error records HTTP status'
+        )
+    } finally {
+        db.close()
+    }
+})
+
+// ── 409 reconciliation ────────────────────────────────────────────────────────
+
+test('pushSync: 409 upserts server row and deletes outbox', async (t) => {
+    const db = await openLocalDb('did:test:push-409')
+    try {
+        const feedId = seedFeed(db)
+        const itemId = seedItem(db, feedId)
+
+        db.exec({
+            sql: `INSERT INTO outbox
+                (op, target_id, payload, client_op_id, client_updated_at)
+                VALUES ('update_item', ?, ?, 'op-uuid-3', '2026-01-01 00:00:00')`,
+            bind: [
+                itemId,
+                JSON.stringify({ id: itemId, is_read: true })
+            ]
+        })
+
+        const serverItem = {
+            id: itemId,
+            feed_id: feedId,
+            guid: 'guid-1',
+            title: 'Updated by server',
+            link: 'https://example.com/1',
+            description: null,
+            content: null,
+            author: null,
+            pub_date: null,
+            is_read: 0,
+            is_starred: 0,
+            created_at: '2026-01-01 00:00:00',
+            updated_at: '2026-01-03 00:00:00'
+        }
+
+        await pushSync(db, makeFetch(409, serverItem))
+
+        const item = queryOne<{ title:string; updated_at:string }>(
+            db,
+            'SELECT title, updated_at FROM items WHERE id = ?',
+            [itemId]
+        )
+        t.equal(item?.title, 'Updated by server', 'server title upserted')
+        t.equal(
+            item?.updated_at,
+            '2026-01-03 00:00:00',
+            'server updated_at upserted'
+        )
+
+        const remaining = queryAll(db, 'SELECT * FROM outbox')
+        t.equal(remaining.length, 0, 'outbox row removed after 409')
+    } finally {
+        db.close()
+    }
+})
+
+// ── 401 halt ──────────────────────────────────────────────────────────────────
+
+test('pushSync: 401 throws PushSyncAuthError and preserves outbox', async (t) => {
+    const db = await openLocalDb('did:test:push-401')
+    try {
+        db.exec({
+            sql: `INSERT INTO outbox
+                (op, target_id, payload, client_op_id, client_updated_at)
+                VALUES ('add_feed', NULL, ?, 'op-uuid-4', '2026-01-01 00:00:00')`,
+            bind: [JSON.stringify({ url: 'https://ex.com/feed2' })]
+        })
+
+        let threw = false
+        try {
+            await pushSync(db, makeFetch(401))
+        } catch (err) {
+            threw = err instanceof PushSyncAuthError
+        }
+        t.ok(threw, 'throws PushSyncAuthError')
+
+        const rows = queryAll(db, 'SELECT * FROM outbox')
+        t.equal(rows.length, 1, 'outbox row preserved on 401')
+    } finally {
+        db.close()
+    }
+})
+
+// ── network error retry ───────────────────────────────────────────────────────
+
+test('pushSync: network error increments attempts', async (t) => {
+    const db = await openLocalDb('did:test:push-networkerr')
+    try {
+        db.exec({
+            sql: `INSERT INTO outbox
+                (op, target_id, payload, client_op_id, client_updated_at)
+                VALUES ('add_feed', NULL, ?, 'op-uuid-5', '2026-01-01 00:00:00')`,
+            bind: [JSON.stringify({ url: 'https://ex.com/feed3' })]
+        })
+
+        const errFetch:FakeFetch = async () => {
+            throw new Error('Network failure')
+        }
+
+        await pushSync(db, errFetch)
+
+        const row = queryOne<{ attempts:number; last_error:string }>(
+            db,
+            'SELECT attempts, last_error FROM outbox LIMIT 1'
+        )
+        t.equal(row?.attempts, 1, 'attempts incremented')
+        t.ok(
+            row?.last_error?.includes('Network failure'),
+            'last_error set to error message'
+        )
+    } finally {
+        db.close()
+    }
+})

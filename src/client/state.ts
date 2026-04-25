@@ -10,6 +10,7 @@ import ky from 'ky'
 import Debug from '@substrate-system/debug'
 import { getAdapter, getLocalDb } from './db/index.js'
 import { pullSync } from './db/pull-sync.js'
+import { pushSync } from './db/push-sync.js'
 const debug = Debug('rsss:state')
 
 const USER_STORAGE_KEY = 'rsss_user'
@@ -209,6 +210,9 @@ export function State ():AppState {
                 pullSync(db).catch(
                     err => debug('pullSync error:', err)
                 ).then(() => {
+                    pushSync(db).catch(
+                        err => debug('pushSync error:', err)
+                    )
                     State.loadFeeds(state)
                     State.loadItems(state)
                     State.loadCounts(state)
@@ -227,7 +231,11 @@ export function State ():AppState {
         if (db) {
             pullSync(db).catch(
                 err => debug('pullSync online error:', err)
-            )
+            ).then(() => {
+                pushSync(db).catch(
+                    err => debug('pushSync online error:', err)
+                )
+            })
         }
     })
 
