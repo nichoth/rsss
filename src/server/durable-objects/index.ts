@@ -128,7 +128,10 @@ export class UserDO extends DurableObject<Env> {
 
         // Add a new feed
         app.post('/feeds', async (c) => {
-            const body = await c.req.json<{ url: string }>()
+            const body = await c.req.json<{
+                url:string
+                client_updated_at?:string
+            }>()
             console.log('[DO] POST /feeds', body.url)
 
             if (!body.url) {
@@ -150,6 +153,19 @@ export class UserDO extends DurableObject<Env> {
                         '[DO] Feed already exists:',
                         body.url
                     )
+                    const existingFeed = this.sql.exec(
+                        'SELECT * FROM feeds WHERE url = ?',
+                        body.url
+                    ).one() as Record<string, unknown> | null
+                    if (
+                        body.client_updated_at !== undefined &&
+                        existingFeed
+                    ) {
+                        const serverTs = existingFeed.updated_at as string|null
+                        if (serverTs && serverTs > body.client_updated_at) {
+                            return c.json({ feed: existingFeed }, 409)
+                        }
+                    }
                     return c.json(
                         { error: 'Feed already exists' },
                         409
@@ -251,12 +267,24 @@ export class UserDO extends DurableObject<Env> {
         })
 
         // Delete a feed
-        app.delete('/feeds/:id', (c) => {
+        app.delete('/feeds/:id', async (c) => {
             const id = parseInt(c.req.param('id'))
+            const body = await c.req.json<{
+                client_updated_at?:string
+            }>().catch(() => ({}))
 
-            const feeds = this.sql.exec('SELECT id FROM feeds WHERE id = ?', id).toArray()
-            if (feeds.length === 0) {
+            const feed = this.sql.exec(
+                'SELECT * FROM feeds WHERE id = ?', id
+            ).one() as Record<string, unknown> | null
+            if (!feed) {
                 return c.json({ error: 'Feed not found' }, 404)
+            }
+
+            if (body.client_updated_at !== undefined) {
+                const serverTs = feed.updated_at as string | null
+                if (serverTs && serverTs > body.client_updated_at) {
+                    return c.json({ feed }, 409)
+                }
             }
 
             this.sql.exec('DELETE FROM feeds WHERE id = ?', id)
@@ -402,31 +430,79 @@ export class UserDO extends DurableObject<Env> {
         // Mark item as read/unread
         app.patch('/items/:id', async (c) => {
             const id = parseInt(c.req.param('id'))
-            const body = await c.req.json<{ is_read?: boolean; is_starred?: boolean }>()
+            const body = await c.req.json<{
+                is_read?:boolean
+                is_starred?:boolean
+                client_updated_at?:string
+            }>()
 
-            const item = this.sql.exec('SELECT id FROM items WHERE id = ?', id).one()
+            const item = this.sql.exec(
+                'SELECT * FROM items WHERE id = ?', id
+            ).one() as Record<string, unknown> | null
             if (!item) {
                 return c.json({ error: 'Item not found' }, 404)
             }
 
+            if (body.client_updated_at !== undefined) {
+                const serverTs = item.updated_at as string | null
+                if (serverTs && serverTs > body.client_updated_at) {
+                    return c.json({ item }, 409)
+                }
+            }
+
             if (body.is_read !== undefined) {
-                this.sql.exec('UPDATE items SET is_read = ? WHERE id = ?', body.is_read ? 1 : 0, id)
+                this.sql.exec(
+                    'UPDATE items SET is_read = ? WHERE id = ?',
+                    body.is_read ? 1 : 0, id
+                )
             }
 
             if (body.is_starred !== undefined) {
-                this.sql.exec('UPDATE items SET is_starred = ? WHERE id = ?', body.is_starred ? 1 : 0, id)
+                this.sql.exec(
+                    'UPDATE items SET is_starred = ? WHERE id = ?',
+                    body.is_starred ? 1 : 0, id
+                )
             }
 
-            const updated = this.sql.exec('SELECT * FROM items WHERE id = ?', id).one()
+            const updated = this.sql.exec(
+                'SELECT * FROM items WHERE id = ?', id
+            ).one()
             return c.json({ item: updated })
         })
 
         // Mark all items as read
         app.post('/items/mark-all-read', async (c) => {
-            const body = await c.req.json<{ feed_id?: number }>().catch(() => ({ feed_id: undefined }))
+            const body = await c.req.json<{
+                feed_id?:number
+                client_updated_at?:string
+            }>().catch(() => ({ feed_id: undefined }))
+
+            if (body.client_updated_at !== undefined) {
+                // LWW: check if any items in scope are newer than client
+                let newerItems:unknown[]
+                if (body.feed_id !== undefined) {
+                    newerItems = this.sql.exec(
+                        'SELECT * FROM items WHERE feed_id = ?' +
+                        ' AND updated_at > ?',
+                        body.feed_id,
+                        body.client_updated_at
+                    ).toArray()
+                } else {
+                    newerItems = this.sql.exec(
+                        'SELECT * FROM items WHERE updated_at > ?',
+                        body.client_updated_at
+                    ).toArray()
+                }
+                if (newerItems.length > 0) {
+                    return c.json({ items: newerItems }, 409)
+                }
+            }
 
             if (body.feed_id !== undefined) {
-                this.sql.exec('UPDATE items SET is_read = 1 WHERE feed_id = ?', body.feed_id)
+                this.sql.exec(
+                    'UPDATE items SET is_read = 1 WHERE feed_id = ?',
+                    body.feed_id
+                )
             } else {
                 this.sql.exec('UPDATE items SET is_read = 1')
             }

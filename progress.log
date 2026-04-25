@@ -17,3 +17,17 @@
   - Splitting SCHEMA_SQL into TABLES_SQL + INDEXES_SQL + TRIGGERS_SQL lets the DO interleave server-only migration steps.
   - `npm run test:db` passes 35 tests (all mock-adapter interface tests).
 ---
+
+## 2026-04-24 - US-002
+- What was implemented: Added LWW (last-write-wins) conflict resolution to server mutating endpoints. `PATCH /items/:id`, `DELETE /feeds/:id`, and `POST /items/mark-all-read` now accept optional `client_updated_at` in the JSON body. When present and the server row is newer, endpoint returns 409 with the authoritative row(s). `POST /feeds` returns 409 with the feed when a duplicate URL is found and the server version is newer. Existing behavior is unchanged when `client_updated_at` is absent.
+- Files changed:
+  - `src/server/durable-objects/index.ts` (LWW checks on 4 endpoints)
+  - `test/server-lww.ts` (new — 16 LWW simulation tests)
+  - `test/index.ts` (imports server-lww)
+  - `package.json` (added test:lww script)
+  - `specs/prd.json` (US-002 passes: true)
+- **Learnings for future iterations:**
+  - LWW tests run as pure logic simulations in the browser — no real DO/SQLite needed. Mirror the server logic in a `simulate*` helper and test the returned status/body.
+  - The DO's `DELETE /feeds/:id` handler needed to be made `async` to parse the optional JSON body.
+  - `npm run test:lww` runs only the LWW tests (16 tests). Full suite is 98 tests.
+---
