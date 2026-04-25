@@ -139,3 +139,14 @@
   - `getAdapter` needs a `did` param to open the OPFS DB; callers that lack a DID at invocation time will fall back to remoteAdapter automatically.
   - The cache for the opened DB is keyed by `did`; switching users would open a new DB.
 ---
+
+## 2026-04-24 - US-012
+- What was implemented: Refactored `src/client/state.ts` to consume `getAdapter(did?)` from `src/client/db/index.ts` instead of importing `remoteAdapter` directly. All data methods (`loadFeeds`, `addFeed`, `deleteFeed`, `loadItems`, `loadItemByRoute`, `loadCounts`, `toggleItemRead`, `toggleItemStarred`, `markAllRead`) now call `await getAdapter(state.user.value?.did)` and use the returned adapter. Auth routes (`/api/auth/*`, `/api/me`, `/api/feeds/refresh`) still use `ky` directly since they are server-only operations with no `DbAdapter` equivalent.
+- Files changed:
+  - `src/client/state.ts` (replaced remoteAdapter import with getAdapter; refactored all data methods)
+  - `specs/prd.json` (US-012 passes: true)
+- **Learnings for future iterations:**
+  - `getAdapter` already caches by DID internally, so calling it per-method is equivalent to caching on the state instance.
+  - `toggleItemRead`/`toggleItemStarred` no longer check `response.ok` since `adapter.updateItem` throws on failure — simplifies optimistic update logic.
+  - `State.addFeed` return type changed from `Promise<Response>` to `Promise<void>`; the sidebar already ignored the return value.
+---

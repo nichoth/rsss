@@ -8,7 +8,7 @@ import {
 import Route from 'route-event'
 import ky from 'ky'
 import Debug from '@substrate-system/debug'
-import { remoteAdapter } from './db/remote-adapter.js'
+import { getAdapter } from './db/index.js'
 const debug = Debug('rsss:state')
 
 const USER_STORAGE_KEY = 'rsss_user'
@@ -430,7 +430,10 @@ State.loadFeeds = async function (
     state.feedsLoading.value = true
 
     try {
-        const feeds = await remoteAdapter.getFeeds()
+        const adapter = await getAdapter(
+            state.user.value?.did
+        )
+        const feeds = await adapter.getFeeds()
         batch(() => {
             state.feeds.value = feeds
             state.feedsLoading.value = false
@@ -447,19 +450,15 @@ State.loadFeeds = async function (
 State.addFeed = async function (
     state:AppState,
     url:string
-):Promise<Response> {
+):Promise<void> {
     try {
-        const response = await api.post(
-            'feeds',
-            { json: { url } }
+        const adapter = await getAdapter(
+            state.user.value?.did
         )
-        debug('got response...', response)
-
+        await adapter.addFeed(url)
         await State.loadFeeds(state)
         await State.loadItems(state)
         await State.loadCounts(state)
-
-        return response
     } catch (err) {
         if (
             err instanceof Error &&
@@ -469,9 +468,7 @@ State.addFeed = async function (
         ) {
             debug('Feed already exists, reloading...')
             await State.loadFeeds(state)
-            return (
-                err as { response:Response }
-            ).response
+            return
         }
         throw err
     }
@@ -485,7 +482,10 @@ State.deleteFeed = async function (
     feedId:number
 ):Promise<{ success:boolean; error?:string }> {
     try {
-        await api.delete(`feeds/${feedId}`)
+        const adapter = await getAdapter(
+            state.user.value?.did
+        )
+        await adapter.deleteFeed(feedId)
 
         await State.loadFeeds(state)
         await State.loadItems(state)
@@ -562,7 +562,10 @@ State.loadItems = async function (
             options.isStarred = true
         }
 
-        const data = await remoteAdapter.getItems(options)
+        const adapter = await getAdapter(
+            state.user.value?.did
+        )
+        const data = await adapter.getItems(options)
         state.items.value = data.items as Item[]
         state.itemsTotal.value = data.total
     } catch (err) {
@@ -576,16 +579,17 @@ State.loadItems = async function (
  * Load a single item that matches a /post/* route
  */
 State.loadItemByRoute = async function (
-    _state:AppState,
+    state:AppState,
     route:string
 ):Promise<Item|null> {
     const itemRoute = routeToItemRoute(route)
     if (!itemRoute) return null
 
     try {
-        const item = await remoteAdapter.getItemByRoute(
-            itemRoute
+        const adapter = await getAdapter(
+            state.user.value?.did
         )
+        const item = await adapter.getItemByRoute(itemRoute)
         return item as Item|null
     } catch (err) {
         debug('Error loading item by route:', err)
@@ -600,7 +604,10 @@ State.loadCounts = async function (
     state:AppState
 ):Promise<void> {
     try {
-        const counts = await remoteAdapter.getCounts()
+        const adapter = await getAdapter(
+            state.user.value?.did
+        )
+        const counts = await adapter.getCounts()
         state.counts.value = counts
     } catch (err) {
         debug('Error loading counts:', err)
@@ -616,30 +623,28 @@ State.toggleItemRead = async function (
     isRead:boolean
 ):Promise<void> {
     try {
-        const response = await api.patch(`items/${itemId}`, {
-            json: { is_read: isRead }
+        const adapter = await getAdapter(
+            state.user.value?.did
+        )
+        await adapter.updateItem(itemId, { is_read: isRead })
+
+        batch(() => {
+            state.items.value = state.items.value.map(
+                item => item.id === itemId ? {
+                    ...item,
+                    is_read: isRead ? 1 : 0
+                } : item
+            )
+
+            if (state.routeItem.value?.id === itemId) {
+                state.routeItem.value = {
+                    ...state.routeItem.value,
+                    is_read: isRead ? 1 : 0
+                }
+            }
         })
 
-        if (response.ok) {
-            // Optimistic UI update
-            batch(() => {
-                state.items.value = state.items.value.map(
-                    item => item.id === itemId ? {
-                        ...item,
-                        is_read: isRead ? 1 : 0
-                    } : item
-                )
-
-                if (state.routeItem.value?.id === itemId) {
-                    state.routeItem.value = {
-                        ...state.routeItem.value,
-                        is_read: isRead ? 1 : 0
-                    }
-                }
-            })
-
-            await State.loadCounts(state)
-        }
+        await State.loadCounts(state)
     } catch (err) {
         debug('Error toggling read status:', err)
     }
@@ -654,29 +659,31 @@ State.toggleItemStarred = async function (
     isStarred:boolean
 ):Promise<void> {
     try {
-        const response = await api.patch(`items/${itemId}`, {
-            json: { is_starred: isStarred }
+        const adapter = await getAdapter(
+            state.user.value?.did
+        )
+        await adapter.updateItem(
+            itemId,
+            { is_starred: isStarred }
+        )
+
+        batch(() => {
+            state.items.value = state.items.value.map(
+                item => item.id === itemId ? {
+                    ...item,
+                    is_starred: isStarred ? 1 : 0
+                } : item
+            )
+
+            if (state.routeItem.value?.id === itemId) {
+                state.routeItem.value = {
+                    ...state.routeItem.value,
+                    is_starred: isStarred ? 1 : 0
+                }
+            }
         })
 
-        if (response.ok) {
-            batch(() => {
-                state.items.value = state.items.value.map(
-                    item => item.id === itemId ? {
-                        ...item,
-                        is_starred: isStarred ? 1 : 0
-                    } : item
-                )
-
-                if (state.routeItem.value?.id === itemId) {
-                    state.routeItem.value = {
-                        ...state.routeItem.value,
-                        is_starred: isStarred ? 1 : 0
-                    }
-                }
-            })
-
-            await State.loadCounts(state)
-        }
+        await State.loadCounts(state)
     } catch (err) {
         debug('Error toggling starred status:', err)
     }
@@ -690,16 +697,12 @@ State.markAllRead = async function (
     feedId?:number
 ):Promise<void> {
     try {
-        const body = feedId ? { feed_id: feedId } : {}
-        const response = await api.post(
-            'items/mark-all-read',
-            { json: body }
+        const adapter = await getAdapter(
+            state.user.value?.did
         )
-
-        if (response.ok) {
-            await State.loadItems(state)
-            await State.loadCounts(state)
-        }
+        await adapter.markAllRead(feedId)
+        await State.loadItems(state)
+        await State.loadCounts(state)
     } catch (err) {
         debug('Error marking all read:', err)
     }
