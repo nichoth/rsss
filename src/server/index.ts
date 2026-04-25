@@ -30,6 +30,26 @@ type Variables = {
 
 const app = new Hono<{ Bindings:Env; Variables:Variables }>()
 
+// Cross-origin isolation headers required for OPFS sync access handles
+app.use('*', async (c, next) => {
+    await next()
+    const ct = c.res.headers.get('content-type') ?? ''
+    if (
+        ct.includes('text/html') ||
+        ct.includes('javascript') ||
+        ct === ''
+    ) {
+        c.res.headers.set(
+            'Cross-Origin-Opener-Policy',
+            'same-origin'
+        )
+        c.res.headers.set(
+            'Cross-Origin-Embedder-Policy',
+            'require-corp'
+        )
+    }
+})
+
 // CORS for API routes
 app.use('/api/*', cors())
 

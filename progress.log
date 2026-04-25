@@ -40,3 +40,13 @@
 - **Learnings for future iterations:**
   - COOP/COEP headers must be set on both the Vite dev server (vite.config.js `server.headers`) and the Cloudflare Worker (US-004) for cross-origin isolation in all environments.
 ---
+
+## 2026-04-24 - US-004
+- What was implemented: Added a Hono `app.use('*', ...)` middleware in `src/server/index.ts` that sets `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` on HTML and JS responses (and empty content-type responses). Middleware runs after `next()` so it inspects the resolved content-type.
+- Files changed:
+  - `src/server/index.ts` (added COOP/COEP middleware)
+  - `specs/prd.json` (US-004 passes: true)
+- **Learnings for future iterations:**
+  - In Hono, to set headers on the outgoing response after the handler runs, call `await next()` first, then use `c.res.headers.set(...)`.
+  - The middleware checks `content-type` to target HTML and JS only, since COOP is only meaningful on documents and COEP on subresources.
+---
