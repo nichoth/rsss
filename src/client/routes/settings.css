@@ -151,6 +151,13 @@
     & check-box[disabled] {
         opacity: 0.5;
     }
+
+    & .toggle-desc {
+        max-width: 42rem;
+        margin: 0.25rem 0 0 1.75rem;
+        color: var(--color-text-secondary);
+        font-size: 0.95rem;
+    }
 }
 
 .settings-feeds-list {

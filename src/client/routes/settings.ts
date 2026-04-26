@@ -249,16 +249,25 @@ export const SettingsRoute:FunctionComponent<{
             <div class="local-first-toggle">
                 <check-box
                     name="sync-subscriptions"
+                    aria-describedby="sync-subscriptions-desc"
                     checked=${syncSubscriptions.value || undefined}
                     disabled=${(!supported || inProgress) || undefined}
                     onChange=${handleSyncChange}
                 >
                     Sync subscriptions and read state to this device
                 </check-box>
+                <p
+                    class="toggle-desc"
+                    id="sync-subscriptions-desc"
+                >
+                    Keeps subscriptions, read state, and starred items in
+                    local SQLite storage on this device.
+                </p>
             </div>
             <div class="local-first-toggle">
                 <check-box
                     name="store-content"
+                    aria-describedby="store-content-desc"
                     checked=${storeContent.value || undefined}
                     disabled=${(!supported || !syncSubscriptions.value ||
                         inProgress) || undefined}
@@ -266,6 +275,13 @@ export const SettingsRoute:FunctionComponent<{
                 >
                     Store article content locally for offline reading
                 </check-box>
+                <p
+                    class="toggle-desc"
+                    id="store-content-desc"
+                >
+                    Stores article bodies locally only when local storage is
+                    enabled.
+                </p>
             </div>
             ${inProgress && html`
                 <div class="bootstrap-progress">

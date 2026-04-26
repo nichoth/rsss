@@ -75,6 +75,10 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Local-first a11y/CSS regression checks**:
+  `test/local-first-a11y-static.mjs` owns static checks for the local-first
+  settings and sync status surface, including live status semantics,
+  `aria-describedby` wiring, no border-radius, and variable-only colors.
 - **Local-first PWA docs**: v1 ships a web app manifest but no service
   worker. Keep service worker claims out of README/DOCS until an actual
   worker and registration exist; `test/local-first-docs.mjs` owns the static
@@ -1678,4 +1682,31 @@ Thread: https://ampcode.com/threads/unknown
     implemented.
   - Static docs regressions can live in Node `.mjs` tests and be listed in
     `test/run-all-tests.mjs`.
+---
+
+## 2026-04-26 15:41 PDT - US-068
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Accessibility and CSS pass for local-first settings
+  and sync status.
+  - Added descriptive text for both local-first settings toggles and wired
+    each control with `aria-describedby`.
+  - Added live-region status semantics to the sync badge and exposed error
+    and warning detail through `aria-label` instead of title-only text.
+  - Added static CSS/a11y regression coverage for local-first settings and
+    sync status, and extended header component coverage for the sync badge.
+- Files changed:
+  - `src/client/components/sync-status.ts`
+  - `src/client/routes/settings.ts`
+  - `src/client/routes/settings.css`
+  - `test/header-component.ts`
+  - `test/local-first-a11y-static.mjs`
+  - `test/run-all-tests.mjs`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Sync status detail must not live only in `title`; include the same
+    useful context in `aria-label` because the badge is a live region.
+  - Local-first settings/status CSS contracts are now guarded by
+    `test/local-first-a11y-static.mjs`; add future local-first a11y/static
+    regressions there instead of relying only on manual review.
 ---
