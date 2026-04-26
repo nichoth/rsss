@@ -105,7 +105,8 @@ export type AppState = {
     showStarredOnly:Signal<boolean>,
     pageSize:Signal<number>,
     selectedFeedId:Signal<number|null>,
-    isAuthenticated:Signal<boolean>
+    isAuthenticated:Signal<boolean>,
+    cleanup:() => void
 }
 
 export function State ():AppState {
@@ -135,6 +136,7 @@ export function State ():AppState {
         showStarredOnly: signal(false),
         pageSize: signal(DEFAULT_PAGE_SIZE),
         selectedFeedId: signal<number|null>(null),
+        cleanup: () => {},
     }
 
     onRoute((path:string, data) => {
@@ -272,7 +274,7 @@ export function State ():AppState {
         })
     })
 
-    window.addEventListener('online', () => {
+    const handleOnline = () => {
         updateOnlineStatus()
         const did = state.user.value?.did
         const db = getLocalDb(did)
@@ -291,14 +293,22 @@ export function State ():AppState {
                 debug('sync cycle online error:', err)
             })
         }
-    })
+    }
 
-    window.addEventListener('offline', () => {
+    const handleOffline = () => {
         const did = state.user.value?.did
         const db = getLocalDb(did)
         const pending = db ? getOutboxCount(db) : 0
         setSyncOffline(pending)
-    })
+    }
+
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+
+    state.cleanup = () => {
+        window.removeEventListener('online', handleOnline)
+        window.removeEventListener('offline', handleOffline)
+    }
 
     State.checkAuth(state)
 

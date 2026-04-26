@@ -139,6 +139,51 @@ test('State auth effect loads once for the final rapid auth value',
         }
     })
 
+test('State cleanup removes online and offline listeners', async t => {
+    const originals = {
+        checkAuth: State.checkAuth,
+        addEventListener: window.addEventListener,
+        removeEventListener: window.removeEventListener
+    }
+    const listeners = new Map<string, EventListenerOrEventListenerObject>()
+    const removed = new Map<string, EventListenerOrEventListenerObject>()
+
+    State.checkAuth = async () => {}
+    window.addEventListener = (
+        type:string,
+        listener:EventListenerOrEventListenerObject
+    ) => {
+        listeners.set(type, listener)
+    }
+    window.removeEventListener = (
+        type:string,
+        listener:EventListenerOrEventListenerObject
+    ) => {
+        removed.set(type, listener)
+    }
+
+    try {
+        const state = State()
+
+        state.cleanup()
+
+        t.equal(
+            removed.get('online'),
+            listeners.get('online'),
+            'removes the registered online listener'
+        )
+        t.equal(
+            removed.get('offline'),
+            listeners.get('offline'),
+            'removes the registered offline listener'
+        )
+    } finally {
+        State.checkAuth = originals.checkAuth
+        window.addEventListener = originals.addEventListener
+        window.removeEventListener = originals.removeEventListener
+    }
+})
+
 test('checkAuth does not remove legacy user localStorage entry',
     async t => {
         const originalFetch = globalThis.fetch

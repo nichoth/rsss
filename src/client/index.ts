@@ -13,6 +13,12 @@ import './style.css'
 const state = State()
 const router = Router(state)
 
+if (import.meta.hot) {
+    import.meta.hot.dispose(() => {
+        state.cleanup()
+    })
+}
+
 /**
  * Debug logging
  */

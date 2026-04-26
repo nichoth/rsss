@@ -75,6 +75,9 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Client lifecycle cleanup**: `AppState` exposes `cleanup()` for listeners
+  and other lifecycle resources created by `State()`. Module entrypoints
+  should call it from teardown hooks such as `import.meta.hot.dispose`.
 - **Repository configuration tests**: Focused repository-level assertions can
   live in `.mjs` files under `test/` and be listed in
   `test/run-all-tests.mjs` before browser-bundled tapout tests.
@@ -1084,4 +1087,26 @@ Thread: https://ampcode.com/threads/unknown
 - **Learnings for future iterations:**
   - Repository-level configuration checks can live in focused `.mjs` tests and
     be called from `test/run-all-tests.mjs` before browser-bundled tests.
+---
+## 2026-04-26 12:02 PDT - US-048
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Fixed online/offline listener cleanup in State().
+  - State now registers named online/offline handlers and exposes a cleanup
+    function that removes both handlers.
+  - The client entrypoint calls state.cleanup() during Vite hot-module
+    disposal.
+  - Added focused regression coverage that verifies cleanup removes the exact
+    registered handlers.
+- Files changed:
+  - src/client/state.ts
+  - src/client/index.ts
+  - test/state-auth-storage.ts
+  - specs/prd.json
+  - progress.log
+- **Learnings for future iterations:**
+  - AppState includes a cleanup function for lifecycle cleanup owned by
+    State(); call it from module teardown paths such as
+    import.meta.hot.dispose.
+  - Tests can stub window.addEventListener/removeEventListener to assert the
+    same listener object is registered and removed.
 ---
