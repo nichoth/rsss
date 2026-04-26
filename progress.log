@@ -14,6 +14,23 @@
   - `getOutboxCount` exported from `push-sync.ts` lets the UI show pending count without re-opening the DB.
 ---
 
+## 2026-04-26 11:55 PDT - US-046
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Completed missing critical-path test coverage.
+  - Added a live-Resend billing email dedupe regression test using mocked
+    `fetch` and mocked KV storage.
+  - Verified the existing session cookie, Autumn subscription, email, DO
+    handler, and exact item-route coverage required by the story.
+- Files changed:
+  - `test/email.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - The critical coverage for OAuth sessions, Autumn billing, billing email
+    dedupe, DO feed handlers, and exact item routing is split across focused
+    test files instead of a single `US-046` suite.
+---
+
 ## 2026-04-25 23:21 PDT - US-032
 Thread: https://ampcode.com/threads/unknown
 - What was implemented: Standardized client-side SQLite timestamp writes.

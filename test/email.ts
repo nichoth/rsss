@@ -57,6 +57,45 @@ test('billing email dedupe key changes with weekly epoch', async t => {
     t.equal(third.sent, true, 'new weekly epoch sends again')
 })
 
+test('billing email dedupe suppresses a second live send', async t => {
+    const originalFetch = globalThis.fetch
+    const kv = new MemoryKv()
+    let calls = 0
+    globalThis.fetch = (async () => {
+        calls += 1
+        return new Response(JSON.stringify({ id: 'email_live' }), {
+            status: 200
+        })
+    }) as typeof fetch
+
+    try {
+        const first = await sendSubscriptionStarted(
+            { RESEND_API_KEY: 're_test' },
+            kv,
+            {
+                to: 'reader@example.com',
+                did: 'did:plc:reader',
+                planId: 'sync'
+            }
+        )
+        const second = await sendSubscriptionStarted(
+            { RESEND_API_KEY: 're_test' },
+            kv,
+            {
+                to: 'reader@example.com',
+                did: 'did:plc:reader',
+                planId: 'sync'
+            }
+        )
+
+        t.equal(first.sent, true, 'first live send goes through')
+        t.equal(second.deduped, true, 'second live send is deduped')
+        t.equal(calls, 1, 'deduped send does not call Resend')
+    } finally {
+        globalThis.fetch = originalFetch
+    }
+})
+
 test('subscription email retries once after transient Resend failure',
     async t => {
         const originalFetch = globalThis.fetch
