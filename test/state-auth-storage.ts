@@ -1,17 +1,25 @@
 import { signal } from '@preact/signals'
 import { test } from '@substrate-system/tapzero'
+import * as pullSyncModule from '../src/client/db/pull-sync.js'
+import { PushSyncAuthError } from '../src/client/db/push-sync.js'
 import { State, type AppState } from '../src/client/state.js'
+
+type ErrorCtor = new () => Error
+type StateWithSyncAuth = typeof State & {
+    handleSyncAuthError?:(state:AppState, err:unknown) => boolean
+}
 
 function nextTask ():Promise<void> {
     return new Promise(resolve => setTimeout(resolve, 0))
 }
 
 function authState ():AppState {
-    return {
+    return ({
         authLoading: signal(false),
         authError: signal<string|null>(null),
+        _setRoute: () => {},
         user: signal(null)
-    } as AppState
+    } as unknown) as AppState
 }
 
 test('checkAuth does not persist authenticated user to localStorage',
@@ -46,6 +54,41 @@ test('checkAuth does not persist authenticated user to localStorage',
             localStorage.removeItem('rsss_user')
         }
     })
+
+test('handleSyncAuthError sends auth failures to login', async t => {
+    const PullSyncAuthError = (
+        pullSyncModule as typeof pullSyncModule & {
+            PullSyncAuthError?:ErrorCtor
+        }
+    ).PullSyncAuthError
+    const handleSyncAuthError = (State as StateWithSyncAuth)
+        .handleSyncAuthError
+    const routes:string[] = []
+    const state = {
+        ...authState(),
+        _setRoute: (route:string) => {
+            routes.push(route)
+        }
+    }
+
+    t.ok(PullSyncAuthError, 'exports pull auth error')
+    t.ok(handleSyncAuthError, 'exports sync auth handler')
+
+    if (!PullSyncAuthError || !handleSyncAuthError) return
+
+    handleSyncAuthError(state, new PullSyncAuthError())
+
+    t.equal(
+        state.authError.value,
+        'Your session expired. Please log in again.',
+        'sets re-auth copy for pull auth failure'
+    )
+    t.equal(routes.pop(), '/login', 'routes pull auth failure to login')
+
+    handleSyncAuthError(state, new PushSyncAuthError())
+
+    t.equal(routes.pop(), '/login', 'routes push auth failure to login')
+})
 
 test('State auth effect loads once for the final rapid auth value',
     async t => {

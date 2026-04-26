@@ -1,8 +1,12 @@
 import type { Sqlite3Db } from './sqlite-init.js'
-import { pullSync } from './pull-sync.js'
+import {
+    PullSyncAuthError,
+    pullSync
+} from './pull-sync.js'
 import {
     getDeadLetterOutboxCount,
     getOutboxCount,
+    PushSyncAuthError,
     pushSync
 } from './push-sync.js'
 import {
@@ -31,6 +35,12 @@ export async function runSync (
         )
         await pullSync(db, fetchFn, { trackStatus: false })
     } catch (err) {
+        if (
+            err instanceof PullSyncAuthError ||
+            err instanceof PushSyncAuthError
+        ) {
+            throw err
+        }
         if (trackStatus) {
             setSyncError(
                 err instanceof Error ? err.message : String(err)

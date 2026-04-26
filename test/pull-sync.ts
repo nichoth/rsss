@@ -6,9 +6,13 @@ import {
     openLocalDb,
     setTestMode
 } from '../src/client/db/sqlite-init.js'
-import { pullSync } from '../src/client/db/pull-sync.js'
+import * as pullSyncModule from '../src/client/db/pull-sync.js'
 import { storeContent } from '../src/client/local-first-settings.js'
 import type { Sqlite3Db } from '../src/client/db/sqlite-init.js'
+
+const { pullSync } = pullSyncModule
+
+type ErrorCtor = new () => Error
 
 setTestMode(true, wasmUrl as string)
 
@@ -192,6 +196,31 @@ test('pullSync throws on non-ok response', async (t) => {
             threw = true
         }
         t.ok(threw, 'throws on 500')
+    } finally {
+        db.close()
+    }
+})
+
+test('pullSync throws PullSyncAuthError on 401 response', async (t) => {
+    const db = await openLocalDb('did:test:pull-auth-error')
+    try {
+        const PullSyncAuthError = (
+            pullSyncModule as typeof pullSyncModule & {
+                PullSyncAuthError?:ErrorCtor
+            }
+        ).PullSyncAuthError
+        let caught:unknown
+        try {
+            await pullSync(db, makeFetch({}, 401))
+        } catch (err) {
+            caught = err
+        }
+
+        t.ok(PullSyncAuthError, 'exports typed auth error')
+        t.ok(
+            PullSyncAuthError && caught instanceof PullSyncAuthError,
+            'throws typed auth error'
+        )
     } finally {
         db.close()
     }

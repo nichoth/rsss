@@ -15,6 +15,13 @@ export class SyncBillingError extends Error {
     }
 }
 
+export class PullSyncAuthError extends Error {
+    constructor () {
+        super('pullSync: 401 unauthorized -- re-auth required')
+        this.name = 'PullSyncAuthError'
+    }
+}
+
 export interface SyncResponse {
     feeds:Record<string, unknown>[]
     items:Record<string, unknown>[]
@@ -217,6 +224,10 @@ export async function pullSync (
             )
         }
         throw err
+    }
+
+    if (res.status === 401) {
+        throw new PullSyncAuthError()
     }
 
     if (res.status === 402) {

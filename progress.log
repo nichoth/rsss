@@ -74,6 +74,9 @@ Thread: https://ampcode.com/threads/unknown
   `runSync` from `src/client/db/sync.ts`. It owns `setSyncDone`; pass
   `{ trackStatus: false }` only from orchestrators that will set final
   sync status themselves.
+- **Sync auth expiry handling**: `pullSync` and `pushSync` expose typed auth
+  errors. `runSync` rethrows them without setting generic sync-error status;
+  `State.handleSyncAuthError` owns clearing auth state and routing to login.
 - **Durable Object route tests**: Route behavior can be tested without a real
   DO instance by using `Object.create(UserDO.prototype)`, assigning a focused
   fake `sql` object and `ctx.waitUntil`, then calling the private
@@ -927,4 +930,29 @@ Thread: https://ampcode.com/threads/unknown
   - Focused State effect regressions can stub `State.checkAuth` and the
     State load methods, then instantiate `State()` to exercise signal
     effects without hitting the network.
+---
+
+## 2026-04-26 01:51 PDT - US-043
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Pull-sync now distinguishes session expiry from
+  generic sync failures.
+  - Added `PullSyncAuthError` for `/api/sync` 401 responses.
+  - Updated `runSync` to rethrow typed pull/push auth errors without setting
+    generic sync-error status.
+  - Added `State.handleSyncAuthError` so sync auth failures clear auth state,
+    set re-login copy, and route to `/login`.
+  - Added focused tests for the typed pull-sync error and shared state auth
+    routing.
+- Files changed:
+  - `src/client/db/pull-sync.ts`
+  - `src/client/db/sync.ts`
+  - `src/client/state.ts`
+  - `test/pull-sync.ts`
+  - `test/state-auth-storage.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Auth expiry during sync should use typed errors, not generic sync errors.
+  - State-level sync catch blocks should call `State.handleSyncAuthError`
+    before billing or generic sync handling.
 ---

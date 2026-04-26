@@ -15,9 +15,13 @@ import type {
     Item,
     ItemsResponse
 } from './db/types.js'
-import { SyncBillingError } from './db/pull-sync.js'
+import {
+    PullSyncAuthError,
+    SyncBillingError
+} from './db/pull-sync.js'
 import {
     getOutboxCount,
+    PushSyncAuthError,
     PushSyncBillingError
 } from './db/push-sync.js'
 import { runSync } from './db/sync.js'
@@ -38,6 +42,7 @@ const debug = Debug('rsss:state')
 
 const CHECKOUT_EMAIL_KEY = 'rsss_checkout_email'
 export const DEFAULT_PAGE_SIZE = 20
+const SYNC_AUTH_EXPIRED = 'Your session expired. Please log in again.'
 
 /**
  * Stash the email the user entered on /signup so the
@@ -240,6 +245,9 @@ export function State ():AppState {
                 if (db) {
                     isLocalFirstActive.value = true
                     runSync(db).catch((err) => {
+                        if (State.handleSyncAuthError(state, err)) {
+                            return
+                        }
                         if (
                             err instanceof SyncBillingError ||
                             err instanceof PushSyncBillingError
@@ -270,6 +278,9 @@ export function State ():AppState {
         const db = getLocalDb(did)
         if (db) {
             runSync(db).catch((err) => {
+                if (State.handleSyncAuthError(state, err)) {
+                    return
+                }
                 if (
                     err instanceof SyncBillingError ||
                     err instanceof PushSyncBillingError
@@ -292,6 +303,25 @@ export function State ():AppState {
     State.checkAuth(state)
 
     return state
+}
+
+State.handleSyncAuthError = function (
+    state:AppState,
+    err:unknown
+):boolean {
+    if (
+        !(err instanceof PullSyncAuthError) &&
+        !(err instanceof PushSyncAuthError)
+    ) {
+        return false
+    }
+
+    batch(() => {
+        state.user.value = null
+        state.authError.value = SYNC_AUTH_EXPIRED
+    })
+    state._setRoute('/login')
+    return true
 }
 
 /**
