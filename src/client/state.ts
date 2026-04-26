@@ -222,36 +222,45 @@ export function State ():AppState {
      * local-first adapter is active. Billing status is loaded
      * in parallel so the UI can show free-vs-paid state quickly.
      */
+    let authLoadGeneration = 0
+
     effect(() => {
-        if (!state.isAuthenticated.value) return
-        const did = state.user.value?.did
+        const user = state.user.value
+        const generation = ++authLoadGeneration
 
-        State.loadBillingStatus(state)
+        if (!user) return
 
-        getAdapter(did).then(() => {
-            const db = getLocalDb(did)
-            if (db) {
-                isLocalFirstActive.value = true
-                runSync(db).catch((err) => {
-                    if (
-                        err instanceof SyncBillingError ||
-                        err instanceof PushSyncBillingError
-                    ) {
-                        State.loadBillingStatus(state)
-                        return
-                    }
-                    debug('sync cycle error:', err)
-                }).then(() => {
+        queueMicrotask(() => {
+            if (generation !== authLoadGeneration) return
+            State.loadBillingStatus(state)
+
+            getAdapter(user.did).then(() => {
+                if (generation !== authLoadGeneration) return
+                const db = getLocalDb(user.did)
+                if (db) {
+                    isLocalFirstActive.value = true
+                    runSync(db).catch((err) => {
+                        if (
+                            err instanceof SyncBillingError ||
+                            err instanceof PushSyncBillingError
+                        ) {
+                            State.loadBillingStatus(state)
+                            return
+                        }
+                        debug('sync cycle error:', err)
+                    }).then(() => {
+                        if (generation !== authLoadGeneration) return
+                        State.loadFeeds(state)
+                        State.loadItems(state)
+                        State.loadCounts(state)
+                    })
+                } else {
+                    isLocalFirstActive.value = false
                     State.loadFeeds(state)
                     State.loadItems(state)
                     State.loadCounts(state)
-                })
-            } else {
-                isLocalFirstActive.value = false
-                State.loadFeeds(state)
-                State.loadItems(state)
-                State.loadCounts(state)
-            }
+                }
+            })
         })
     })
 

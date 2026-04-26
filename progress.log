@@ -904,3 +904,27 @@ Thread: https://ampcode.com/threads/unknown
   - `pushSync` and `pullSync` still manage standalone status by default.
     Use `{ trackStatus: false }` only inside a higher-level orchestrator.
 ---
+
+## 2026-04-26 01:43 PDT - US-042
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Guarded the State authentication bootstrap/load
+  effect against rapid stale/null/final auth signal changes.
+  - Added an auth-load generation counter in `State()` and deferred the
+    load body to a microtask so stale rapid changes are invalidated before
+    bootstrapping begins.
+  - Rechecked the generation before async adapter and sync continuations
+    load feeds, items, and counts.
+  - Added a focused state regression test that proves only the final
+    authenticated user triggers bootstrap when auth values change rapidly.
+- Files changed:
+  - `src/client/state.ts`
+  - `test/state-auth-storage.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Auth-driven State effects should use a generation token when they cross
+    async boundaries so stale auth values cannot trigger duplicate loads.
+  - Focused State effect regressions can stub `State.checkAuth` and the
+    State load methods, then instantiate `State()` to exercise signal
+    effects without hitting the network.
+---
