@@ -289,10 +289,6 @@ app.get('/api/health', (c) => {
     return c.json({ status: 'ok', service: 'rsss' })
 })
 
-app.get('/health', (c) => {
-    return c.json({ status: 'ok' })
-})
-
 /**
  * OAuth client metadata (AT Protocol OAuth discovery)
  */

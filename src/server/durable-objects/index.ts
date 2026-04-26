@@ -1,7 +1,6 @@
 import { DurableObject } from 'cloudflare:workers'
 import { XMLParser } from 'fast-xml-parser'
 import { Hono } from 'hono'
-import { cors } from 'hono/cors'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import {
     TABLES_SQL,
@@ -161,8 +160,6 @@ export class UserDO extends DurableObject<Env> {
 
     private createRouter (): Hono {
         const app = new Hono()
-
-        app.use('*', cors())
 
         // Health check
         app.get('/health', (c) => {

@@ -75,6 +75,10 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Server route static tests**: Repository-level route-shape assertions can
+  live in `test/server-routing-static.mjs` and should be listed in
+  `test/run-all-tests.mjs` so route cleanup regressions are covered without
+  browser bundling.
 - **Local-first delete/reset preflight**: Disable/reset flows should call
   `pushSync` before removing OPFS data, then verify `getOutboxCount(db)`.
   `pushSync` records retryable failures without throwing, so pending rows
@@ -1204,4 +1208,26 @@ Thread: https://ampcode.com/threads/unknown
 - **Learnings for future iterations:**
   - Small source-shape invariants can be covered with focused Node tests and
     run early from `test/run-all-tests.mjs`.
+---
+
+## 2026-04-26 12:35 PDT - US-053
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Removed duplicate and unnecessary server routing
+  behavior.
+  - Removed Hono CORS middleware from the internal Durable Object router.
+  - Removed the duplicate root `/health` Worker route, keeping the documented
+    `/api/health` route.
+  - Added a static regression test covering both route-shape requirements.
+- Files changed:
+  - `src/server/durable-objects/index.ts`
+  - `src/server/index.ts`
+  - `test/server-routing-static.mjs`
+  - `test/run-all-tests.mjs`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Static route cleanup checks can live in `test/server-routing-static.mjs`
+    and be wired into `test/run-all-tests.mjs`.
+  - README deploy verification already documents `/api/health`; no docs
+    referenced the removed root `/health` route.
 ---
