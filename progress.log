@@ -1187,3 +1187,21 @@ Thread: https://ampcode.com/threads/unknown
   - Repository-level cleanup invariants can use focused Node assertion tests
     and run early in `test/run-all-tests.mjs`, before bundled browser tests.
 ---
+
+## 2026-04-26 12:32 PDT - US-052
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Fixed the sidebar add-feed input lookup type.
+  - Replaced the untyped form-elements bracket access with
+    `els.namedItem('new-feed-url') as HTMLInputElement`.
+  - Added a focused Node regression test for the typed lookup and wired it
+    into the full test runner.
+- Files changed:
+  - `src/client/components/sidebar.ts`
+  - `test/sidebar-static.mjs`
+  - `test/run-all-tests.mjs`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Small source-shape invariants can be covered with focused Node tests and
+    run early from `test/run-all-tests.mjs`.
+---
