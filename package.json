@@ -43,6 +43,7 @@
     "@types/dompurify": "^3.0.5",
     "autumn-js": "^1.2.12",
     "dompurify": "^3.4.1",
+    "fast-xml-parser": "^5.7.2",
     "hono": "^4.11.3",
     "htm": "^3.1.1",
     "ky": "^1.14.1",

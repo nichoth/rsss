@@ -77,15 +77,10 @@ async function readBoundedText (
     maxBytes:number
 ):Promise<string> {
     if (!response.body) {
-        const text = await response.text()
-        const size = new TextEncoder().encode(text).byteLength
-        if (size > maxBytes) {
-            throw new FeedFetchError(
-                `Feed response exceeds ${maxBytes} bytes`,
-                413
-            )
-        }
-        return text
+        throw new FeedFetchError(
+            'Feed response has no readable body',
+            502
+        )
     }
 
     const reader = response.body.getReader()

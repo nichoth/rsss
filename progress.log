@@ -34,6 +34,15 @@
 
 ## Codebase Patterns
 
+- **Feed parser tests**: Durable Object parser behavior can be tested without
+  constructing a DO by importing `UserDO`, creating
+  `Object.create(UserDO.prototype)`, and calling the private parser through a
+  typed test shim. Browser-bundled tests that import the DO need the
+  `cloudflare:workers` esbuild alias.
+- **Tapout browser tests**: Tapout uses a fixed local port, so focused
+  browser test commands must run serially rather than in parallel.
+- **Bounded feed reads**: `fetchFeedText` requires `response.body` and reads
+  through a stream with the byte cap. Do not fall back to `response.text()`.
 - **Schema split pattern**: The shared schema exports `TABLES_SQL`, `INDEXES_SQL`, `TRIGGERS_SQL`, and `SCHEMA_SQL` (combined). The DO must apply them in order: tables → server migrations → indexes/triggers. Client (OPFS) can use `SCHEMA_SQL` directly on a fresh DB.
 - **SQLite foreign keys**: `PRAGMA foreign_keys = ON;` is connection-local.
   Run it immediately after opening any client or Durable Object SQLite handle,
@@ -69,6 +78,38 @@
   to `dead_letter_outbox` and updates `syncDeadLetters`; status UI reads that
   signal instead of querying SQLite directly.
 
+---
+
+## 2026-04-25 22:33 PDT - US-026
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Replaced regex RSS/Atom parsing with
+  `fast-xml-parser`.
+  - `parseFeed` now parses XML into objects and dispatches to RSS or Atom
+    object readers.
+  - RSS parsing handles namespaced fields such as `media:title`,
+    `dc:creator`, and `content:encoded`.
+  - Atom parsing handles entries and links with attributes, including
+    self-closing `<link>` elements.
+  - Feed text reads now reject responses without a readable stream instead of
+    falling back to unbounded `response.text()`.
+  - Added focused browser tests for namespaced RSS fields and Atom entries
+    with attributes, plus missing-stream feed responses.
+- Files changed:
+  - `src/server/durable-objects/index.ts`
+  - `src/server/feed-fetch.ts`
+  - `test/feed-fetch-security.ts`
+  - `test/feed-parser.ts`
+  - `test/index.ts`
+  - `package.json`
+  - `package-lock.json`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Feed parsing should use the `fast-xml-parser` object tree, not regexes.
+  - Namespaced RSS tags keep their full key names, for example
+    `media:title` and `dc:creator`.
+  - Durable Object parser tests need the `cloudflare:workers` esbuild alias.
+  - Tapout browser tests share port 8123; run focused scripts serially.
 ---
 
 ## 2026-04-25 22:11 PDT - US-023

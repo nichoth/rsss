@@ -73,3 +73,25 @@ test('fetchFeedText rejects bodies larger than the byte limit', async t => {
         t.equal(err.message, 'Feed response exceeds 10 bytes')
     }
 })
+
+test('fetchFeedText rejects responses without a stream', async t => {
+    const response = {
+        ok: true,
+        status: 200,
+        body: null,
+        async text () {
+            t.fail('response.text should not be called')
+            return ''
+        }
+    } as unknown as Response
+
+    try {
+        await fetchFeedText('https://example.com/feed.xml', {
+            fetchFn: async () => response
+        })
+        t.fail('expected missing stream to be rejected')
+    } catch (_err) {
+        const err = _err as Error
+        t.equal(err.message, 'Feed response has no readable body')
+    }
+})

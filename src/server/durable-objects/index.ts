@@ -1,4 +1,5 @@
 import { DurableObject } from 'cloudflare:workers'
+import { XMLParser } from 'fast-xml-parser'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
@@ -31,6 +32,20 @@ interface Feed {
     updated_at:string
     is_locally_cached:number
 }
+
+type XmlValue = string | number | boolean | null | XmlObject | XmlValue[]
+
+interface XmlObject {
+    [key:string]:XmlValue
+}
+
+const FEED_XML_PARSER = new XMLParser({
+    attributeNamePrefix: '@_',
+    cdataPropName: '#cdata',
+    ignoreAttributes: false,
+    textNodeName: '#text',
+    trimValues: true
+})
 
 /**
  * Store feeds and items for a single user.
@@ -729,120 +744,158 @@ export class UserDO extends DurableObject<Env> {
             pubDate: string | null
         }>
     } {
-        const isAtom = xml.includes('<feed') && xml.includes('xmlns="http://www.w3.org/2005/Atom"')
+        const doc = FEED_XML_PARSER.parse(xml) as XmlObject
+        const rss = this.asObject(this.getChild(doc, ['rss', 'rdf:RDF']))
+        const channel = rss ?
+            this.asObject(this.getChild(rss, ['channel'])) :
+            null
+        const atom = this.asObject(this.getChild(doc, ['feed']))
 
-        if (isAtom) {
-            return this.parseAtom(xml)
-        } else {
-            return this.parseRss(xml)
+        if (channel) return this.parseRss(channel)
+        if (atom) return this.parseAtom(atom)
+
+        return {
+            title: null,
+            description: null,
+            link: null,
+            items: []
         }
     }
 
-    private parseRss (xml: string) {
-        const getTagContent = (str: string, tag: string): string | null => {
-            // Handle CDATA
-            const cdataRegex = new RegExp(`<${tag}[^>]*><!\\[CDATA\\[([\\s\\S]*?)\\]\\]></${tag}>`, 'i')
-            const cdataMatch = str.match(cdataRegex)
-            if (cdataMatch) return cdataMatch[1].trim()
-
-            const regex = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, 'i')
-            const match = str.match(regex)
-            return match ? this.decodeHtmlEntities(match[1].trim()) : null
-        }
-
-        // const getAttr = (str: string, tag: string, attr: string): string | null => {
-        //     const regex = new RegExp(`<${tag}[^>]*${attr}=["']([^"']*)["'][^>]*>`, 'i')
-        //     const match = str.match(regex)
-        //     return match ? match[1] : null
-        // }
-
-        // Get channel info
-        const channelMatch = xml.match(/<channel>([\s\S]*?)<item/i)
-        const channel = channelMatch ? channelMatch[1] : ''
-
-        const title = getTagContent(channel, 'title')
-        const description = getTagContent(channel, 'description')
-        const link = getTagContent(channel, 'link')
-
-        // Get items
+    private parseRss (channel: XmlObject) {
+        const title = this.getText(channel, ['title'])
+        const description = this.getText(channel, ['description'])
+        const link = this.getText(channel, ['link'])
         const items: ReturnType<typeof this.parseFeed>['items'] = []
-        const itemRegex = /<item>([\s\S]*?)<\/item>/gi
-        let itemMatch
+        const itemNodes = this.asArray(this.getChild(channel, ['item']))
 
-        while ((itemMatch = itemRegex.exec(xml)) !== null) {
-            const itemXml = itemMatch[1]
+        for (const itemNode of itemNodes) {
+            const item = this.asObject(itemNode)
+            if (!item) continue
+
             items.push({
-                guid: getTagContent(itemXml, 'guid') || getTagContent(itemXml, 'link'),
-                title: getTagContent(itemXml, 'title'),
-                link: getTagContent(itemXml, 'link'),
-                description: getTagContent(itemXml, 'description'),
-                content: getTagContent(itemXml, 'content:encoded') || getTagContent(itemXml, 'content'),
-                author: getTagContent(itemXml, 'author') || getTagContent(itemXml, 'dc:creator'),
-                pubDate: this.parseDate(getTagContent(itemXml, 'pubDate'))
+                guid: this.getText(item, ['guid', 'id']) ||
+                    this.getText(item, ['link']),
+                title: this.getText(item, ['title', 'media:title']),
+                link: this.getText(item, ['link']),
+                description: this.getText(item, ['description']),
+                content: this.getText(item, [
+                    'content:encoded',
+                    'encoded',
+                    'content'
+                ]),
+                author: this.getText(item, [
+                    'author',
+                    'dc:creator',
+                    'creator'
+                ]),
+                pubDate: this.parseDate(this.getText(item, ['pubDate']))
             })
         }
 
         return { title, description, link, items }
     }
 
-    private parseAtom (xml: string) {
-        const getTagContent = (str: string, tag: string): string | null => {
-            // Handle CDATA
-            const cdataRegex = new RegExp(`<${tag}[^>]*><!\\[CDATA\\[([\\s\\S]*?)\\]\\]></${tag}>`, 'i')
-            const cdataMatch = str.match(cdataRegex)
-            if (cdataMatch) return cdataMatch[1].trim()
-
-            const regex = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, 'i')
-            const match = str.match(regex)
-            return match ? this.decodeHtmlEntities(match[1].trim()) : null
-        }
-
-        const getLinkHref = (str: string): string | null => {
-            // Look for rel="alternate" or no rel attribute
-            const alternateMatch = str.match(/<link[^>]*rel=["']alternate["'][^>]*href=["']([^"']*)["'][^>]*>/i)
-            if (alternateMatch) return alternateMatch[1]
-
-            const hrefMatch = str.match(/<link[^>]*href=["']([^"']*)["'][^>]*>/i)
-            return hrefMatch ? hrefMatch[1] : null
-        }
-
-        // Get feed info (before first entry)
-        const feedMatch = xml.match(/<feed[^>]*>([\s\S]*?)<entry/i)
-        const feedInfo = feedMatch ? feedMatch[1] : ''
-
-        const title = getTagContent(feedInfo, 'title')
-        const description = getTagContent(feedInfo, 'subtitle')
-        const link = getLinkHref(feedInfo)
-
-        // Get entries
+    private parseAtom (feed: XmlObject) {
+        const title = this.getText(feed, ['title'])
+        const description = this.getText(feed, ['subtitle'])
+        const link = this.getLinkHref(this.getChild(feed, ['link']))
         const items: ReturnType<typeof this.parseFeed>['items'] = []
-        const entryRegex = /<entry>([\s\S]*?)<\/entry>/gi
-        let entryMatch
+        const entries = this.asArray(this.getChild(feed, ['entry']))
 
-        while ((entryMatch = entryRegex.exec(xml)) !== null) {
-            const entryXml = entryMatch[1]
+        for (const entryNode of entries) {
+            const entry = this.asObject(entryNode)
+            if (!entry) continue
+
+            const author = this.asObject(this.getChild(entry, ['author']))
+
             items.push({
-                guid: getTagContent(entryXml, 'id'),
-                title: getTagContent(entryXml, 'title'),
-                link: getLinkHref(entryXml),
-                description: getTagContent(entryXml, 'summary'),
-                content: getTagContent(entryXml, 'content'),
-                author: getTagContent(entryXml, 'name'), // Inside <author>
-                pubDate: this.parseDate(getTagContent(entryXml, 'published') || getTagContent(entryXml, 'updated'))
+                guid: this.getText(entry, ['id']),
+                title: this.getText(entry, ['title']),
+                link: this.getLinkHref(this.getChild(entry, ['link'])),
+                description: this.getText(entry, ['summary']),
+                content: this.getText(entry, ['content']),
+                author: author ? this.getText(author, ['name']) : null,
+                pubDate: this.parseDate(
+                    this.getText(entry, ['published']) ||
+                    this.getText(entry, ['updated'])
+                )
             })
         }
 
         return { title, description, link, items }
     }
 
-    private decodeHtmlEntities (str: string): string {
-        return str
-            .replace(/&lt;/g, '<')
-            .replace(/&gt;/g, '>')
-            .replace(/&amp;/g, '&')
-            .replace(/&quot;/g, '"')
-            .replace(/&#39;/g, "'")
-            .replace(/&apos;/g, "'")
+    private getLinkHref (value:XmlValue | undefined):string | null {
+        const links = this.asArray(value)
+        let fallback:string | null = null
+
+        for (const linkValue of links) {
+            const link = this.asObject(linkValue)
+            if (!link) {
+                fallback = fallback || this.textValue(linkValue)
+                continue
+            }
+
+            const href = this.textValue(link['@_href'])
+            const rel = this.textValue(link['@_rel'])
+            if (!href) continue
+            if (!rel || rel === 'alternate') return href
+            fallback = fallback || href
+        }
+
+        return fallback
+    }
+
+    private getText (
+        node:XmlObject,
+        names:string[]
+    ):string | null {
+        const value = this.getChild(node, names)
+        return this.textValue(value)
+    }
+
+    private getChild (
+        node:XmlObject,
+        names:string[]
+    ):XmlValue | undefined {
+        for (const name of names) {
+            if (node[name] !== undefined) return node[name]
+        }
+
+        return undefined
+    }
+
+    private textValue (value:XmlValue | undefined):string | null {
+        if (value === undefined || value === null) return null
+        if (typeof value === 'string') return value.trim() || null
+        if (typeof value === 'number' || typeof value === 'boolean') {
+            return String(value)
+        }
+        if (Array.isArray(value)) {
+            for (const item of value) {
+                const text = this.textValue(item)
+                if (text) return text
+            }
+
+            return null
+        }
+
+        return this.textValue(value['#cdata']) ||
+            this.textValue(value['#text'])
+    }
+
+    private asObject (value:XmlValue | undefined):XmlObject | null {
+        if (!value || Array.isArray(value) || typeof value !== 'object') {
+            return null
+        }
+
+        return value
+    }
+
+    private asArray (value:XmlValue | undefined):XmlValue[] {
+        if (value === undefined || value === null) return []
+        return Array.isArray(value) ? value : [value]
     }
 
     private parseDate (dateStr: string | null): string | null {
