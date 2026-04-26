@@ -40,6 +40,16 @@ test('openLocalDb creates expected indexes', async (t) => {
     }
 })
 
+test('openLocalDb enables foreign key enforcement', async (t) => {
+    const db = await openLocalDb('did:test:foreign-keys')
+    try {
+        const enabled = db.selectValue('PRAGMA foreign_keys') as number
+        t.equal(enabled, 1, 'foreign keys are enabled')
+    } finally {
+        db.close()
+    }
+})
+
 test('openLocalDb schema is idempotent', async (t) => {
     const db = await openLocalDb('did:test:user3')
     const db2 = await openLocalDb('did:test:user3')

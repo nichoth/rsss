@@ -18,6 +18,7 @@
     "test:push-sync": "esbuild ./test/push-sync.ts --bundle --loader:.wasm=dataurl | tapout",
     "test:bootstrap": "esbuild ./test/bootstrap.ts --bundle --loader:.wasm=dataurl | tapout",
     "test:feed": "esbuild test/feed-fetch-security.ts --bundle | tapout",
+    "test:server-fk": "node test/run-server-foreign-keys.mjs",
     "test:tab-coordination": "esbuild test/tab-coordination.ts --bundle | tapout",
     "test:api-router": "esbuild test/api-router.ts --bundle --alias:cloudflare:workers=./test/cloudflare-workers-stub.ts | tapout",
     "build": "mkdir -p ./public && rm -rf ./public/* && npx vite build $([ \"$NODE_ENV\" != \"production\" ] && echo \"--mode staging\")",

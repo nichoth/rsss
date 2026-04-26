@@ -35,6 +35,9 @@
 ## Codebase Patterns
 
 - **Schema split pattern**: The shared schema exports `TABLES_SQL`, `INDEXES_SQL`, `TRIGGERS_SQL`, and `SCHEMA_SQL` (combined). The DO must apply them in order: tables → server migrations → indexes/triggers. Client (OPFS) can use `SCHEMA_SQL` directly on a fresh DB.
+- **SQLite foreign keys**: `PRAGMA foreign_keys = ON;` is connection-local.
+  Run it immediately after opening any client or Durable Object SQLite handle,
+  before applying schema or relying on `ON DELETE CASCADE`.
 - **Test command**: `npm run test:db` runs `test/db-adapter.ts` via esbuild + tapout in a browser (Chromium). All DB adapter interface tests live there.
 - **Import paths**: TypeScript source uses `.js` extensions in imports (e.g. `../../shared/schema.js`) for ESM compatibility with esbuild.
 - **sqlite-wasm in tapout tests**: tapout's HTTP server only serves the test bundle. To use sqlite-wasm in tests, use `--loader:.wasm=dataurl` with esbuild (inlines WASM as base64), import the wasm as `import wasmUrl from '@sqlite.org/sqlite-wasm/sqlite3.wasm'`, and pass `{ locateFile: () => wasmUrl }` to `sqlite3Module.default()`. Use `setTestMode(true, wasmUrl)` before tests to enable in-memory mode.
@@ -407,4 +410,32 @@ Thread: https://ampcode.com/threads/unknown
     opening SQLite.
   - Adapter factory tests should run serially with other tapout browser tests
     because tapout binds a fixed local port.
+---
+
+## 2026-04-25 22:16 PDT - US-024
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Enabled SQLite foreign-key enforcement for local and
+  Durable Object databases.
+  - `openLocalDb` now runs `PRAGMA foreign_keys = ON;` immediately after
+    opening both in-memory test DBs and OPFS-backed DBs.
+  - `UserDO.initDatabase` now runs the same PRAGMA before applying schema or
+    server migrations.
+  - Added focused regression coverage for client PRAGMA state and server-side
+    `ON DELETE CASCADE` behavior.
+- Files changed:
+  - `src/client/db/sqlite-init.ts`
+  - `src/server/durable-objects/index.ts`
+  - `test/sqlite-init.ts`
+  - `test/server-foreign-keys.ts`
+  - `test/run-server-foreign-keys.mjs`
+  - `package.json`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - SQLite foreign-key enforcement is disabled per connection by default, so
+    opening a database is not enough for `ON DELETE CASCADE` to work.
+  - Browser tapout tests use a fixed port; run sqlite-wasm focused tests
+    serially, not in parallel.
+  - `npx tsc --noEmit` is the available typecheck command in this repo; it
+    prints file lists because of the current TypeScript config.
 ---

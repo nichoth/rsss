@@ -76,6 +76,7 @@ export async function openLocalDb (did:string):Promise<Sqlite3Db> {
 
     if (_testMode) {
         const db = new sqlite3.oo1.DB(':memory:')
+        db.exec('PRAGMA foreign_keys = ON;')
         db.exec(SCHEMA_SQL)
         db.exec(OUTBOX_SQL)
         db.exec(SYNC_META_SQL)
@@ -99,6 +100,7 @@ export async function openLocalDb (did:string):Promise<Sqlite3Db> {
 
         const filename = getOpfsFilename(did)
         const db = new poolUtil.OpfsSAHPoolDb(filename)
+        db.exec('PRAGMA foreign_keys = ON;')
         db.exec(SCHEMA_SQL)
         db.exec(OUTBOX_SQL)
         db.exec(SYNC_META_SQL)

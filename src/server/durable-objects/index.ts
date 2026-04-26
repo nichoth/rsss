@@ -58,6 +58,8 @@ export class UserDO extends DurableObject<Env> {
     }
 
     private initDatabase () {
+        this.sql.exec('PRAGMA foreign_keys = ON;')
+
         // 1. Create tables (shared schema)
         this.sql.exec(TABLES_SQL)
 
