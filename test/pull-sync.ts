@@ -6,6 +6,8 @@ import {
     openLocalDb,
     setTestMode
 } from '../src/client/db/sqlite-init.js'
+import { purgeStoredContent } from
+    '../src/client/db/content-storage.js'
 import * as pullSyncModule from '../src/client/db/pull-sync.js'
 import { storeContent } from '../src/client/local-first-settings.js'
 import type { Sqlite3Db } from '../src/client/db/sqlite-init.js'
@@ -117,6 +119,35 @@ test('content stripped when storeContent is false', async (t) => {
         db.close()
     }
 })
+
+test('purgeStoredContent clears content after storeContent is disabled',
+    async (t) => {
+        storeContent.value = true
+        const db = await openLocalDb('did:test:purge-content')
+        try {
+            const syncData = {
+                feeds: [FEED],
+                items: [ITEM],
+                syncedAt: '2026-01-02 00:00:00',
+                latestUpdatedAt: '2026-01-01 00:00:00',
+                isFullSync: true
+            }
+            await pullSync(db, makeFetch(syncData))
+
+            storeContent.value = false
+            await purgeStoredContent(db)
+
+            const item = queryOne<{
+                content:string|null
+                description:string|null
+            }>(db, 'SELECT content, description FROM items WHERE id = 10')
+            t.equal(item?.content, null, 'content is cleared')
+            t.equal(item?.description, null, 'description is cleared')
+        } finally {
+            storeContent.value = true
+            db.close()
+        }
+    })
 
 test('lastPullAt advances after sync', async (t) => {
     storeContent.value = true

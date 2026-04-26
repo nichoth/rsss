@@ -75,6 +75,15 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Content storage opt-out**: Turning `storeContent` off purges local
+  `items.content` and `items.description` through `purgeStoredContent(db)`.
+  Keep future toggle-off flows wired to that helper so old article bodies do
+  not remain in OPFS.
+- **Reader missing-content fallback**: `State.loadItemByRoute` preserves the
+  local item row and only fills missing `content`/`description` from the
+  remote route endpoint when a local-first route item has no body and the
+  browser is online. Do not overwrite local optimistic read/starred state
+  with the remote fetch.
 - **Outbox retry idempotency**: `pushSync` sends `client_op_id` on every
   outbox request. The server does not store processed ops in v1; add-feed
   retries reconcile by unique feed URL, delete-feed retries with a missing
@@ -1565,4 +1574,35 @@ Thread: https://ampcode.com/threads/unknown
     rows, because DO handlers return `{ feed }`, `{ item }`, or `{ items }`.
   - Browser tapout tests use a fixed port, so focused tapout commands must
     run serially.
+---
+
+## 2026-04-26 15:19 PDT - US-065
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Defined and enforced content storage toggle behavior.
+  - Disabling `storeContent` now purges local item `content` and
+    `description` values from SQLite before saving the disabled setting.
+  - Reader routes now fill missing local article body fields from the server
+    while online, without persisting the body or overwriting local read/starred
+    state.
+  - Offline reader routes with missing body content render an unavailable
+    state instead of an empty article body.
+- Files changed:
+  - `src/client/db/content-storage.ts`
+  - `src/client/db/index.ts`
+  - `src/client/routes/item-reader.css`
+  - `src/client/routes/item-reader.ts`
+  - `src/client/routes/settings.ts`
+  - `src/client/state.ts`
+  - `test/pull-sync.ts`
+  - `test/state-auth-storage.ts`
+  - `test/state-route.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Treat `storeContent` opt-out as a data-removal action, not only a future
+    pull-sync preference.
+  - Server body fallback for local-first route items should merge only
+    `content` and `description`; local read/starred state may be ahead of the
+    server because of pending outbox writes.
+  - Tapout browser tests must be run serially because they share port 8123.
 ---

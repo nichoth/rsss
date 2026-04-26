@@ -27,7 +27,7 @@ import {
     bootstrapLocalDb
 } from './bootstrap.js'
 import { pushSync, getOutboxCount } from './push-sync.js'
-import type { DbAdapter } from './types.js'
+import type { DbAdapter, Item } from './types.js'
 import type { Sqlite3Db } from './sqlite-init.js'
 
 export { remoteAdapter } from './remote-adapter.js'
@@ -49,6 +49,7 @@ export {
     clearBootstrappedDb
 } from './bootstrap.js'
 export { getOutboxCount } from './push-sync.js'
+export { purgeStoredContent } from './content-storage.js'
 
 export const localFirstSupported = signal(false)
 
@@ -138,6 +139,12 @@ export async function getAdapter (did?:string):Promise<DbAdapter> {
         }
     }
     return remoteAdapter
+}
+
+export async function getRemoteItemByRoute (
+    itemRoute:string
+):Promise<Item|null> {
+    return remoteAdapter.getItemByRoute(itemRoute)
 }
 
 /**

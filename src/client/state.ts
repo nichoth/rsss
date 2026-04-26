@@ -8,7 +8,11 @@ import {
 import Route from 'route-event'
 import ky from 'ky'
 import Debug from '@substrate-system/debug'
-import { getAdapter, getLocalDb } from './db/index.js'
+import {
+    getAdapter,
+    getLocalDb,
+    getRemoteItemByRoute
+} from './db/index.js'
 import type {
     CountsResponse,
     Feed,
@@ -47,6 +51,39 @@ const debug = Debug('rsss:state')
 const CHECKOUT_EMAIL_KEY = 'rsss_checkout_email'
 export const DEFAULT_PAGE_SIZE = 20
 const SYNC_AUTH_EXPIRED = 'Your session expired. Please log in again.'
+
+function hasArticleBody (item:Item):boolean {
+    return Boolean(item.content || item.description)
+}
+
+function isBrowserOnline ():boolean {
+    return (
+        typeof navigator === 'undefined' ||
+        navigator.onLine !== false
+    )
+}
+
+async function fillMissingRouteBody (
+    did:string|undefined,
+    itemRoute:string,
+    item:Item|null
+):Promise<Item|null> {
+    if (!item || hasArticleBody(item)) return item
+    if (!did || !getLocalDb(did) || !isBrowserOnline()) return item
+
+    try {
+        const serverItem = await getRemoteItemByRoute(itemRoute)
+        if (!serverItem || !hasArticleBody(serverItem)) return item
+        return {
+            ...item,
+            content: serverItem.content,
+            description: serverItem.description
+        }
+    } catch (err) {
+        debug('Error loading missing route item content:', err)
+        return item
+    }
+}
 
 /**
  * Stash the email the user entered on /signup so the
@@ -937,11 +974,10 @@ State.loadItemByRoute = async function (
     if (!itemRoute) return null
 
     try {
-        const adapter = await getAdapter(
-            state.user.value?.did
-        )
+        const did = state.user.value?.did
+        const adapter = await getAdapter(did)
         const item = await adapter.getItemByRoute(itemRoute)
-        return item as Item|null
+        return fillMissingRouteBody(did, itemRoute, item as Item|null)
     } catch (err) {
         debug('Error loading item by route:', err)
         return null

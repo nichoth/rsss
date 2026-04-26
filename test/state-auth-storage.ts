@@ -4,6 +4,7 @@ import { test } from '@substrate-system/tapzero'
 import wasmUrl from '@sqlite.org/sqlite-wasm/sqlite3.wasm'
 import {
     getAdapter,
+    getLocalDb,
     _resetAdapterCache,
     _resetSupportedCache
 } from '../src/client/db/index.js'
@@ -84,6 +85,27 @@ function authState ():AppState {
         _setRoute: () => {},
         user: signal(null)
     } as unknown) as AppState
+}
+
+function itemByRouteResponse ():Response {
+    return new Response(JSON.stringify({
+        item: {
+            id: 10,
+            feed_id: 1,
+            guid: 'guid-10',
+            title: 'Local Item',
+            link: 'https://example.com/item-10',
+            description: 'remote description',
+            content: '<p>remote content</p>',
+            author: null,
+            pub_date: null,
+            is_read: 0,
+            is_starred: 0,
+            created_at: '2026-01-01 00:00:00',
+            updated_at: '2026-01-01 00:00:00',
+            feed_title: 'Example Feed'
+        }
+    }))
 }
 
 test('checkAuth does not persist authenticated user to localStorage',
@@ -313,6 +335,81 @@ test('online sync refreshes lists, counts, and the route item',
             State.loadItems = originals.loadItems
             State.loadCounts = originals.loadCounts
             State.loadItemByRoute = originals.loadItemByRoute
+            globalThis.fetch = originals.fetch
+            setSQLiteWorkerClientFactoryForTests(null)
+            _resetAdapterCache()
+            _resetSupportedCache()
+            syncSubscriptions.value = false
+            resetTabCoordinationForTests()
+        }
+    })
+
+test('loadItemByRoute fetches server body for local item missing content',
+    async t => {
+        const originals = {
+            fetch: globalThis.fetch
+        }
+        const did = 'did:plc:missing-content'
+
+        setupLocalFirstForStateTest()
+        await getAdapter(did)
+        const db = getLocalDb(did)
+        if (!db) {
+            t.fail('local DB is opened')
+            return
+        }
+
+        db.exec({
+            sql: `INSERT INTO feeds
+                (id, url, title, created_at, updated_at)
+                VALUES (1, 'https://example.com/feed', 'Example Feed',
+                    '2026-01-01 00:00:00',
+                    '2026-01-01 00:00:00')`
+        })
+        db.exec({
+            sql: `INSERT INTO items
+                (id, feed_id, guid, title, link, description, content,
+                 is_read, is_starred, created_at, updated_at)
+                VALUES (10, 1, 'guid-10', 'Local Item',
+                    'https://example.com/item-10', NULL, NULL, 1, 1,
+                    '2026-01-01 00:00:00',
+                    '2026-01-01 00:00:00')`
+        })
+
+        globalThis.fetch = async (input) => {
+            const url = input instanceof Request ?
+                input.url :
+                input.toString()
+            if (url.includes('/api/items/by-route')) {
+                return itemByRouteResponse()
+            }
+            return new Response('{}', { status: 404 })
+        }
+
+        try {
+            const state = authState()
+            state.user.value = {
+                did,
+                handle: 'missing-content.test'
+            }
+            const item = await State.loadItemByRoute(
+                state,
+                '/post/example.com/item-10'
+            )
+
+            t.equal(
+                item?.content,
+                '<p>remote content</p>',
+                'uses server content for display'
+            )
+            t.equal(
+                item?.description,
+                'remote description',
+                'uses server description for display'
+            )
+            t.equal(item?.is_read, 1, 'preserves local read state')
+            t.equal(item?.is_starred, 1, 'preserves local starred state')
+        } finally {
             globalThis.fetch = originals.fetch
             setSQLiteWorkerClientFactoryForTests(null)
             _resetAdapterCache()

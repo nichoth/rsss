@@ -1,8 +1,12 @@
 import { signal } from '@preact/signals'
 import type { Signal } from '@preact/signals'
+import { html } from 'htm/preact/index.js'
+import { render } from 'preact'
 import { test } from '@substrate-system/tapzero'
 import type { Item } from '../src/client/db/types.js'
 import { findItemByRoute } from '../src/client/routing.js'
+import { ItemReader } from '../src/client/routes/item-reader.js'
+import { type AppState } from '../src/client/state.js'
 
 type RouteState = {
     items:Signal<Item[]>
@@ -50,3 +54,57 @@ test('findItemByRoute returns exact match for overlapping paths', t => {
 
     t.equal(result?.title, 'Exact Item', 'returns exact route match')
 })
+
+test('ItemReader renders unavailable state for offline missing content',
+    t => {
+        const originalOnline = Object.getOwnPropertyDescriptor(
+            navigator,
+            'onLine'
+        )
+        Object.defineProperty(navigator, 'onLine', {
+            value: false,
+            configurable: true
+        })
+
+        const body = document.querySelector('body') as HTMLElement
+        const root = document.createElement('div')
+        body.appendChild(root)
+
+        const state = {
+            route: signal('/post/example.com/posts/item'),
+            routeItem: signal(item(
+                2,
+                'https://example.com/posts/item',
+                'Exact Item'
+            )),
+            routeItemLoading: signal(false),
+            items: signal([]),
+            _setRoute: () => {}
+        } as unknown as AppState
+
+        try {
+            render(
+                html`<${ItemReader} state=${state} splats=${[]} />`,
+                root
+            )
+
+            const unavailable = root.querySelector(
+                '.article-unavailable'
+            )
+            t.equal(
+                unavailable?.textContent?.trim(),
+                'Article content unavailable offline.',
+                'shows unavailable copy instead of crashing'
+            )
+        } finally {
+            render(null, root)
+            root.remove()
+            if (originalOnline) {
+                Object.defineProperty(
+                    navigator,
+                    'onLine',
+                    originalOnline
+                )
+            }
+        }
+    })

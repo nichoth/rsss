@@ -49,6 +49,15 @@ export const ItemReader:FunctionComponent<{
     const itemId = item.id
     const isStarred = !!item.is_starred
     const isRead = !!item.is_read
+    const articleHtml = sanitizeHtml(
+        item.content ||
+        item.description ||
+        ''
+    )
+    const contentUnavailable = (
+        !articleHtml &&
+        navigator.onLine === false
+    )
 
     const handleStar = useCallback(async () => {
         await State.toggleItemStarred(
@@ -125,16 +134,18 @@ export const ItemReader:FunctionComponent<{
                     </div>
                 </header>
 
-                <div
-                    class="article-body"
-                    dangerouslySetInnerHTML=${{
-                        __html: sanitizeHtml(
-                            item.content ||
-                            item.description ||
-                            ''
-                        )
-                    }}
-                ></div>
+                ${contentUnavailable ? html`
+                    <div class="article-body article-unavailable">
+                        Article content unavailable offline.
+                    </div>
+                ` : html`
+                    <div
+                        class="article-body"
+                        dangerouslySetInnerHTML=${{
+                            __html: articleHtml
+                        }}
+                    ></div>
+                `}
             </article>
         </div>
     `

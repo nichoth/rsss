@@ -111,6 +111,12 @@
         }
     }
 
+    & .article-unavailable {
+        color: var(--color-text-secondary);
+        border-left: 3px solid var(--color-border);
+        padding-left: 1rem;
+    }
+
     /* Header link */
     & .header-link {
         color: var(--color-text-secondary);

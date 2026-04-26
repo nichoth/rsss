@@ -25,7 +25,8 @@ import {
     getLocalDb,
     getOutboxCount,
     localTabLockError,
-    LocalFirstSyncFailureError
+    LocalFirstSyncFailureError,
+    purgeStoredContent
 } from '../db/index.js'
 import '@substrate-system/check-box'
 import './settings.css'
@@ -171,10 +172,30 @@ export const SettingsRoute:FunctionComponent<{
         }
     }
 
-    function handleContentChange (ev:Event) {
-        const checked = (ev.target as HTMLInputElement).checked
-        storeContent.value = checked
-        saveLocalFirstSettings()
+    async function handleContentChange (ev:Event) {
+        const target = ev.target as HTMLInputElement
+        const checked = target.checked
+        if (checked) {
+            storeContent.value = true
+            saveLocalFirstSettings()
+            return
+        }
+
+        const did = state.user.value?.did
+        const db = did ? getBootstrappedDb() ?? getLocalDb(did) : null
+
+        try {
+            if (db) await purgeStoredContent(db)
+            storeContent.value = false
+            saveLocalFirstSettings()
+        } catch (err) {
+            alert(err instanceof Error ?
+                err.message :
+                'Unable to clear local article content')
+            storeContent.value = true
+            saveLocalFirstSettings()
+            target.checked = true
+        }
     }
 
     return html`<div class="route settings">
