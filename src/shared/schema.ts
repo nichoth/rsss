@@ -66,5 +66,18 @@ export const TRIGGERS_SQL = `
     END;
 `
 
+export const DEAD_LETTER_OUTBOX_SQL = `
+    CREATE TABLE IF NOT EXISTS dead_letter_outbox (
+        id INTEGER PRIMARY KEY,
+        op TEXT NOT NULL,
+        target_id INTEGER,
+        payload TEXT NOT NULL,
+        client_op_id TEXT NOT NULL UNIQUE,
+        client_updated_at TEXT NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT
+    );
+`
+
 /** Full schema: tables + indexes + triggers. Suitable for fresh databases. */
 export const SCHEMA_SQL = TABLES_SQL + INDEXES_SQL + TRIGGERS_SQL

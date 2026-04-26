@@ -5,6 +5,7 @@ import {
     syncedAt,
     syncError,
     syncPending,
+    syncDeadLetters,
     isLocalFirstActive
 } from '../db/sync-status.js'
 import { billingStatus } from '../billing-status.js'
@@ -41,6 +42,7 @@ export const SyncStatus:FunctionComponent = function () {
     const at = syncedAt.value
     const err = syncError.value
     const pending = syncPending.value
+    const deadLetters = syncDeadLetters.value
 
     let label:string
     let cls:string
@@ -56,6 +58,12 @@ export const SyncStatus:FunctionComponent = function () {
         label = 'Sync error'
         cls = 'sync-status error'
         title = err ?? undefined
+    } else if (status === 'warning') {
+        label = deadLetters > 0
+            ? `Sync warning - ${deadLetters} blocked`
+            : 'Sync warning'
+        cls = 'sync-status warning'
+        title = 'Some local changes stopped retrying after 10 failures'
     } else {
         label = at ? `Synced ${formatTime(at)}` : 'Synced'
         cls = 'sync-status idle'

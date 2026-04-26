@@ -1,4 +1,7 @@
-import { SCHEMA_SQL } from '../../shared/schema.js'
+import {
+    SCHEMA_SQL,
+    DEAD_LETTER_OUTBOX_SQL
+} from '../../shared/schema.js'
 import { LOCAL_TAB_LOCK_ERROR } from './tab-coordination.js'
 
 export const SYNC_META_SQL = `
@@ -79,6 +82,7 @@ export async function openLocalDb (did:string):Promise<Sqlite3Db> {
         db.exec('PRAGMA foreign_keys = ON;')
         db.exec(SCHEMA_SQL)
         db.exec(OUTBOX_SQL)
+        db.exec(DEAD_LETTER_OUTBOX_SQL)
         db.exec(SYNC_META_SQL)
         return db as Sqlite3Db
     }
@@ -103,6 +107,7 @@ export async function openLocalDb (did:string):Promise<Sqlite3Db> {
         db.exec('PRAGMA foreign_keys = ON;')
         db.exec(SCHEMA_SQL)
         db.exec(OUTBOX_SQL)
+        db.exec(DEAD_LETTER_OUTBOX_SQL)
         db.exec(SYNC_META_SQL)
         return db
     } catch (err) {

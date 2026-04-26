@@ -65,6 +65,9 @@
 - **Optimistic feed ID reconciliation**: On successful `add_feed` push,
   delete the optimistic local feed row before upserting the server feed row.
   Do this in one transaction because `feeds.url` is unique.
+- **Dead-letter outbox status**: `pushSync` owns promotion from `outbox`
+  to `dead_letter_outbox` and updates `syncDeadLetters`; status UI reads that
+  signal instead of querying SQLite directly.
 
 ---
 
@@ -438,4 +441,37 @@ Thread: https://ampcode.com/threads/unknown
     serially, not in parallel.
   - `npx tsc --noEmit` is the available typecheck command in this repo; it
     prints file lists because of the current TypeScript config.
+---
+
+## 2026-04-25 22:25 PDT - US-025
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added the outbox retry cap and dead-letter handling.
+  - `pushSync` now moves rows to `dead_letter_outbox` on the 10th failed
+    attempt instead of retrying forever.
+  - Added shared `dead_letter_outbox` schema and apply it on both local DB
+    open and Durable Object database initialization.
+  - Sync status now exposes `syncDeadLetters` and renders a distinct warning
+    when dead-letter rows exist.
+- Files changed:
+  - `src/shared/schema.ts`
+  - `src/client/db/sqlite-init.ts`
+  - `src/server/durable-objects/index.ts`
+  - `src/client/db/push-sync.ts`
+  - `src/client/db/sync-status.ts`
+  - `src/client/components/sync-status.ts`
+  - `src/client/components/sync-status.css`
+  - `src/client/style.css`
+  - `test/push-sync.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - The dead-letter table definition is shared in `src/shared/schema.ts`,
+    but `pushSync` remains the only place that promotes failed client outbox
+    rows and updates `syncDeadLetters`.
+  - `setSyncDone` preserves the current dead-letter count by default so a
+    later pull phase does not clear an existing warning state.
+  - Let `dead_letter_outbox` allocate its own `id`; preserving the old outbox
+    rowid can collide after SQLite reuses rowids in an emptied `outbox`.
+  - Tapout browser tests use a fixed port; run focused browser test scripts
+    serially instead of in parallel.
 ---

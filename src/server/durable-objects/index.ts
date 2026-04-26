@@ -2,7 +2,12 @@ import { DurableObject } from 'cloudflare:workers'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
-import { TABLES_SQL, INDEXES_SQL, TRIGGERS_SQL } from '../../shared/schema.js'
+import {
+    TABLES_SQL,
+    INDEXES_SQL,
+    TRIGGERS_SQL,
+    DEAD_LETTER_OUTBOX_SQL
+} from '../../shared/schema.js'
 import type { FeedFetchError } from '../feed-fetch.js'
 import {
     fetchFeedText,
@@ -72,6 +77,7 @@ export class UserDO extends DurableObject<Env> {
         // 3. Create indexes and triggers (shared schema) - idempotent
         this.sql.exec(INDEXES_SQL)
         this.sql.exec(TRIGGERS_SQL)
+        this.sql.exec(DEAD_LETTER_OUTBOX_SQL)
     }
 
     /**

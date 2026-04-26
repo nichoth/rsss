@@ -7,6 +7,8 @@ import {
     isLocalFirstActive
 } from './sync-status.js'
 
+const OUTBOX_ATTEMPT_LIMIT = 10
+
 export class PushSyncAuthError extends Error {
     constructor () {
         super('pushSync: 401 unauthorized — halting drain')
@@ -42,6 +44,16 @@ export function getOutboxCount (db:Sqlite3Db):number {
     return rows[0]?.n ?? 0
 }
 
+export function getDeadLetterOutboxCount (db:Sqlite3Db):number {
+    const rows:Array<{ n:number }> = []
+    db.exec({
+        sql: 'SELECT COUNT(*) AS n FROM dead_letter_outbox',
+        rowMode: 'object',
+        resultRows: rows as Record<string, SqlValue>[]
+    })
+    return rows[0]?.n ?? 0
+}
+
 function getOutboxRows (db:Sqlite3Db):OutboxRow[] {
     const rows:OutboxRow[] = []
     db.exec({
@@ -67,6 +79,49 @@ function incrementAttempt (
               WHERE id = ?`,
         bind: [error, id]
     })
+}
+
+function moveOutboxRowToDeadLetters (
+    db:Sqlite3Db,
+    row:OutboxRow,
+    error:string
+):void {
+    db.exec('BEGIN')
+    try {
+        db.exec({
+            sql: `INSERT INTO dead_letter_outbox
+                (op, target_id, payload, client_op_id, client_updated_at,
+                 attempts, last_error)
+                VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            bind: [
+                row.op,
+                row.target_id,
+                row.payload,
+                row.client_op_id,
+                row.client_updated_at,
+                row.attempts + 1,
+                error
+            ]
+        })
+        deleteOutboxRow(db, row.id)
+        db.exec('COMMIT')
+    } catch (err) {
+        db.exec('ROLLBACK')
+        throw err
+    }
+}
+
+function recordFailedAttempt (
+    db:Sqlite3Db,
+    row:OutboxRow,
+    error:string
+):void {
+    if (row.attempts + 1 >= OUTBOX_ATTEMPT_LIMIT) {
+        moveOutboxRowToDeadLetters(db, row, error)
+        return
+    }
+
+    incrementAttempt(db, row.id, error)
 }
 
 function upsertFeedFromServer (
@@ -310,22 +365,19 @@ export async function pushSync (
             }
 
             // 5xx or other non-success
-            incrementAttempt(
-                db,
-                row.id,
-                `HTTP ${res.status}`
-            )
+            recordFailedAttempt(db, row, `HTTP ${res.status}`)
         } catch (err) {
             if (err instanceof PushSyncAuthError) throw err
             if (err instanceof PushSyncBillingError) throw err
             const errMsg = err instanceof Error ? err.message : String(err)
-            incrementAttempt(db, row.id, errMsg)
+            recordFailedAttempt(db, row, errMsg)
             if (trackStatus) setSyncError(errMsg)
         }
     }
 
     if (trackStatus) {
         const pending = getOutboxCount(db)
-        setSyncDone(pending)
+        const deadLetters = getDeadLetterOutboxCount(db)
+        setSyncDone(pending, deadLetters)
     }
 }

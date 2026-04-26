@@ -10,6 +10,11 @@ import {
     pushSync,
     PushSyncAuthError
 } from '../src/client/db/push-sync.js'
+import {
+    syncStatus,
+    syncDeadLetters,
+    isLocalFirstActive
+} from '../src/client/db/sync-status.js'
 import { createLocalAdapter } from '../src/client/db/local-adapter.js'
 import type { Sqlite3Db } from '../src/client/db/sqlite-init.js'
 
@@ -199,6 +204,113 @@ test('pushSync: 5xx increments attempts and preserves row', async (t) => {
         t.ok(
             row?.last_error?.includes('500'),
             'last_error records HTTP status'
+        )
+    } finally {
+        db.close()
+    }
+})
+
+test('pushSync: 10th failed attempt moves row to dead letters', async (t) => {
+    const db = await openLocalDb('did:test:push-deadletter')
+    try {
+        db.exec({
+            sql: `INSERT INTO outbox
+                (op, target_id, payload, client_op_id,
+                 client_updated_at, attempts)
+                VALUES ('add_feed', NULL, ?, 'op-uuid-dead',
+                    '2026-01-01 00:00:00', 9)`,
+            bind: [JSON.stringify({ url: 'https://ex.com/dead.xml' })]
+        })
+
+        await pushSync(db, makeFetch(500))
+
+        const outboxRows = queryAll(db, 'SELECT * FROM outbox')
+        t.equal(outboxRows.length, 0, 'outbox row promoted')
+
+        const deadRows = queryAll<{
+            op:string
+            client_op_id:string
+            attempts:number
+            last_error:string|null
+        }>(db, 'SELECT * FROM dead_letter_outbox')
+        t.equal(deadRows.length, 1, 'dead-letter row inserted')
+        t.equal(deadRows[0]?.op, 'add_feed', 'op is preserved')
+        t.equal(
+            deadRows[0]?.client_op_id,
+            'op-uuid-dead',
+            'client_op_id is preserved'
+        )
+        t.equal(deadRows[0]?.attempts, 10, 'final attempt is recorded')
+        t.ok(
+            deadRows[0]?.last_error?.includes('HTTP 500'),
+            'last_error is preserved'
+        )
+    } finally {
+        db.close()
+    }
+})
+
+test('pushSync: dead letters set a sync warning count', async (t) => {
+    const db = await openLocalDb('did:test:push-deadletter-status')
+    try {
+        isLocalFirstActive.value = true
+        syncStatus.value = 'idle'
+        syncDeadLetters.value = 0
+
+        db.exec({
+            sql: `INSERT INTO outbox
+                (op, target_id, payload, client_op_id,
+                 client_updated_at, attempts)
+                VALUES ('add_feed', NULL, ?, 'op-uuid-dead-status',
+                    '2026-01-01 00:00:00', 9)`,
+            bind: [JSON.stringify({ url: 'https://ex.com/dead-status.xml' })]
+        })
+
+        await pushSync(db, makeFetch(500))
+
+        t.equal(syncStatus.value, 'warning', 'sync status is warning')
+        t.equal(syncDeadLetters.value, 1, 'dead-letter count is exposed')
+    } finally {
+        isLocalFirstActive.value = false
+        db.close()
+    }
+})
+
+test('pushSync: sequential dead letters do not collide on id', async (t) => {
+    const db = await openLocalDb('did:test:push-deadletter-sequential')
+    try {
+        for (const opId of ['op-uuid-dead-a', 'op-uuid-dead-b']) {
+            db.exec({
+                sql: `INSERT INTO outbox
+                    (op, target_id, payload, client_op_id,
+                     client_updated_at, attempts)
+                    VALUES ('add_feed', NULL, ?, ?,
+                        '2026-01-01 00:00:00', 9)`,
+                bind: [
+                    JSON.stringify({ url: `https://ex.com/${opId}.xml` }),
+                    opId
+                ]
+            })
+
+            await pushSync(db, makeFetch(500))
+        }
+
+        const deadRows = queryAll<{ client_op_id:string }>(
+            db,
+            `SELECT client_op_id
+             FROM dead_letter_outbox
+             ORDER BY id ASC`
+        )
+        t.equal(deadRows.length, 2, 'both failed rows are dead-lettered')
+        t.equal(
+            deadRows[0]?.client_op_id,
+            'op-uuid-dead-a',
+            'first operation is preserved'
+        )
+        t.equal(
+            deadRows[1]?.client_op_id,
+            'op-uuid-dead-b',
+            'second operation is preserved'
         )
     } finally {
         db.close()
