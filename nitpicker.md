@@ -11,7 +11,7 @@ Recent commit messages (`add docs`, `wip`, `implement`, `add some notes`) are un
 
 ## P0 — Ship-blockers
 
-### 1. Admin endpoints have **no authentication whatsoever**
+### 1. Admin endpoints have **no authentication whatsoever** [FIXED]
 **File**: `src/server/index.ts`
 **Lines**: 894–908 (`/admin/users`), 915–976 (`/admin/refresh-all`)
 
@@ -19,7 +19,7 @@ Both routes are public. `GET /admin/users` returns the DID and Bluesky handle of
 
 **Fix**: Gate both behind a separate `ADMIN_TOKEN` secret checked from a header, or at minimum require `requireAuth` plus an allowlist of admin DIDs. Right now the comment "Admin: list all tracked users" is the only thing standing between you and the front page of HN.
 
-### 2. `sanitizeHtml` is a regex toy and is used to render untrusted feed content into the DOM
+### 2. `sanitizeHtml` is a regex toy and is used to render untrusted feed content into the DOM [FIXED]
 **File**: `src/client/util.ts:24–31`, used in `src/client/routes/item-reader.ts:130–136`
 
 ```js
@@ -43,7 +43,7 @@ Used to feed `dangerouslySetInnerHTML` with arbitrary RSS/Atom item content. The
 
 **Fix**: Use a real sanitizer. `DOMPurify` is a drop-in. If you want to keep things small, render `textContent` only. Do not roll your own HTML sanitizer — this rule is older than Node.js.
 
-### 3. Session cookie payload includes plaintext OAuth tokens; "encrypted-cookie sessions" claim is wrong
+### 3. Session cookie payload includes plaintext OAuth tokens; "encrypted-cookie sessions" claim is wrong [FIXED]
 **File**: `src/server/auth/oauth.ts:593–619`
 
 `createSessionCookie` does HMAC-sign `JSON.stringify(session)` and concatenates `btoa(payload).signature`. That is **signed**, not **encrypted**. The cookie body is base64 plaintext containing `accessToken`, `refreshToken`, `expiresAt`. Anyone who steals or logs the cookie has the user's Bluesky access token, *and* anyone with browser-extension access to cookies (which httpOnly does not protect against — extensions with `cookies` permission read httpOnly cookies happily) gets the same.

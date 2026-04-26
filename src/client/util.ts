@@ -1,3 +1,5 @@
+import DOMPurify from 'dompurify'
+
 export function stripHtml (html:string):string {
     return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
 }
@@ -22,12 +24,11 @@ export function formatDate (dateStr:string|null):string {
 }
 
 export function sanitizeHtml (html:string):string {
-    // Basic sanitization - remove script tags and event handlers
-    return html
-        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-        .replace(/\s*on\w+="[^"]*"/gi, '')
-        .replace(/\s*on\w+='[^']*'/gi, '')
-        .replace(/javascript:/gi, '')
+    return DOMPurify.sanitize(html, {
+        USE_PROFILES: { html: true },
+        FORBID_TAGS: ['style', 'form'],
+        FORBID_ATTR: ['style']
+    })
 }
 
 /**

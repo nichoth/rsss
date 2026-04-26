@@ -6,6 +6,7 @@ import {
     exchangeCode,
     createSessionCookie,
     verifySessionCookie,
+    destroySessionCookie,
     type OAuthSession,
     type OAuthState
 } from './auth/oauth.js'
@@ -42,6 +43,7 @@ export interface Env {
     RESEND_API_KEY?:string;
     RESEND_DISABLED?:string;
     RESEND_FROM?:string;
+    ADMIN_TOKEN?:string;
     NODE_ENV:string;
 }
 
@@ -200,7 +202,8 @@ app.use('*', async (c, next) => {
     if (sessionCookie && c.env.SESSION_SECRET) {
         const session = await verifySessionCookie(
             sessionCookie,
-            c.env.SESSION_SECRET
+            c.env.SESSION_SECRET,
+            c.env.SESSIONS
         )
         c.set('session', session)
     } else {
@@ -394,7 +397,8 @@ app.post('/api/auth/callback', async (c) => {
         // Create session cookie
         const sessionCookie = await createSessionCookie(
             session,
-            c.env.SESSION_SECRET
+            c.env.SESSION_SECRET,
+            c.env.SESSIONS
         )
 
         setCookie(c, 'session', sessionCookie, {
@@ -422,12 +426,28 @@ app.post('/api/auth/callback', async (c) => {
 /**
  * Logout
  */
-app.post('/api/auth/logout', (c) => {
+app.post('/api/auth/logout', async (c) => {
+    const cookie = getCookie(c, 'session')
+    if (cookie && c.env.SESSION_SECRET) {
+        await destroySessionCookie(
+            cookie,
+            c.env.SESSION_SECRET,
+            c.env.SESSIONS
+        )
+    }
     deleteCookie(c, 'session', { path: '/' })
     return c.json({ success: true })
 })
 
-app.get('/logout', (c) => {
+app.get('/logout', async (c) => {
+    const cookie = getCookie(c, 'session')
+    if (cookie && c.env.SESSION_SECRET) {
+        await destroySessionCookie(
+            cookie,
+            c.env.SESSION_SECRET,
+            c.env.SESSIONS
+        )
+    }
     deleteCookie(c, 'session', { path: '/' })
     return c.redirect('/login')
 })
@@ -439,6 +459,45 @@ const requireAuth = async (c:Context<{
     const session = c.get('session')
 
     if (!session) {
+        return c.json({ error: 'Unauthorized' }, 401)
+    }
+
+    await next()
+}
+
+/**
+ * Constant-time comparison for admin token verification.
+ * Avoids early exit on mismatch to prevent timing leaks.
+ */
+function timingSafeEqual (a:string, b:string):boolean {
+    if (a.length !== b.length) return false
+    let result = 0
+    for (let i = 0; i < a.length; i++) {
+        result |= a.charCodeAt(i) ^ b.charCodeAt(i)
+    }
+    return result === 0
+}
+
+/**
+ * Require an admin bearer token. Reads from `ADMIN_TOKEN` secret;
+ * if unset, all admin routes return 503 (closed by default).
+ */
+const requireAdmin = async (c:Context<{
+    Bindings:Env;
+    Variables:Variables
+}>, next:Next) => {
+    const expected = c.env.ADMIN_TOKEN
+    if (!expected) {
+        return c.json({
+            error: 'admin_disabled'
+        }, 503)
+    }
+
+    const header = c.req.header('authorization') || ''
+    const match = header.match(/^Bearer\s+(.+)$/i)
+    const provided = match ? match[1] : ''
+
+    if (!provided || !timingSafeEqual(provided, expected)) {
         return c.json({ error: 'Unauthorized' }, 401)
     }
 
@@ -488,7 +547,7 @@ app.post('/api/auth/dev-login', async (c) => {
             || 'dev-secret-key-32-chars-long!!'
     )
     const sessionCookie = await createSessionCookie(
-        session, secret
+        session, secret, c.env.SESSIONS
     )
 
     // Track this user in KV for admin tools
@@ -889,9 +948,10 @@ app.all('/api/*', requireAuth, requireEntitlement, async (c) => {
 })
 
 /**
- * Admin: list all tracked users
+ * Admin: list all tracked users.
+ * Requires ADMIN_TOKEN bearer header.
  */
-app.get('/admin/users', async (c) => {
+app.get('/admin/users', requireAdmin, async (c) => {
     const result = await c.env.SESSIONS.list({
         prefix: 'user:'
     })
@@ -911,8 +971,9 @@ app.get('/admin/users', async (c) => {
  * Admin: refresh all feeds for all tracked users.
  * Accepts optional `dids` array in body to refresh
  * specific users only.
+ * Requires ADMIN_TOKEN bearer header.
  */
-app.post('/admin/refresh-all', async (c) => {
+app.post('/admin/refresh-all', requireAdmin, async (c) => {
     let dids:string[]
 
     // Check if specific DIDs were provided
