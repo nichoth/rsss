@@ -129,14 +129,50 @@ test('getItems respects limit and offset', async (t) => {
     }
 })
 
-test('getItemByRoute finds item by link substring', async (t) => {
+test('getItemByRoute finds item by route', async (t) => {
     const db = await openLocalDb('did:test:getitem-route')
     await seedDb(db)
     const adapter = createLocalAdapter(db)
     try {
-        const item = await adapter.getItemByRoute('item-one')
+        const item = await adapter.getItemByRoute(
+            'example.com/posts/item-one'
+        )
         t.ok(item !== null, 'item found')
         t.equal(item!.title, 'Item One', 'correct item returned')
+    } finally {
+        db.close()
+    }
+})
+
+test('getItemByRoute returns exact match for overlapping paths', async (t) => {
+    const db = await openLocalDb('did:test:getitem-overlap')
+    db.exec(`
+        INSERT INTO feeds (url, title, created_at, updated_at)
+        VALUES
+            ('https://example.com/feed', 'Feed',
+             '2024-01-01 00:00:00', '2024-01-01 00:00:00');
+
+        INSERT INTO items
+            (feed_id, guid, title, link, is_read, is_starred,
+             created_at, updated_at, pub_date)
+        VALUES
+            (1, 'exact', 'Exact Item',
+             'https://example.com/posts/item', 0, 0,
+             '2024-01-01 00:00:00', '2024-01-01 00:00:00',
+             '2024-01-01 00:00:00'),
+            (1, 'overlap', 'Overlap Item',
+             'https://example.com/posts/item-extra', 0, 0,
+             '2024-01-02 00:00:00', '2024-01-02 00:00:00',
+             '2024-01-02 00:00:00');
+    `)
+    const adapter = createLocalAdapter(db)
+
+    try {
+        const item = await adapter.getItemByRoute(
+            'example.com/posts/item'
+        )
+
+        t.equal(item?.title, 'Exact Item', 'returns exact path match')
     } finally {
         db.close()
     }
@@ -180,6 +216,39 @@ test('addFeed inserts a feed and returns it', async (t) => {
 
         const feeds = await adapter.getFeeds()
         t.equal(feeds.length, 1, 'one feed in db')
+    } finally {
+        db.close()
+    }
+})
+
+test('addFeed writes sortable SQLite timestamps', async (t) => {
+    const db = await openLocalDb('did:test:addfeed-sqlite-ts')
+    const adapter = createLocalAdapter(db)
+    try {
+        const feed = await adapter.addFeed('https://time.example.com/feed')
+        const rows = getOutbox(db)
+        const sqliteTsPattern = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/
+
+        t.ok(
+            sqliteTsPattern.test(feed.created_at),
+            'created_at uses SQLite timestamp format'
+        )
+        t.ok(
+            sqliteTsPattern.test(feed.updated_at),
+            'updated_at uses SQLite timestamp format'
+        )
+        t.ok(
+            sqliteTsPattern.test(rows[0].client_updated_at),
+            'outbox timestamp uses SQLite timestamp format'
+        )
+        t.ok(
+            '2026-01-01 00:00:00' > '2025-12-31 23:59:59',
+            'server-style timestamps sort lexicographically'
+        )
+        t.ok(
+            '2026-01-01 00:00:00' > '2025-12-31T23:59:59.999Z',
+            'SQLite timestamps sort after older ISO timestamps'
+        )
     } finally {
         db.close()
     }

@@ -18,7 +18,7 @@ export function withIsolationHeaders (response:Response):Response {
     })
 
     next.headers.set(COOP, 'same-origin')
-    next.headers.set(COEP, 'require-corp')
+    next.headers.set(COEP, 'credentialless')
 
     return next
 }

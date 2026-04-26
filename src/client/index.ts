@@ -5,6 +5,7 @@ import { State, type AppState } from './state.js'
 import Router from './routes/index.js'
 import { NotFound } from './not-found.js'
 import { Header } from './components/header.js'
+import { configureDebugStorage } from './debug-storage.js'
 import './style.css'
 // import Debug from '@substrate-system/debug'
 // const debug = Debug('rsss:view:index')
@@ -12,16 +13,22 @@ import './style.css'
 const state = State()
 const router = Router(state)
 
+if (import.meta.hot) {
+    import.meta.hot.dispose(() => {
+        state.cleanup()
+    })
+}
+
 /**
  * Debug logging
  */
 if (import.meta.env.DEV || import.meta.env.MODE === 'staging') {
     // @ts-expect-error DEV env
     window.state = state
-    localStorage.setItem('DEBUG', 'rsss,rsss:*')
-} else {
-    localStorage.removeItem('DEBUG')
 }
+configureDebugStorage(
+    import.meta.env.DEV || import.meta.env.MODE === 'staging'
+)
 
 /**
  * Main app

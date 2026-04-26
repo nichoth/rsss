@@ -21,8 +21,8 @@ test('asset responses receive isolation headers without mutating immutable',
         )
         t.equal(
             res?.headers.get('Cross-Origin-Embedder-Policy'),
-            'require-corp',
-            'sets COEP header'
+            'credentialless',
+            'sets iframe-compatible COEP header'
         )
     }
 )

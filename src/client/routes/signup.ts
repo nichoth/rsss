@@ -29,7 +29,7 @@ export const SignupPage:FunctionComponent<{
     // "you're already subscribed" branch is accurate.
     useEffect(() => {
         if (state.isAuthenticated.value) {
-            State.loadBillingStatus(state)
+            State.loadBillingStatus()
         }
     }, [])
 
@@ -62,7 +62,7 @@ export const SignupPage:FunctionComponent<{
 
     function handleManage (e:Event) {
         e.preventDefault()
-        State.openCustomerPortal(state)
+        State.openCustomerPortal()
     }
 
     return html`

@@ -1,40 +1,57 @@
-import { SCHEMA_SQL } from '../../shared/schema.js'
+import {
+    SCHEMA_SQL,
+    DEAD_LETTER_OUTBOX_SQL
+} from '../../shared/schema.js'
+import { createSQLiteWorkerClient } from './sqlite-worker-factory.js'
+import { WorkerBackedLocalDb } from './local-db.js'
+import { OUTBOX_SQL, SYNC_META_SQL } from './local-schema.js'
+import { LOCAL_TAB_LOCK_ERROR } from './tab-coordination.js'
+import type { SQLiteWorkerClient } from './sqlite-worker-client.js'
 
-export const SYNC_META_SQL = `
-    CREATE TABLE IF NOT EXISTS sync_meta (
-        id INTEGER PRIMARY KEY CHECK (id = 1),
-        last_pull_at TEXT
-    );
-    INSERT OR IGNORE INTO sync_meta (id, last_pull_at) VALUES (1, NULL);
-`
-
-const OUTBOX_SQL = `
-    CREATE TABLE IF NOT EXISTS outbox (
-        id INTEGER PRIMARY KEY,
-        op TEXT NOT NULL,
-        target_id INTEGER,
-        payload TEXT NOT NULL,
-        client_op_id TEXT NOT NULL UNIQUE,
-        client_updated_at TEXT NOT NULL,
-        attempts INTEGER NOT NULL DEFAULT 0,
-        last_error TEXT
-    );
-`
+export { SYNC_META_SQL, OUTBOX_SQL } from './local-schema.js'
 
 export class OPFSUnavailableError extends Error {
-    constructor () {
-        super('OPFS is not available in this browser')
+    constructor (message = 'OPFS is not available in this browser') {
+        super(message)
         this.name = 'OPFSUnavailableError'
+    }
+}
+
+export type LocalDbErrorCategory =
+    'unavailable' |
+    'locked' |
+    'quota' |
+    'corruption' |
+    'unknown'
+
+export class LocalDbOpenError extends Error {
+    category:LocalDbErrorCategory
+
+    constructor (
+        category:LocalDbErrorCategory,
+        message:string,
+        cause?:unknown
+    ) {
+        super(message, { cause })
+        this.name = 'LocalDbOpenError'
+        this.category = category
     }
 }
 
 let _testMode = false
 let _testWasmUrl:string|undefined
+let _workerClientFactory:(() => SQLiteWorkerClient) = createSQLiteWorkerClient
 
 /** Set to true in tests to use an in-memory DB instead of OPFS. */
 export function setTestMode (v:boolean, wasmUrl?:string):void {
     _testMode = v
     _testWasmUrl = wasmUrl
+}
+
+export function setSQLiteWorkerClientFactoryForTests (
+    factory:(() => SQLiteWorkerClient)|null
+):void {
+    _workerClientFactory = factory ?? createSQLiteWorkerClient
 }
 
 export async function initSqlite () {
@@ -55,12 +72,56 @@ export type Sqlite3Db = InstanceType<Sqlite3['oo1']['DB']>
 function isOpfsSupported ():boolean {
     return (
         typeof navigator !== 'undefined' &&
-        'storage' in navigator &&
-        typeof (globalThis as Record<string, unknown>)
-            .FileSystemSyncAccessHandle !== 'undefined' &&
+        navigator.storage != null &&
+        typeof navigator.storage.getDirectory === 'function' &&
         (globalThis as { crossOriginIsolated?:boolean })
             .crossOriginIsolated === true
     )
+}
+
+export async function probeOpfsSupport ():Promise<boolean> {
+    if (!isOpfsSupported()) return false
+
+    const client = _workerClientFactory()
+    try {
+        await client.probe({ directory: 'rsss-db' })
+        return true
+    } catch {
+        return false
+    } finally {
+        client.dispose()
+    }
+}
+
+export function classifyLocalDbError (
+    err:unknown
+):LocalDbErrorCategory {
+    if (err instanceof LocalDbOpenError) return err.category
+    if (err instanceof OPFSUnavailableError) return 'unavailable'
+
+    const record = err as { name?:unknown; message?:unknown }
+    const name = typeof record?.name === 'string' ? record.name : ''
+    const message = err instanceof Error ? err.message : String(err)
+    const text = `${name} ${message}`.toLowerCase()
+
+    if (isExclusiveLockError(err)) return 'locked'
+    if (
+        name === 'QuotaExceededError' ||
+        /quota|disk full|no space|not enough storage/.test(text)
+    ) {
+        return 'quota'
+    }
+    if (
+        /corrupt|malformed|not a database/.test(text) ||
+        /unsupported file format|incompatible/.test(text)
+    ) {
+        return 'corruption'
+    }
+    if (/opfs|storage directory|filesystem/.test(text)) {
+        return 'unavailable'
+    }
+
+    return 'unknown'
 }
 
 /**
@@ -71,12 +132,13 @@ function isOpfsSupported ():boolean {
  * Throws OPFSUnavailableError if OPFS is not supported.
  */
 export async function openLocalDb (did:string):Promise<Sqlite3Db> {
-    const sqlite3 = await initSqlite()
-
     if (_testMode) {
+        const sqlite3 = await initSqlite()
         const db = new sqlite3.oo1.DB(':memory:')
+        db.exec('PRAGMA foreign_keys = ON;')
         db.exec(SCHEMA_SQL)
         db.exec(OUTBOX_SQL)
+        db.exec(DEAD_LETTER_OUTBOX_SQL)
         db.exec(SYNC_META_SQL)
         return db as Sqlite3Db
     }
@@ -85,22 +147,55 @@ export async function openLocalDb (did:string):Promise<Sqlite3Db> {
         throw new OPFSUnavailableError()
     }
 
-    const poolUtil = await (
-        sqlite3 as unknown as {
-            installOpfsSAHPoolVfs:(opts:{
-                directory:string
-            }) => Promise<{
-                OpfsSAHPoolDb:new (filename:string) => Sqlite3Db
-            }>
-        }
-    ).installOpfsSAHPoolVfs({ directory: 'rsss-db' })
+    const client = _workerClientFactory()
+    try {
+        await client.open({ did, directory: 'rsss-db' })
+        return new WorkerBackedLocalDb(client) as unknown as Sqlite3Db
+    } catch (err) {
+        client.dispose()
+        const category = isExclusiveLockError(err) ?
+            'locked' :
+            classifyLocalDbError(err)
+        const message = category === 'locked' ?
+            LOCAL_TAB_LOCK_ERROR :
+            localDbOpenMessage(category, err)
+        throw new LocalDbOpenError(category, message, err)
+    }
+}
 
-    const filename = getOpfsFilename(did)
-    const db = new poolUtil.OpfsSAHPoolDb(filename)
-    db.exec(SCHEMA_SQL)
-    db.exec(OUTBOX_SQL)
-    db.exec(SYNC_META_SQL)
-    return db
+function isExclusiveLockError (err:unknown):boolean {
+    const msg = err instanceof Error ? err.message : String(err)
+    return (
+        /lock/i.test(msg) ||
+        /busy/i.test(msg) ||
+        /already.*open/i.test(msg) ||
+        /no available.*access handle/i.test(msg)
+    )
+}
+
+function localDbOpenMessage (
+    category:LocalDbErrorCategory,
+    err:unknown
+):string {
+    if (category === 'quota') {
+        return (
+            'Local storage is full. Free up space or reset local data, ' +
+            'then try again.'
+        )
+    }
+    if (category === 'corruption') {
+        return (
+            'Local storage could not be read. Reset local data to rebuild ' +
+            'the on-device database.'
+        )
+    }
+    if (category === 'unavailable') {
+        return 'Local storage is not available in this browser.'
+    }
+    if (category === 'locked') return LOCAL_TAB_LOCK_ERROR
+
+    const detail = err instanceof Error ? `: ${err.message}` : ''
+    return `Local storage could not be opened${detail}`
 }
 
 export function getOpfsFilename (did:string):string {

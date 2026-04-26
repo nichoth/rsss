@@ -5,10 +5,82 @@ import wasmUrl from '@sqlite.org/sqlite-wasm/sqlite3.wasm'
 import {
     openLocalDb,
     setTestMode,
-    OPFSUnavailableError
+    setSQLiteWorkerClientFactoryForTests,
+    OPFSUnavailableError,
+    classifyLocalDbError
 } from '../src/client/db/sqlite-init.js'
+import type {
+    SQLiteWorkerClient
+} from '../src/client/db/sqlite-worker-client.js'
 
 setTestMode(true, wasmUrl as string)
+
+test('openLocalDb delegates production open and schema setup to worker',
+    async (t) => {
+        const openCalls:unknown[] = []
+        const execSql:string[] = []
+        const previousNavigator = globalThis.navigator
+        const previousIsolated = (
+            globalThis as { crossOriginIsolated?:boolean }
+        ).crossOriginIsolated
+        const previousAccessHandle = (
+            globalThis as Record<string, unknown>
+        ).FileSystemSyncAccessHandle
+
+        const worker = {
+            open: async (options:unknown) => {
+                openCalls.push(options)
+            },
+            exec: async (sql:string) => {
+                execSql.push(sql)
+            },
+            query: async () => [],
+            close: async () => {}
+        } as unknown as SQLiteWorkerClient
+
+        Object.defineProperty(globalThis, 'navigator', {
+            configurable: true,
+            value: {
+                storage: {
+                    getDirectory: async () => ({})
+                }
+            }
+        })
+        Object.defineProperty(globalThis, 'crossOriginIsolated', {
+            configurable: true,
+            value: true
+        })
+        ;(globalThis as Record<string, unknown>)
+            .FileSystemSyncAccessHandle = function () {}
+
+        setTestMode(false)
+        setSQLiteWorkerClientFactoryForTests(() => worker)
+
+        try {
+            const db = await openLocalDb('did:plc:alice')
+
+            t.deepEqual(openCalls, [{
+                did: 'did:plc:alice',
+                directory: 'rsss-db'
+            }], 'opens the per-user OPFS database in the worker')
+            await db.exec({ sql: 'SELECT 1', bind: [] })
+            t.equal(execSql.at(-1), 'SELECT 1',
+                'returned db delegates exec calls to the worker')
+        } finally {
+            setSQLiteWorkerClientFactoryForTests(null)
+            setTestMode(true, wasmUrl as string)
+            Object.defineProperty(globalThis, 'navigator', {
+                configurable: true,
+                value: previousNavigator
+            })
+            Object.defineProperty(globalThis, 'crossOriginIsolated', {
+                configurable: true,
+                value: previousIsolated
+            })
+            ;(globalThis as Record<string, unknown>)
+                .FileSystemSyncAccessHandle = previousAccessHandle
+        }
+    })
 
 test('openLocalDb creates feeds and items tables', async (t) => {
     const db = await openLocalDb('did:test:user1')
@@ -40,6 +112,16 @@ test('openLocalDb creates expected indexes', async (t) => {
     }
 })
 
+test('openLocalDb enables foreign key enforcement', async (t) => {
+    const db = await openLocalDb('did:test:foreign-keys')
+    try {
+        const enabled = db.selectValue('PRAGMA foreign_keys') as number
+        t.equal(enabled, 1, 'foreign keys are enabled')
+    } finally {
+        db.close()
+    }
+})
+
 test('openLocalDb schema is idempotent', async (t) => {
     const db = await openLocalDb('did:test:user3')
     const db2 = await openLocalDb('did:test:user3')
@@ -59,4 +141,41 @@ test('OPFSUnavailableError is a typed Error subclass', (t) => {
     const err = new OPFSUnavailableError()
     t.ok(err instanceof Error, 'is an Error')
     t.equal(err.name, 'OPFSUnavailableError', 'has correct name')
+})
+
+test('classifyLocalDbError maps common browser and SQLite failures', (t) => {
+    const quota = new DOMException(
+        'The quota has been exceeded.',
+        'QuotaExceededError'
+    )
+    const corrupt = new Error('database disk image is malformed')
+    const locked = new Error('database is locked')
+    const unavailable = new OPFSUnavailableError()
+    const unknown = new Error('something else')
+
+    t.equal(
+        classifyLocalDbError(quota),
+        'quota',
+        'classifies quota errors'
+    )
+    t.equal(
+        classifyLocalDbError(corrupt),
+        'corruption',
+        'classifies corrupt database errors'
+    )
+    t.equal(
+        classifyLocalDbError(locked),
+        'locked',
+        'classifies lock errors'
+    )
+    t.equal(
+        classifyLocalDbError(unavailable),
+        'unavailable',
+        'classifies unsupported OPFS errors'
+    )
+    t.equal(
+        classifyLocalDbError(unknown),
+        'unknown',
+        'falls back to unknown'
+    )
 })

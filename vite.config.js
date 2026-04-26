@@ -42,7 +42,7 @@ export default defineConfig(({ mode }) => {
             open: true,
             headers: {
                 'Cross-Origin-Opener-Policy': 'same-origin',
-                'Cross-Origin-Embedder-Policy': 'require-corp',
+                'Cross-Origin-Embedder-Policy': 'credentialless',
             },
         },
 
@@ -54,13 +54,17 @@ export default defineConfig(({ mode }) => {
             emptyOutDir: true,
             sourcemap: 'inline',
         },
+        worker: {
+            format: 'es',
+        },
         environments: {
             client: {
                 build: {
                     rollupOptions: {
+                        // Inspect lazy SQLite packaging with:
+                        // npm run build && find public -type f | sort
                         input: {
                             index: './index.html',
-                            'sqlite-init': './src/client/db/sqlite-init.ts',
                         },
                     },
                 },

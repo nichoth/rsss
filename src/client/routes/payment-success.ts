@@ -43,7 +43,7 @@ export const PaymentSuccessPage:FunctionComponent<{
             } else {
                 // Retries exhausted -- ask the server to send the
                 // "payment didn't go through" email (idempotent).
-                State.signalCheckoutFailed(state).catch(() => {
+                State.signalCheckoutFailed().catch(() => {
                     // Best-effort; surface only the original error.
                 })
                 setStatus({

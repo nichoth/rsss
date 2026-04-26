@@ -37,6 +37,11 @@ export function didToCustomerId (did:string):string {
     return did.replace(/:/g, '_')
 }
 
+export interface AutumnCustomerContact {
+    customerId:string;
+    email:string|null;
+}
+
 function client (env:BillingEnv):Autumn {
     if (!env.AUTUMN_SECRET_KEY) {
         throw new Error(
@@ -51,12 +56,17 @@ export async function getOrCreateCustomer (
     did:string,
     name?:string,
     email?:string
-):Promise<void> {
-    await client(env).customers.getOrCreate({
-        customerId: didToCustomerId(did),
+):Promise<AutumnCustomerContact> {
+    const customerId = didToCustomerId(did)
+    const customer = await client(env).customers.getOrCreate({
+        customerId,
         name: name ?? null,
         email: email ?? null
     })
+    return {
+        customerId: customer.id ?? customerId,
+        email: customer.email ?? null
+    }
 }
 
 /**
@@ -67,10 +77,8 @@ export async function getCustomerEmail (
     env:BillingEnv,
     did:string
 ):Promise<string|null> {
-    const customer = await client(env).customers.getOrCreate({
-        customerId: didToCustomerId(did)
-    })
-    return customer.email ?? null
+    const customer = await getOrCreateCustomer(env, did)
+    return customer.email
 }
 
 export interface AttachedCheckout {
@@ -93,7 +101,13 @@ export async function attachCheckout (
 
 export interface VerifiedSubscription {
     planId:string;
-    status:string;
+    status:'active'|'scheduled';
+}
+
+function isVerifiedSubscriptionStatus (
+    status:unknown
+):status is VerifiedSubscription['status'] {
+    return status === 'active' || status === 'scheduled'
 }
 
 /**
@@ -115,10 +129,8 @@ export async function verifySubscription (
         if (s.planId !== planId) continue
         if (s.addOn) continue
         if (s.canceledAt) continue
-        if (s.status !== 'active' && s.status !== 'scheduled') {
-            continue
-        }
-        return { planId: s.planId, status: String(s.status) }
+        if (!isVerifiedSubscriptionStatus(s.status)) continue
+        return { planId: s.planId, status: s.status }
     }
     return null
 }

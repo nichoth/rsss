@@ -1,7 +1,19 @@
 import { DurableObject } from 'cloudflare:workers'
+import { XMLParser } from 'fast-xml-parser'
 import { Hono } from 'hono'
-import { cors } from 'hono/cors'
-import { TABLES_SQL, INDEXES_SQL, TRIGGERS_SQL } from '../../shared/schema.js'
+import type { ContentfulStatusCode } from 'hono/utils/http-status'
+import {
+    TABLES_SQL,
+    INDEXES_SQL,
+    TRIGGERS_SQL,
+    DEAD_LETTER_OUTBOX_SQL
+} from '../../shared/schema.js'
+import { itemRouteCandidates } from '../../shared/item-route.js'
+import {
+    FeedFetchError,
+    fetchFeedText,
+    validateFeedUrl
+} from '../feed-fetch.js'
 
 export interface Env {
     USER:DurableObjectNamespace<UserDO>
@@ -16,9 +28,31 @@ interface Feed {
     description:string|null
     site_url:string|null
     last_fetched:string|null
+    last_error:string|null
+    last_status:number|null
     created_at:string
     updated_at:string
-    is_locally_cached:number
+}
+
+type XmlValue = string | number | boolean | null | XmlObject | XmlValue[]
+
+interface XmlObject {
+    [key:string]:XmlValue
+}
+
+const FEED_XML_PARSER = new XMLParser({
+    attributeNamePrefix: '@_',
+    cdataPropName: '#cdata',
+    ignoreAttributes: false,
+    textNodeName: '#text',
+    trimValues: true
+})
+const FEED_REFRESH_CONCURRENCY = 8
+const MIGRATION_STATE_KEY = 'schema_migration'
+const USER_DO_MIGRATION_VERSION = 2
+
+interface MigrationState {
+    migration_v?:number
 }
 
 /**
@@ -37,12 +71,13 @@ export class UserDO extends DurableObject<Env> {
     constructor (ctx: DurableObjectState, env: Env) {
         super(ctx, env)
         this.sql = ctx.storage.sql
-        this.initDatabase()
         this.app = this.createRouter()
 
-        // Schedule initial alarm if none exists
-        // This wakes the DO periodically to refresh feeds
         ctx.blockConcurrencyWhile(async () => {
+            await this.initDatabase()
+
+            // Schedule initial alarm if none exists
+            // This wakes the DO periodically to refresh feeds
             const currentAlarm = await ctx.storage.getAlarm()
             if (!currentAlarm) {
                 // Set first alarm 10 minutes from now
@@ -51,19 +86,30 @@ export class UserDO extends DurableObject<Env> {
         })
     }
 
-    private initDatabase () {
+    private async initDatabase () {
+        this.sql.exec('PRAGMA foreign_keys = ON;')
+
         // 1. Create tables (shared schema)
         this.sql.exec(TABLES_SQL)
 
-        // 2. Server-only migrations: backfill updated_at and is_locally_cached
-        // on rows that existed before those columns were added.
+        // 2. Server-only migrations: backfill columns on rows that existed
+        // before those columns were added.
         // Must run after table creation but before updated_at indexes.
-        this.migrateAddUpdatedAt()
-        this.migrateAddIsLocallyCached()
+        const migrationState = await this.ctx.storage.get<MigrationState>(
+            MIGRATION_STATE_KEY
+        )
+        if (migrationState?.migration_v !== USER_DO_MIGRATION_VERSION) {
+            this.migrateAddUpdatedAt()
+            this.migrateAddFeedFailureColumns()
+            await this.ctx.storage.put(MIGRATION_STATE_KEY, {
+                migration_v: USER_DO_MIGRATION_VERSION
+            })
+        }
 
         // 3. Create indexes and triggers (shared schema) - idempotent
         this.sql.exec(INDEXES_SQL)
         this.sql.exec(TRIGGERS_SQL)
+        this.sql.exec(DEAD_LETTER_OUTBOX_SQL)
     }
 
     /**
@@ -95,23 +141,25 @@ export class UserDO extends DurableObject<Env> {
         }
     }
 
-    /**
-     * Migration: Add is_locally_cached column to feeds table
-     */
-    private migrateAddIsLocallyCached () {
+    private migrateAddFeedFailureColumns () {
         const columns = this.sql.exec('PRAGMA table_info(feeds)').toArray()
-        const hasColumn = columns.some((col: unknown) =>
-            (col as { name: string }).name === 'is_locally_cached'
+        const hasLastError = columns.some((col: unknown) =>
+            (col as { name:string }).name === 'last_error'
         )
-        if (!hasColumn) {
-            this.sql.exec('ALTER TABLE feeds ADD COLUMN is_locally_cached INTEGER DEFAULT 1')
+        const hasLastStatus = columns.some((col: unknown) =>
+            (col as { name:string }).name === 'last_status'
+        )
+
+        if (!hasLastError) {
+            this.sql.exec('ALTER TABLE feeds ADD COLUMN last_error TEXT')
+        }
+        if (!hasLastStatus) {
+            this.sql.exec('ALTER TABLE feeds ADD COLUMN last_status INTEGER')
         }
     }
 
     private createRouter (): Hono {
         const app = new Hono()
-
-        app.use('*', cors())
 
         // Health check
         app.get('/health', (c) => {
@@ -130,6 +178,7 @@ export class UserDO extends DurableObject<Env> {
         app.post('/feeds', async (c) => {
             const body = await c.req.json<{
                 url:string
+                client_op_id?:string
                 client_updated_at?:string
             }>()
             console.log('[DO] POST /feeds', body.url)
@@ -138,6 +187,16 @@ export class UserDO extends DurableObject<Env> {
                 return c.json(
                     { error: 'URL is required' },
                     400
+                )
+            }
+
+            try {
+                body.url = await validateFeedUrl(body.url)
+            } catch (_err) {
+                const err = _err as FeedFetchError
+                return c.json(
+                    { error: err.message },
+                    err.status as ContentfulStatusCode
                 )
             }
 
@@ -161,6 +220,9 @@ export class UserDO extends DurableObject<Env> {
                         body.client_updated_at !== undefined &&
                         existingFeed
                     ) {
+                        if (body.client_op_id !== undefined) {
+                            return c.json({ feed: existingFeed })
+                        }
                         const serverTs = existingFeed.updated_at as string|null
                         if (serverTs && serverTs > body.client_updated_at) {
                             return c.json({ feed: existingFeed }, 409)
@@ -191,31 +253,10 @@ export class UserDO extends DurableObject<Env> {
                     JSON.stringify(feed)
                 )
 
-                // Fetch feed content before responding
-                // so client sees items immediately
-                await this.fetchFeed(
-                    feed as unknown as Feed
-                )
-
-                // Count items after fetch
-                const itemCount = this.sql.exec(
-                    'SELECT COUNT(*) as count' +
-                    ' FROM items WHERE feed_id = ?',
-                    (feed as unknown as Feed).id
-                ).one()
-                console.log(
-                    '[DO] Items after fetch:',
-                    JSON.stringify(itemCount)
-                )
-
-                // Return updated feed with title/description
-                const updatedFeed = this.sql.exec(
-                    'SELECT * FROM feeds WHERE url = ?',
-                    body.url
-                ).one()
+                this.ctx.waitUntil(this.fetchFeed(feed as unknown as Feed))
 
                 return c.json(
-                    { feed: updatedFeed },
+                    { feed },
                     201
                 )
             } catch (_err) {
@@ -234,7 +275,7 @@ export class UserDO extends DurableObject<Env> {
 
         // Get a specific feed
         app.get('/feeds/:id', (c) => {
-            const id = parseInt(c.req.param('id'))
+            const id = parseInt(c.req.param('id'), 10)
             const feed = this.sql.exec('SELECT * FROM feeds WHERE id = ?', id).one()
 
             if (!feed) {
@@ -244,32 +285,14 @@ export class UserDO extends DurableObject<Env> {
             return c.json({ feed })
         })
 
-        // Update a feed (e.g. toggle caching)
-        app.patch('/feeds/:id', async (c) => {
-            const id = parseInt(c.req.param('id'))
-            const body = await c.req.json<{ is_locally_cached?: boolean }>()
-
-            const feed = this.sql.exec('SELECT id FROM feeds WHERE id = ?', id).one()
-            if (!feed) {
-                return c.json({ error: 'Feed not found' }, 404)
-            }
-
-            if (body.is_locally_cached !== undefined) {
-                this.sql.exec(
-                    'UPDATE feeds SET is_locally_cached = ? WHERE id = ?',
-                    body.is_locally_cached ? 1 : 0,
-                    id
-                )
-            }
-
-            const updated = this.sql.exec('SELECT * FROM feeds WHERE id = ?', id).one()
-            return c.json({ feed: updated })
-        })
-
         // Delete a feed
         app.delete('/feeds/:id', async (c) => {
-            const id = parseInt(c.req.param('id'))
-            const body:{ client_updated_at?:string } = await c.req.json<{
+            const id = parseInt(c.req.param('id'), 10)
+            const body:{
+                client_op_id?:string
+                client_updated_at?:string
+            } = await c.req.json<{
+                client_op_id?:string
                 client_updated_at?:string
             }>().catch(() => ({}))
 
@@ -277,6 +300,9 @@ export class UserDO extends DurableObject<Env> {
                 'SELECT * FROM feeds WHERE id = ?', id
             ).one() as Record<string, unknown> | null
             if (!feed) {
+                if (body.client_op_id !== undefined) {
+                    return c.json({ success: true })
+                }
                 return c.json({ error: 'Feed not found' }, 404)
             }
 
@@ -293,14 +319,23 @@ export class UserDO extends DurableObject<Env> {
 
         // Refresh a specific feed
         app.post('/feeds/:id/refresh', async (c) => {
-            const id = parseInt(c.req.param('id'))
+            const id = parseInt(c.req.param('id'), 10)
             const feed = this.sql.exec('SELECT * FROM feeds WHERE id = ?', id).one() as unknown as Feed | null
 
             if (!feed) {
                 return c.json({ error: 'Feed not found' }, 404)
             }
 
-            await this.fetchFeed(feed)
+            try {
+                await validateFeedUrl(feed.url)
+                await this.fetchFeed(feed)
+            } catch (_err) {
+                const err = _err as FeedFetchError
+                return c.json(
+                    { error: err.message },
+                    err.status as ContentfulStatusCode
+                )
+            }
             return c.json({ success: true })
         })
 
@@ -318,8 +353,8 @@ export class UserDO extends DurableObject<Env> {
             const feedId = c.req.query('feed_id')
             const isRead = c.req.query('is_read')
             const isStarred = c.req.query('is_starred')
-            const limit = parseInt(c.req.query('limit') || '50')
-            const offset = parseInt(c.req.query('offset') || '0')
+            const limit = parseInt(c.req.query('limit') || '50', 10)
+            const offset = parseInt(c.req.query('offset') || '0', 10)
 
             let query = 'SELECT items.*, feeds.title as feed_title ' +
                 'FROM items JOIN feeds ON items.feed_id = feeds.id WHERE 1=1'
@@ -327,7 +362,7 @@ export class UserDO extends DurableObject<Env> {
 
             if (feedId) {
                 query += ' AND feed_id = ?'
-                params.push(parseInt(feedId))
+                params.push(parseInt(feedId, 10))
             }
 
             if (isRead !== undefined) {
@@ -351,7 +386,7 @@ export class UserDO extends DurableObject<Env> {
 
             if (feedId) {
                 countQuery += ' AND feed_id = ?'
-                countParams.push(parseInt(feedId))
+                countParams.push(parseInt(feedId, 10))
             }
             if (isRead !== undefined) {
                 countQuery += ' AND is_read = ?'
@@ -382,7 +417,7 @@ export class UserDO extends DurableObject<Env> {
                 )
             }
 
-            const routeCandidates = this.itemRouteCandidates(route)
+            const routeCandidates = itemRouteCandidates(route)
             if (routeCandidates.length === 0) {
                 return c.json(
                     { error: 'Route is required' },
@@ -391,11 +426,8 @@ export class UserDO extends DurableObject<Env> {
             }
 
             const routeQuery = routeCandidates
-                .map(() => "items.link LIKE ? ESCAPE '\\'")
+                .map(() => 'items.link = ?')
                 .join(' OR ')
-            const params = routeCandidates.map((candidate) => {
-                return `%${this.escapeLikePattern(candidate)}%`
-            })
 
             const item = this.sql.exec(
                 `SELECT items.*, feeds.title as feed_title
@@ -405,7 +437,7 @@ export class UserDO extends DurableObject<Env> {
                  AND (${routeQuery})
                  ORDER BY pub_date DESC, created_at DESC
                  LIMIT 1`,
-                ...params
+                ...routeCandidates
             ).one()
 
             if (!item) {
@@ -429,7 +461,7 @@ export class UserDO extends DurableObject<Env> {
 
         // Mark item as read/unread
         app.patch('/items/:id', async (c) => {
-            const id = parseInt(c.req.param('id'))
+            const id = parseInt(c.req.param('id'), 10)
             const body = await c.req.json<{
                 is_read?:boolean
                 is_starred?:boolean
@@ -586,33 +618,6 @@ export class UserDO extends DurableObject<Env> {
         return app
     }
 
-    private itemRouteCandidates (route:string):string[] {
-        const normalizedRoute = route
-            .trim()
-            .replace(/^\/post\//, '')
-            .replace(/^\/+/, '')
-
-        if (!normalizedRoute) return []
-
-        const candidates = new Set<string>()
-        candidates.add(normalizedRoute)
-
-        try {
-            candidates.add(decodeURIComponent(normalizedRoute))
-        } catch {
-            // Ignore malformed URI sequences
-        }
-
-        return Array.from(candidates)
-    }
-
-    private escapeLikePattern (value:string):string {
-        return value
-            .replace(/\\/g, '\\\\')
-            .replace(/%/g, '\\%')
-            .replace(/_/g, '\\_')
-    }
-
     /**
      * Fetch and parse an RSS/Atom feed
      */
@@ -622,20 +627,7 @@ export class UserDO extends DurableObject<Env> {
             feed.url
         )
         try {
-            const response = await fetch(feed.url, {
-                headers: {
-                    'User-Agent': 'RSSS/1.0 RSS Reader'
-                }
-            })
-
-            if (!response.ok) {
-                console.error(
-                    `[DO] Feed fetch failed ${feed.url}: ${response.status}`
-                )
-                return
-            }
-
-            const text = await response.text()
+            const text = await fetchFeedText(feed.url)
             console.log(
                 '[DO] Feed response length:',
                 text.length
@@ -655,7 +647,9 @@ export class UserDO extends DurableObject<Env> {
                         title = COALESCE(?, title),
                         description = COALESCE(?, description),
                         site_url = COALESCE(?, site_url),
-                        last_fetched = datetime('now')
+                        last_fetched = datetime('now'),
+                        last_error = NULL,
+                        last_status = NULL
                     WHERE id = ?`,
                     parsedFeed.title,
                     parsedFeed.description,
@@ -689,6 +683,15 @@ export class UserDO extends DurableObject<Env> {
             }
         } catch (err) {
             console.error(`Error fetching feed ${feed.url}:`, err)
+            this.sql.exec(
+                `UPDATE feeds SET
+                    last_error = ?,
+                    last_status = ?
+                WHERE id = ?`,
+                err instanceof Error ? err.message : String(err),
+                err instanceof FeedFetchError ? err.status : 500,
+                feed.id
+            )
         }
     }
 
@@ -709,120 +712,158 @@ export class UserDO extends DurableObject<Env> {
             pubDate: string | null
         }>
     } {
-        const isAtom = xml.includes('<feed') && xml.includes('xmlns="http://www.w3.org/2005/Atom"')
+        const doc = FEED_XML_PARSER.parse(xml) as XmlObject
+        const rss = this.asObject(this.getChild(doc, ['rss', 'rdf:RDF']))
+        const channel = rss ?
+            this.asObject(this.getChild(rss, ['channel'])) :
+            null
+        const atom = this.asObject(this.getChild(doc, ['feed']))
 
-        if (isAtom) {
-            return this.parseAtom(xml)
-        } else {
-            return this.parseRss(xml)
+        if (channel) return this.parseRss(channel)
+        if (atom) return this.parseAtom(atom)
+
+        return {
+            title: null,
+            description: null,
+            link: null,
+            items: []
         }
     }
 
-    private parseRss (xml: string) {
-        const getTagContent = (str: string, tag: string): string | null => {
-            // Handle CDATA
-            const cdataRegex = new RegExp(`<${tag}[^>]*><!\\[CDATA\\[([\\s\\S]*?)\\]\\]></${tag}>`, 'i')
-            const cdataMatch = str.match(cdataRegex)
-            if (cdataMatch) return cdataMatch[1].trim()
-
-            const regex = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, 'i')
-            const match = str.match(regex)
-            return match ? this.decodeHtmlEntities(match[1].trim()) : null
-        }
-
-        // const getAttr = (str: string, tag: string, attr: string): string | null => {
-        //     const regex = new RegExp(`<${tag}[^>]*${attr}=["']([^"']*)["'][^>]*>`, 'i')
-        //     const match = str.match(regex)
-        //     return match ? match[1] : null
-        // }
-
-        // Get channel info
-        const channelMatch = xml.match(/<channel>([\s\S]*?)<item/i)
-        const channel = channelMatch ? channelMatch[1] : ''
-
-        const title = getTagContent(channel, 'title')
-        const description = getTagContent(channel, 'description')
-        const link = getTagContent(channel, 'link')
-
-        // Get items
+    private parseRss (channel: XmlObject) {
+        const title = this.getText(channel, ['title'])
+        const description = this.getText(channel, ['description'])
+        const link = this.getText(channel, ['link'])
         const items: ReturnType<typeof this.parseFeed>['items'] = []
-        const itemRegex = /<item>([\s\S]*?)<\/item>/gi
-        let itemMatch
+        const itemNodes = this.asArray(this.getChild(channel, ['item']))
 
-        while ((itemMatch = itemRegex.exec(xml)) !== null) {
-            const itemXml = itemMatch[1]
+        for (const itemNode of itemNodes) {
+            const item = this.asObject(itemNode)
+            if (!item) continue
+
             items.push({
-                guid: getTagContent(itemXml, 'guid') || getTagContent(itemXml, 'link'),
-                title: getTagContent(itemXml, 'title'),
-                link: getTagContent(itemXml, 'link'),
-                description: getTagContent(itemXml, 'description'),
-                content: getTagContent(itemXml, 'content:encoded') || getTagContent(itemXml, 'content'),
-                author: getTagContent(itemXml, 'author') || getTagContent(itemXml, 'dc:creator'),
-                pubDate: this.parseDate(getTagContent(itemXml, 'pubDate'))
+                guid: this.getText(item, ['guid', 'id']) ||
+                    this.getText(item, ['link']),
+                title: this.getText(item, ['title', 'media:title']),
+                link: this.getText(item, ['link']),
+                description: this.getText(item, ['description']),
+                content: this.getText(item, [
+                    'content:encoded',
+                    'encoded',
+                    'content'
+                ]),
+                author: this.getText(item, [
+                    'author',
+                    'dc:creator',
+                    'creator'
+                ]),
+                pubDate: this.parseDate(this.getText(item, ['pubDate']))
             })
         }
 
         return { title, description, link, items }
     }
 
-    private parseAtom (xml: string) {
-        const getTagContent = (str: string, tag: string): string | null => {
-            // Handle CDATA
-            const cdataRegex = new RegExp(`<${tag}[^>]*><!\\[CDATA\\[([\\s\\S]*?)\\]\\]></${tag}>`, 'i')
-            const cdataMatch = str.match(cdataRegex)
-            if (cdataMatch) return cdataMatch[1].trim()
-
-            const regex = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, 'i')
-            const match = str.match(regex)
-            return match ? this.decodeHtmlEntities(match[1].trim()) : null
-        }
-
-        const getLinkHref = (str: string): string | null => {
-            // Look for rel="alternate" or no rel attribute
-            const alternateMatch = str.match(/<link[^>]*rel=["']alternate["'][^>]*href=["']([^"']*)["'][^>]*>/i)
-            if (alternateMatch) return alternateMatch[1]
-
-            const hrefMatch = str.match(/<link[^>]*href=["']([^"']*)["'][^>]*>/i)
-            return hrefMatch ? hrefMatch[1] : null
-        }
-
-        // Get feed info (before first entry)
-        const feedMatch = xml.match(/<feed[^>]*>([\s\S]*?)<entry/i)
-        const feedInfo = feedMatch ? feedMatch[1] : ''
-
-        const title = getTagContent(feedInfo, 'title')
-        const description = getTagContent(feedInfo, 'subtitle')
-        const link = getLinkHref(feedInfo)
-
-        // Get entries
+    private parseAtom (feed: XmlObject) {
+        const title = this.getText(feed, ['title'])
+        const description = this.getText(feed, ['subtitle'])
+        const link = this.getLinkHref(this.getChild(feed, ['link']))
         const items: ReturnType<typeof this.parseFeed>['items'] = []
-        const entryRegex = /<entry>([\s\S]*?)<\/entry>/gi
-        let entryMatch
+        const entries = this.asArray(this.getChild(feed, ['entry']))
 
-        while ((entryMatch = entryRegex.exec(xml)) !== null) {
-            const entryXml = entryMatch[1]
+        for (const entryNode of entries) {
+            const entry = this.asObject(entryNode)
+            if (!entry) continue
+
+            const author = this.asObject(this.getChild(entry, ['author']))
+
             items.push({
-                guid: getTagContent(entryXml, 'id'),
-                title: getTagContent(entryXml, 'title'),
-                link: getLinkHref(entryXml),
-                description: getTagContent(entryXml, 'summary'),
-                content: getTagContent(entryXml, 'content'),
-                author: getTagContent(entryXml, 'name'), // Inside <author>
-                pubDate: this.parseDate(getTagContent(entryXml, 'published') || getTagContent(entryXml, 'updated'))
+                guid: this.getText(entry, ['id']),
+                title: this.getText(entry, ['title']),
+                link: this.getLinkHref(this.getChild(entry, ['link'])),
+                description: this.getText(entry, ['summary']),
+                content: this.getText(entry, ['content']),
+                author: author ? this.getText(author, ['name']) : null,
+                pubDate: this.parseDate(
+                    this.getText(entry, ['published']) ||
+                    this.getText(entry, ['updated'])
+                )
             })
         }
 
         return { title, description, link, items }
     }
 
-    private decodeHtmlEntities (str: string): string {
-        return str
-            .replace(/&lt;/g, '<')
-            .replace(/&gt;/g, '>')
-            .replace(/&amp;/g, '&')
-            .replace(/&quot;/g, '"')
-            .replace(/&#39;/g, "'")
-            .replace(/&apos;/g, "'")
+    private getLinkHref (value:XmlValue | undefined):string | null {
+        const links = this.asArray(value)
+        let fallback:string | null = null
+
+        for (const linkValue of links) {
+            const link = this.asObject(linkValue)
+            if (!link) {
+                fallback = fallback || this.textValue(linkValue)
+                continue
+            }
+
+            const href = this.textValue(link['@_href'])
+            const rel = this.textValue(link['@_rel'])
+            if (!href) continue
+            if (!rel || rel === 'alternate') return href
+            fallback = fallback || href
+        }
+
+        return fallback
+    }
+
+    private getText (
+        node:XmlObject,
+        names:string[]
+    ):string | null {
+        const value = this.getChild(node, names)
+        return this.textValue(value)
+    }
+
+    private getChild (
+        node:XmlObject,
+        names:string[]
+    ):XmlValue | undefined {
+        for (const name of names) {
+            if (node[name] !== undefined) return node[name]
+        }
+
+        return undefined
+    }
+
+    private textValue (value:XmlValue | undefined):string | null {
+        if (value === undefined || value === null) return null
+        if (typeof value === 'string') return value.trim() || null
+        if (typeof value === 'number' || typeof value === 'boolean') {
+            return String(value)
+        }
+        if (Array.isArray(value)) {
+            for (const item of value) {
+                const text = this.textValue(item)
+                if (text) return text
+            }
+
+            return null
+        }
+
+        return this.textValue(value['#cdata']) ||
+            this.textValue(value['#text'])
+    }
+
+    private asObject (value:XmlValue | undefined):XmlObject | null {
+        if (!value || Array.isArray(value) || typeof value !== 'object') {
+            return null
+        }
+
+        return value
+    }
+
+    private asArray (value:XmlValue | undefined):XmlValue[] {
+        if (value === undefined || value === null) return []
+        return Array.isArray(value) ? value : [value]
     }
 
     private parseDate (dateStr: string | null): string | null {
@@ -848,11 +889,26 @@ export class UserDO extends DurableObject<Env> {
      * Alarm handler for periodic feed refresh
      */
     async alarm (): Promise<void> {
-        const feeds = this.sql.exec('SELECT * FROM feeds').toArray() as unknown as Feed[]
+        const feeds = this.sql.exec('SELECT * FROM feeds')
+            .toArray() as unknown as Feed[]
 
-        await Promise.all(feeds.map(feed => this.fetchFeed(feed)))
+        await this.refreshFeeds(feeds)
 
         // Schedule next alarm in 10 minutes
-        this.ctx.storage.setAlarm(Date.now() + 10 * 60 * 1000)
+        await this.ctx.storage.setAlarm(Date.now() + 10 * 60 * 1000)
+    }
+
+    private async refreshFeeds (feeds:Feed[]):Promise<void> {
+        let nextFeedIndex = 0
+        const workerCount = Math.min(FEED_REFRESH_CONCURRENCY, feeds.length)
+        const workers = Array.from({ length: workerCount }, async () => {
+            while (nextFeedIndex < feeds.length) {
+                const feed = feeds[nextFeedIndex]
+                nextFeedIndex++
+                if (feed) await this.fetchFeed(feed)
+            }
+        })
+
+        await Promise.all(workers)
     }
 }

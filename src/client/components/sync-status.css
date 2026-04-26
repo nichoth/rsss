@@ -1,28 +1,32 @@
 .sync-status {
     font-size: 1rem;
     padding: 0.2rem 0.6rem;
-    border-radius: 0.75rem;
     white-space: nowrap;
 
     &.idle {
-        color: var(--color-text-muted, #666);
+        color: var(--color-text-secondary);
     }
 
     &.syncing {
-        color: var(--color-primary, #0070f3);
+        color: var(--color-primary);
     }
 
     &.offline {
-        color: var(--color-warning, #f59e0b);
+        color: var(--color-warning);
     }
 
     &.error {
-        color: var(--color-error, #dc2626);
+        color: var(--color-error);
+        cursor: help;
+    }
+
+    &.warning {
+        color: var(--color-warning);
         cursor: help;
     }
 
     &.free {
-        color: var(--color-text-secondary, #666);
+        color: var(--color-text-secondary);
 
         & a {
             color: var(--color-primary);

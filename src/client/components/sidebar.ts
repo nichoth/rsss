@@ -51,7 +51,9 @@ export const Sidebar:FunctionComponent<{
         ev.preventDefault()
         const form = ev.target as HTMLFormElement
         const els = form.elements
-        const input = els['new-feed-url']
+        const input = els.namedItem(
+            'new-feed-url'
+        ) as HTMLInputElement
         const newFeedUrl = input.value
         if (!newFeedUrl.trim()) return
         debug('adding a new feed...', newFeedUrl)

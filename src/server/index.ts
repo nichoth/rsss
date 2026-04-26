@@ -17,7 +17,6 @@ import {
     isValidPlanId,
     useLive as billingUseLive,
     getOrCreateCustomer,
-    getCustomerEmail,
     attachCheckout,
     verifySubscription,
     getCustomerPortalUrl,
@@ -44,6 +43,7 @@ export interface Env {
     RESEND_DISABLED?:string;
     RESEND_FROM?:string;
     ADMIN_TOKEN?:string;
+    APP_ORIGIN?:string;
     NODE_ENV:string;
 }
 
@@ -87,22 +87,14 @@ async function readPendingEmail (
 
 /**
  * Resolve the user's contact email for billing notifications.
- * Prefer the authoritative value Autumn has on the customer; fall
- * back to the email the user entered on /signup (stashed in KV)
- * when Autumn isn't live or hasn't been told yet.
+ * The checkout path stashes the email returned by Autumn when live
+ * billing creates or updates the customer, so notification paths can
+ * use KV instead of re-fetching the same customer record.
  */
 async function resolveContactEmail (
     env:Env,
     did:string
 ):Promise<string|null> {
-    if (billingUseLive(env)) {
-        try {
-            const fromAutumn = await getCustomerEmail(env, did)
-            if (fromAutumn) return fromAutumn
-        } catch (err) {
-            console.error('getCustomerEmail error:', err)
-        }
-    }
     return readPendingEmail(env, did)
 }
 
@@ -171,9 +163,7 @@ async function resolveBilling (
     const verified = await verifySubscription(env, did, planId)
     const fresh:CachedBilling = {
         planId,
-        status: verified ?
-            (verified.status as 'active'|'scheduled') :
-            'none',
+        status: verified ? verified.status : 'none',
         refreshedAt: Date.now()
     }
     await writeCachedBilling(env, did, fresh)
@@ -182,6 +172,80 @@ async function resolveBilling (
 
 type Variables = {
     session:OAuthSession|null;
+}
+
+type AppContext = Context<{
+    Bindings:Env;
+    Variables:Variables;
+}>
+
+const DEFAULT_APP_ORIGIN = 'https://rsss.space'
+const STATE_CHANGING_METHODS = new Set([
+    'DELETE',
+    'PATCH',
+    'POST',
+    'PUT'
+])
+
+export function isAllowedRequestOrigin (
+    origin:string,
+    requestUrl:string,
+    appOrigin:string = DEFAULT_APP_ORIGIN
+):boolean {
+    const requestOrigin = new URL(requestUrl).origin
+    return origin === requestOrigin || origin === appOrigin
+}
+
+export function isCrossOriginStateChange (
+    method:string,
+    requestUrl:string,
+    origin:string|null|undefined,
+    fetchSite:string|null|undefined,
+    appOrigin:string = DEFAULT_APP_ORIGIN
+):boolean {
+    if (!STATE_CHANGING_METHODS.has(method)) return false
+    if (origin && !isAllowedRequestOrigin(
+        origin,
+        requestUrl,
+        appOrigin
+    )) {
+        return true
+    }
+    return fetchSite === 'cross-site'
+        || (!origin && fetchSite === 'same-site')
+}
+
+function allowedCorsOrigin (
+    origin:string,
+    c:Context
+):string|null {
+    const appContext = c as AppContext
+    if (!origin) return null
+    const appOrigin = appContext.env.APP_ORIGIN || DEFAULT_APP_ORIGIN
+    return isAllowedRequestOrigin(origin, appContext.req.url, appOrigin) ?
+        origin :
+        null
+}
+
+const rejectCrossOriginStateChanges = async (
+    c:AppContext,
+    next:Next
+) => {
+    const origin = c.req.header('origin')
+    const fetchSite = c.req.header('sec-fetch-site')
+    const appOrigin = c.env.APP_ORIGIN || DEFAULT_APP_ORIGIN
+
+    if (isCrossOriginStateChange(
+        c.req.method,
+        c.req.url,
+        origin,
+        fetchSite,
+        appOrigin
+    )) {
+        return c.json({ error: 'Cross-origin request rejected' }, 403)
+    }
+
+    await next()
 }
 
 const app = new Hono<{ Bindings:Env; Variables:Variables }>()
@@ -193,7 +257,12 @@ app.use('*', async (c, next) => {
 })
 
 // CORS for API routes
-app.use('/api/*', cors())
+app.use('/api/*', cors({
+    origin: allowedCorsOrigin,
+    credentials: true
+}))
+
+app.use('*', rejectCrossOriginStateChanges)
 
 // Session middleware
 app.use('*', async (c, next) => {
@@ -218,10 +287,6 @@ app.use('*', async (c, next) => {
  */
 app.get('/api/health', (c) => {
     return c.json({ status: 'ok', service: 'rsss' })
-})
-
-app.get('/health', (c) => {
-    return c.json({ status: 'ok' })
 })
 
 /**
@@ -629,6 +694,7 @@ app.post('/api/billing/checkout', requireAuth, async (c) => {
 
         if (email) {
             try {
+                const baseUrl = new URL(c.req.url).origin
                 await sendSubscriptionStarted(
                     c.env,
                     c.env.SESSIONS,
@@ -636,6 +702,7 @@ app.post('/api/billing/checkout', requireAuth, async (c) => {
                         to: email,
                         did: session.did,
                         planId,
+                        baseUrl,
                         handle: session.handle
                     }
                 )
@@ -655,12 +722,19 @@ app.post('/api/billing/checkout', requireAuth, async (c) => {
     }
 
     try {
-        await getOrCreateCustomer(
+        const customer = await getOrCreateCustomer(
             c.env,
             session.did,
             session.handle,
             email ?? undefined
         )
+        if (customer.email) {
+            await stashPendingEmail(
+                c.env,
+                session.did,
+                customer.email
+            )
+        }
         const baseUrl = new URL(c.req.url).origin
         const successUrl =
             `${baseUrl}/payment-success?checkout=return`
@@ -735,7 +809,7 @@ app.post(
             }
             const billing:CachedBilling = {
                 planId: verified.planId,
-                status: verified.status as 'active'|'scheduled',
+                status: verified.status,
                 refreshedAt: Date.now()
             }
             await writeCachedBilling(
@@ -752,6 +826,7 @@ app.post(
                     session.did
                 )
                 if (to) {
+                    const baseUrl = new URL(c.req.url).origin
                     await sendSubscriptionStarted(
                         c.env,
                         c.env.SESSIONS,
@@ -759,8 +834,10 @@ app.post(
                             to,
                             did: session.did,
                             planId: verified.planId,
+                            baseUrl,
                             handle: session.handle
-                        }
+                        },
+                        c.executionCtx
                     )
                 }
             } catch (err) {
@@ -846,7 +923,8 @@ app.post(
                     planId,
                     handle: session.handle,
                     signupUrl: `${baseUrl}/signup`
-                }
+                },
+                c.executionCtx
             )
             return c.json({
                 emailed: result.sent,
@@ -909,17 +987,25 @@ const requireEntitlement = async (
     await next()
 }
 
+export const dataRouter = new Hono<{
+    Bindings:Env;
+    Variables:Variables
+}>()
+
+dataRouter.use('*', requireAuth)
+dataRouter.use('*', requireEntitlement)
+
 /**
  * Proxy requests to user's Durable Object.
- * All /api/* routes go to the user's DO.
+ * All data routes under /api go to the user's DO.
  */
-app.all('/api/*', requireAuth, requireEntitlement, async (c) => {
+dataRouter.all('*', async (c) => {
     const session = c.get('session')!
     const stub = getUserDO(c.env, session.did)
 
     // Build the request URL for the DO
     const url = new URL(c.req.url)
-    const doPath = url.pathname.replace('/api', '')
+    const doPath = url.pathname
     const doUrl = new URL(doPath || '/', 'http://do')
     doUrl.search = url.search
 
@@ -943,6 +1029,8 @@ app.all('/api/*', requireAuth, requireEntitlement, async (c) => {
 
     return response
 })
+
+app.route('/api', dataRouter)
 
 /**
  * Admin: list all tracked users.

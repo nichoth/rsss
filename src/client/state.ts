@@ -8,18 +8,37 @@ import {
 import Route from 'route-event'
 import ky from 'ky'
 import Debug from '@substrate-system/debug'
-import { getAdapter, getLocalDb } from './db/index.js'
-import { pullSync, SyncBillingError } from './db/pull-sync.js'
 import {
-    pushSync,
+    getAdapter,
+    getLocalDb,
+    getRemoteItemByRoute
+} from './db/index.js'
+import type {
+    CountsResponse,
+    Feed,
+    Item,
+    ItemsResponse
+} from './db/types.js'
+import {
+    PullSyncAuthError,
+    SyncBillingError
+} from './db/pull-sync.js'
+import {
     getOutboxCount,
+    PushSyncAuthError,
     PushSyncBillingError
 } from './db/push-sync.js'
+import { runSync } from './db/sync.js'
 import {
     isLocalFirstActive,
     updateOnlineStatus,
     setSyncOffline
 } from './db/sync-status.js'
+import {
+    findItemByRoute,
+    isItemRoute,
+    routeToItemRoute
+} from './routing.js'
 import {
     type BillingStatus,
     setBillingStatus,
@@ -29,9 +48,42 @@ import {
 } from './billing-status.js'
 const debug = Debug('rsss:state')
 
-const USER_STORAGE_KEY = 'rsss_user'
 const CHECKOUT_EMAIL_KEY = 'rsss_checkout_email'
 export const DEFAULT_PAGE_SIZE = 20
+const SYNC_AUTH_EXPIRED = 'Your session expired. Please log in again.'
+
+function hasArticleBody (item:Item):boolean {
+    return Boolean(item.content || item.description)
+}
+
+function isBrowserOnline ():boolean {
+    return (
+        typeof navigator === 'undefined' ||
+        navigator.onLine !== false
+    )
+}
+
+async function fillMissingRouteBody (
+    did:string|undefined,
+    itemRoute:string,
+    item:Item|null
+):Promise<Item|null> {
+    if (!item || hasArticleBody(item)) return item
+    if (!did || !getLocalDb(did) || !isBrowserOnline()) return item
+
+    try {
+        const serverItem = await getRemoteItemByRoute(itemRoute)
+        if (!serverItem || !hasArticleBody(serverItem)) return item
+        return {
+            ...item,
+            content: serverItem.content,
+            description: serverItem.description
+        }
+    } catch (err) {
+        debug('Error loading missing route item content:', err)
+        return item
+    }
+}
 
 /**
  * Stash the email the user entered on /signup so the
@@ -67,46 +119,20 @@ export interface User {
     handle:string
 }
 
-export interface Feed {
-    id:number
-    url:string
-    title:string|null
-    description:string|null
-    site_url:string|null
-    last_fetched:string|null
-    created_at:string
-}
-
-export interface Item {
-    id:number
-    feed_id:number
-    guid:string
-    title:string|null
-    link:string|null
-    description:string|null
-    content:string|null
-    author:string|null
-    pub_date:string|null
-    is_read:number
-    is_starred:number
-    created_at:string
-    feed_title?:string
-}
-
-export interface ItemsResponse {
-    items:Item[]
-    total:number
-    limit:number
-    offset:number
-}
-
-export interface CountsResponse {
-    unread:number
-    starred:number
-    total:number
-}
-
 export type { BillingStatus }
+export type {
+    CountsResponse,
+    Feed,
+    Item,
+    ItemsResponse
+}
+export {
+    findItemByRoute,
+    isItemRoute,
+    itemToRoute,
+    routeToItemRoute,
+    stripProtocol
+} from './routing.js'
 
 export type AppState = {
     _setRoute:(route:string) => void,
@@ -127,7 +153,8 @@ export type AppState = {
     showStarredOnly:Signal<boolean>,
     pageSize:Signal<number>,
     selectedFeedId:Signal<number|null>,
-    isAuthenticated:Signal<boolean>
+    isAuthenticated:Signal<boolean>,
+    cleanup:() => void
 }
 
 export function State ():AppState {
@@ -157,6 +184,7 @@ export function State ():AppState {
         showStarredOnly: signal(false),
         pageSize: signal(DEFAULT_PAGE_SIZE),
         selectedFeedId: signal<number|null>(null),
+        cleanup: () => {},
     }
 
     onRoute((path:string, data) => {
@@ -249,76 +277,140 @@ export function State ():AppState {
      * local-first adapter is active. Billing status is loaded
      * in parallel so the UI can show free-vs-paid state quickly.
      */
+    let authLoadGeneration = 0
+
     effect(() => {
-        if (!state.isAuthenticated.value) return
-        const did = state.user.value?.did
+        const user = state.user.value
+        const generation = ++authLoadGeneration
 
-        State.loadBillingStatus(state)
+        if (!user) return
 
-        getAdapter(did).then(() => {
-            const db = getLocalDb(did)
-            if (db) {
-                isLocalFirstActive.value = true
-                pullSync(db).catch((err) => {
-                    if (err instanceof SyncBillingError) {
-                        State.loadBillingStatus(state)
-                        return
-                    }
-                    debug('pullSync error:', err)
-                }).then(() => {
-                    pushSync(db).catch((err) => {
-                        if (err instanceof PushSyncBillingError) {
-                            State.loadBillingStatus(state)
+        queueMicrotask(() => {
+            if (generation !== authLoadGeneration) return
+            State.loadBillingStatus()
+
+            getAdapter(user.did).then(() => {
+                if (generation !== authLoadGeneration) return
+                const db = getLocalDb(user.did)
+                if (db) {
+                    isLocalFirstActive.value = true
+                    runSync(db).catch((err) => {
+                        if (State.handleSyncAuthError(state, err)) {
                             return
                         }
-                        debug('pushSync error:', err)
+                        if (
+                            err instanceof SyncBillingError ||
+                            err instanceof PushSyncBillingError
+                        ) {
+                            State.loadBillingStatus()
+                            return
+                        }
+                        debug('sync cycle error:', err)
+                    }).then(() => {
+                        if (generation !== authLoadGeneration) return
+                        State.refreshAfterSync(state)
                     })
-                    State.loadFeeds(state)
-                    State.loadItems(state)
-                    State.loadCounts(state)
-                })
-            } else {
-                isLocalFirstActive.value = false
-                State.loadFeeds(state)
-                State.loadItems(state)
-                State.loadCounts(state)
-            }
+                } else {
+                    isLocalFirstActive.value = false
+                    State.refreshAfterSync(state)
+                }
+            })
         })
     })
 
-    window.addEventListener('online', () => {
+    const handleOnline = () => {
         updateOnlineStatus()
         const did = state.user.value?.did
         const db = getLocalDb(did)
         if (db) {
-            pullSync(db).catch((err) => {
-                if (err instanceof SyncBillingError) {
-                    State.loadBillingStatus(state)
+            runSync(db).then(() => {
+                State.refreshAfterSync(state)
+            }).catch((err) => {
+                if (State.handleSyncAuthError(state, err)) {
                     return
                 }
-                debug('pullSync online error:', err)
-            }).then(() => {
-                pushSync(db).catch((err) => {
-                    if (err instanceof PushSyncBillingError) {
-                        State.loadBillingStatus(state)
-                        return
-                    }
-                    debug('pushSync online error:', err)
-                })
+                if (
+                    err instanceof SyncBillingError ||
+                    err instanceof PushSyncBillingError
+                ) {
+                    State.loadBillingStatus()
+                    return
+                }
+                debug('sync cycle online error:', err)
             })
         }
-    })
+    }
 
-    window.addEventListener('offline', () => {
+    const handleOffline = () => {
         const did = state.user.value?.did
         const db = getLocalDb(did)
-        const pending = db ? getOutboxCount(db) : 0
-        setSyncOffline(pending)
-    })
+        if (!db) {
+            setSyncOffline(0)
+            return
+        }
+        getOutboxCount(db)
+            .then((pending) => setSyncOffline(pending))
+            .catch((err) => {
+                debug('offline pending count error:', err)
+                setSyncOffline(0)
+            })
+    }
+
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+
+    state.cleanup = () => {
+        window.removeEventListener('online', handleOnline)
+        window.removeEventListener('offline', handleOffline)
+    }
 
     State.checkAuth(state)
 
     return state
+}
+
+State.handleSyncAuthError = function (
+    state:AppState,
+    err:unknown
+):boolean {
+    if (
+        !(err instanceof PullSyncAuthError) &&
+        !(err instanceof PushSyncAuthError)
+    ) {
+        return false
+    }
+
+    batch(() => {
+        state.user.value = null
+        state.authError.value = SYNC_AUTH_EXPIRED
+    })
+    state._setRoute('/login')
+    return true
+}
+
+State.refreshAfterSync = async function (
+    state:AppState
+):Promise<void> {
+    const route = state.route.value
+
+    await State.loadFeeds(state)
+    await State.loadItems(state)
+    await State.loadCounts(state)
+
+    if (!isItemRoute(route)) return
+
+    state.routeItemLoading.value = true
+    const item = await State.loadItemByRoute(state, route)
+
+    if (state.route.value !== route) {
+        state.routeItemLoading.value = false
+        return
+    }
+
+    batch(() => {
+        state.routeItem.value = item
+        state.routeItemLoading.value = false
+    })
 }
 
 /**
@@ -433,17 +525,11 @@ State.checkAuth = async function (
                     handle: data.handle
                 }
                 state.user.value = user
-                localStorage.setItem(
-                    USER_STORAGE_KEY,
-                    JSON.stringify(user)
-                )
             } else {
                 state.user.value = null
-                localStorage.removeItem(USER_STORAGE_KEY)
             }
         } else {
             state.user.value = null
-            localStorage.removeItem(USER_STORAGE_KEY)
         }
     } catch {
         state.user.value = null
@@ -518,7 +604,6 @@ State.devLogin = async function (
  * Called after auth lands and after returning from checkout.
  */
 State.loadBillingStatus = async function (
-    _state:AppState
 ):Promise<BillingStatus|null> {
     try {
         const res = await api.get('billing/status', {
@@ -588,7 +673,7 @@ State.startCheckout = async function (
 
         // Dev-mode: server already entitled the user.
         setCheckoutInProgress(false)
-        await State.loadBillingStatus(state)
+        await State.loadBillingStatus()
         state._setRoute('/')
     } catch (err) {
         batch(() => {
@@ -618,7 +703,7 @@ State.finalizeCheckout = async function (
                 500 * 2 ** (attempt - 1),
                 4000
             )
-            await new Promise(r => setTimeout(r, delayMs))
+            await new Promise(resolve => setTimeout(resolve, delayMs))
         }
 
         try {
@@ -632,7 +717,7 @@ State.finalizeCheckout = async function (
 
             if (res.ok) {
                 clearCheckoutEmail()
-                await State.loadBillingStatus(state)
+                await State.loadBillingStatus()
                 return { ok: true }
             }
 
@@ -661,7 +746,6 @@ State.finalizeCheckout = async function (
  * a "payment didn't go through" email idempotently.
  */
 State.signalCheckoutFailed = async function (
-    _state:AppState,
     planId?:string
 ):Promise<void> {
     try {
@@ -683,7 +767,6 @@ State.signalCheckoutFailed = async function (
  * Open the Autumn-hosted customer portal in the same tab.
  */
 State.openCustomerPortal = async function (
-    _state:AppState
 ):Promise<void> {
     try {
         const res = await api.post('billing/portal', {
@@ -717,7 +800,6 @@ State.logout = async function (
     } catch {
         // Ignore logout errors
     }
-    localStorage.removeItem(USER_STORAGE_KEY)
     batch(() => {
         state.user.value = null
         state.feeds.value = []
@@ -892,11 +974,10 @@ State.loadItemByRoute = async function (
     if (!itemRoute) return null
 
     try {
-        const adapter = await getAdapter(
-            state.user.value?.did
-        )
+        const did = state.user.value?.did
+        const adapter = await getAdapter(did)
         const item = await adapter.getItemByRoute(itemRoute)
-        return item as Item|null
+        return fillMissingRouteBody(did, itemRoute, item as Item|null)
     } catch (err) {
         debug('Error loading item by route:', err)
         return null
@@ -1015,75 +1096,8 @@ State.markAllRead = async function (
 }
 
 /**
- * Strip protocol from a URL
- */
-export const stripProtocol = function (
-    url:string
-):string {
-    return url.replace(/^https?:\/\//, '')
-}
-
-/**
- * Convert an item's link to a route path
- */
-export const itemToRoute = function (
-    item:Item
-):string|null {
-    if (!item.link) return null
-    try {
-        const url = new URL(item.link)
-        return '/post/' + url.host +
-            url.pathname + url.search + url.hash
-    } catch {
-        return null
-    }
-}
-
-/**
  * Clear selected item and navigate back to list
  */
 State.clearSelectedItem = function (state:AppState):void {
     state._setRoute('/')
-}
-
-/**
- * Check if a route matches an item route pattern
- */
-export const isItemRoute = function (
-    route:string
-):boolean {
-    return route.startsWith('/post/')
-}
-
-/**
- * Convert a /post/* route to the comparable link fragment
- */
-export const routeToItemRoute = function (
-    route:string
-):string|null {
-    if (!isItemRoute(route)) return null
-    return route.replace(/^\/post\//, '')
-}
-
-/**
- * Find an item by its link matching the current route
- */
-export const findItemByRoute = function (
-    state:AppState,
-    route:string
-):Item|null {
-    const itemRoute = routeToItemRoute(route)
-    if (!itemRoute) return null
-
-    for (const item of state.items.value) {
-        const itemRoutePath = itemToRoute(item)
-        if (itemRoutePath === route) {
-            return item
-        }
-
-        if (item.link?.includes(itemRoute)) {
-            return item
-        }
-    }
-    return null
 }

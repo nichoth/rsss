@@ -15,7 +15,8 @@ export const TABLES_SQL = `
         description TEXT,
         site_url TEXT,
         last_fetched TEXT,
-        is_locally_cached INTEGER DEFAULT 1,
+        last_error TEXT,
+        last_status INTEGER,
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now'))
     );
@@ -64,6 +65,19 @@ export const TRIGGERS_SQL = `
     BEGIN
         UPDATE items SET updated_at = datetime('now') WHERE id = NEW.id;
     END;
+`
+
+export const DEAD_LETTER_OUTBOX_SQL = `
+    CREATE TABLE IF NOT EXISTS dead_letter_outbox (
+        id INTEGER PRIMARY KEY,
+        op TEXT NOT NULL,
+        target_id INTEGER,
+        payload TEXT NOT NULL,
+        client_op_id TEXT NOT NULL UNIQUE,
+        client_updated_at TEXT NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT
+    );
 `
 
 /** Full schema: tables + indexes + triggers. Suitable for fresh databases. */

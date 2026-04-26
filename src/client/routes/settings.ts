@@ -13,6 +13,7 @@ import {
 } from '../local-first-settings.js'
 import {
     isLocalFirstSupported,
+    localFirstSupported,
     bootstrapLocalDb,
     bootstrapInProgress,
     bootstrapFeedsCount,
@@ -22,7 +23,11 @@ import {
     resetLocalFirst,
     getBootstrappedDb,
     getLocalDb,
-    getOutboxCount
+    getOutboxCount,
+    localTabLockError,
+    localDbError,
+    LocalFirstSyncFailureError,
+    purgeStoredContent
 } from '../db/index.js'
 import '@substrate-system/check-box'
 import './settings.css'
@@ -35,21 +40,24 @@ export const SettingsRoute:FunctionComponent<{
 
     useEffect(() => {
         loadLocalFirstSettings()
+        isLocalFirstSupported()
         if (state.isAuthenticated.value) {
-            State.loadBillingStatus(state)
+            State.loadBillingStatus()
         }
     }, [])
 
-    const supported = isLocalFirstSupported()
+    const supported = localFirstSupported.value
     const inProgress = bootstrapInProgress.value
     const bError = bootstrapError.value
+    const dbError = localDbError.value
+    const tabLockError = localTabLockError.value
     const billing = useComputed(() => billingStatus.value)
     const isEntitled = Boolean(billing.value?.entitled)
     const planLabel = billing.value?.planId ?? 'sync'
 
     function handleManageSubscription (e:Event) {
         e.preventDefault()
-        State.openCustomerPortal(state)
+        State.openCustomerPortal()
     }
 
     function handleUpgrade (e:Event) {
@@ -73,7 +81,7 @@ export const SettingsRoute:FunctionComponent<{
                 return
             }
             const db = getBootstrappedDb() ?? getLocalDb(did)
-            const pending = db ? getOutboxCount(db) : 0
+            const pending = db ? await getOutboxCount(db) : 0
             const lines = [
                 'This will delete your local data on this device:',
                 '  - Subscriptions cache',
@@ -83,7 +91,10 @@ export const SettingsRoute:FunctionComponent<{
                 lines.push(
                     `  - ${pending} pending offline change` +
                     (pending === 1 ? '' : 's') +
-                    ' (not yet synced to server)'
+                    ' (will sync before deletion)'
+                )
+                lines.push(
+                    'If sync fails, local storage will stay enabled.'
                 )
             }
             lines.push('\nContinue?')
@@ -101,7 +112,17 @@ export const SettingsRoute:FunctionComponent<{
                     'synced and will be discarded. Proceeding anyway.'
                 )
             }
-            await disableLocalFirst(did)
+            try {
+                await disableLocalFirst(did)
+            } catch (err) {
+                const msg = err instanceof Error ?
+                    err.message :
+                    'Unable to disable local storage'
+                alert(msg)
+                setSyncSubscriptions(true)
+                saveLocalFirstSettings()
+                ;(ev.target as HTMLInputElement).checked = true
+            }
         }
     }
 
@@ -109,7 +130,7 @@ export const SettingsRoute:FunctionComponent<{
         const did = state.user.value?.did
         if (!did) return
         const db = getBootstrappedDb() ?? getLocalDb(did)
-        const pending = db ? getOutboxCount(db) : 0
+        const pending = db ? await getOutboxCount(db) : 0
         const lines = [
             'This will wipe and re-download all local data.'
         ]
@@ -119,16 +140,64 @@ export const SettingsRoute:FunctionComponent<{
                 (pending === 1 ? '' : 's') +
                 ' will be synced before wiping.'
             )
+            lines.push(
+                'If sync fails, reset will be cancelled unless you ' +
+                'confirm discarding pending changes.'
+            )
         }
         lines.push('Continue?')
         if (!confirm(lines.join('\n'))) return
-        await resetLocalFirst(did)
+        try {
+            await resetLocalFirst(did)
+        } catch (err) {
+            if (!(err instanceof LocalFirstSyncFailureError)) {
+                alert(err instanceof Error ? err.message : 'Reset failed')
+                return
+            }
+
+            const confirmed = confirm([
+                err.message,
+                '',
+                'Reset anyway and discard pending local changes?'
+            ].join('\n'))
+            if (!confirmed) return
+
+            try {
+                await resetLocalFirst(did, fetch, {
+                    allowDataLossOnSyncFailure: true
+                })
+            } catch (resetErr) {
+                alert(resetErr instanceof Error ?
+                    resetErr.message :
+                    'Reset failed')
+            }
+        }
     }
 
-    function handleContentChange (ev:Event) {
-        const checked = (ev.target as HTMLInputElement).checked
-        storeContent.value = checked
-        saveLocalFirstSettings()
+    async function handleContentChange (ev:Event) {
+        const target = ev.target as HTMLInputElement
+        const checked = target.checked
+        if (checked) {
+            storeContent.value = true
+            saveLocalFirstSettings()
+            return
+        }
+
+        const did = state.user.value?.did
+        const db = did ? getBootstrappedDb() ?? getLocalDb(did) : null
+
+        try {
+            if (db) await purgeStoredContent(db)
+            storeContent.value = false
+            saveLocalFirstSettings()
+        } catch (err) {
+            alert(err instanceof Error ?
+                err.message :
+                'Unable to clear local article content')
+            storeContent.value = true
+            saveLocalFirstSettings()
+            target.checked = true
+        }
     }
 
     return html`<div class="route settings">
@@ -172,19 +241,33 @@ export const SettingsRoute:FunctionComponent<{
                     Local storage is not supported in this browser.
                 </p>
             `}
+            ${tabLockError && html`
+                <p class="unsupported-note">
+                    ${tabLockError}
+                </p>
+            `}
             <div class="local-first-toggle">
                 <check-box
                     name="sync-subscriptions"
+                    aria-describedby="sync-subscriptions-desc"
                     checked=${syncSubscriptions.value || undefined}
                     disabled=${(!supported || inProgress) || undefined}
                     onChange=${handleSyncChange}
                 >
                     Sync subscriptions and read state to this device
                 </check-box>
+                <p
+                    class="toggle-desc"
+                    id="sync-subscriptions-desc"
+                >
+                    Keeps subscriptions, read state, and starred items in
+                    local SQLite storage on this device.
+                </p>
             </div>
             <div class="local-first-toggle">
                 <check-box
                     name="store-content"
+                    aria-describedby="store-content-desc"
                     checked=${storeContent.value || undefined}
                     disabled=${(!supported || !syncSubscriptions.value ||
                         inProgress) || undefined}
@@ -192,6 +275,13 @@ export const SettingsRoute:FunctionComponent<{
                 >
                     Store article content locally for offline reading
                 </check-box>
+                <p
+                    class="toggle-desc"
+                    id="store-content-desc"
+                >
+                    Stores article bodies locally only when local storage is
+                    enabled.
+                </p>
             </div>
             ${inProgress && html`
                 <div class="bootstrap-progress">
@@ -209,7 +299,13 @@ export const SettingsRoute:FunctionComponent<{
                     Setup failed: ${bError}
                 </p>
             `}
-            ${syncSubscriptions.value && !inProgress && html`
+            ${dbError && html`
+                <p class="bootstrap-error">
+                    ${dbError.message}
+                </p>
+            `}
+            ${syncSubscriptions.value && !inProgress &&
+                (!dbError || dbError.canReset) && html`
                 <div class="reset-local-data">
                     <button
                         class="btn-reset"
@@ -218,7 +314,8 @@ export const SettingsRoute:FunctionComponent<{
                         Reset local data
                     </button>
                     <p class="reset-desc">
-                        Wipe all local data and re-download from server.
+                        Sync pending changes, then wipe local data and
+                        re-download from server.
                     </p>
                 </div>
             `}

@@ -50,6 +50,28 @@ function base64UrlEncode (buffer: Uint8Array): string {
         .replace(/=+$/, '')
 }
 
+function base64UrlDecode (value: string): Uint8Array<ArrayBuffer> {
+    const padded = value + '='.repeat((4 - value.length % 4) % 4)
+    const base64 = padded.replace(/-/g, '+').replace(/_/g, '/')
+    const binary = atob(base64)
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i)
+    }
+    return bytes
+}
+
+function encodeSessionPayload (sid: string): string {
+    const payload = JSON.stringify({ sid })
+    return base64UrlEncode(new TextEncoder().encode(payload))
+}
+
+function decodeSessionPayload (payloadB64: string): string | null {
+    const decoded = new TextDecoder().decode(base64UrlDecode(payloadB64))
+    const payload = JSON.parse(decoded) as { sid?:unknown }
+    return typeof payload.sid === 'string' ? payload.sid : null
+}
+
 async function sha256 (plain: string): Promise<ArrayBuffer> {
     const encoder = new TextEncoder()
     const data = encoder.encode(plain)
@@ -528,7 +550,10 @@ interface StoredSession {
     createdAt: number;
 }
 
-async function signSid (sid: string, secret: string): Promise<string> {
+async function signCookiePayload (
+    payloadB64: string,
+    secret: string
+): Promise<string> {
     const encoder = new TextEncoder()
     const key = await crypto.subtle.importKey(
         'raw',
@@ -540,13 +565,13 @@ async function signSid (sid: string, secret: string): Promise<string> {
     const signature = await crypto.subtle.sign(
         'HMAC',
         key,
-        encoder.encode(sid)
+        encoder.encode(payloadB64)
     )
     return base64UrlEncode(new Uint8Array(signature))
 }
 
-async function verifySidSignature (
-    sid: string,
+async function verifyCookieSignature (
+    payloadB64: string,
     signatureB64Url: string,
     secret: string
 ): Promise<boolean> {
@@ -558,18 +583,12 @@ async function verifySidSignature (
         false,
         ['verify']
     )
-    const signatureStr = signatureB64Url
-        .replace(/-/g, '+')
-        .replace(/_/g, '/')
-    const signatureBytes = Uint8Array.from(
-        atob(signatureStr),
-        c => c.charCodeAt(0)
-    )
+    const signatureBytes = base64UrlDecode(signatureB64Url)
     return crypto.subtle.verify(
         'HMAC',
         key,
         signatureBytes,
-        encoder.encode(sid)
+        encoder.encode(payloadB64)
     )
 }
 
@@ -596,8 +615,9 @@ export async function createSessionCookie (
         { expirationTtl: SESSION_TTL_SECONDS }
     )
 
-    const signature = await signSid(sid, secret)
-    return `${sid}.${signature}`
+    const payloadB64 = encodeSessionPayload(sid)
+    const signature = await signCookiePayload(payloadB64, secret)
+    return `${payloadB64}.${signature}`
 }
 
 /**
@@ -610,15 +630,18 @@ export async function verifySessionCookie (
     kv: KVNamespace
 ): Promise<OAuthSession | null> {
     try {
-        const [sid, signatureB64] = cookie.split('.')
-        if (!sid || !signatureB64) return null
+        const [payloadB64, signatureB64] = cookie.split('.')
+        if (!payloadB64 || !signatureB64) return null
 
-        const valid = await verifySidSignature(
-            sid,
+        const valid = await verifyCookieSignature(
+            payloadB64,
             signatureB64,
             secret
         )
         if (!valid) return null
+
+        const sid = decodeSessionPayload(payloadB64)
+        if (!sid) return null
 
         const recordJson = await kv.get(`session:${sid}`)
         if (!recordJson) return null
@@ -649,14 +672,16 @@ export async function destroySessionCookie (
     kv: KVNamespace
 ): Promise<void> {
     try {
-        const [sid, signatureB64] = cookie.split('.')
-        if (!sid || !signatureB64) return
-        const valid = await verifySidSignature(
-            sid,
+        const [payloadB64, signatureB64] = cookie.split('.')
+        if (!payloadB64 || !signatureB64) return
+        const valid = await verifyCookieSignature(
+            payloadB64,
             signatureB64,
             secret
         )
         if (!valid) return
+        const sid = decodeSessionPayload(payloadB64)
+        if (!sid) return
         await kv.delete(`session:${sid}`)
     } catch {
         // best-effort

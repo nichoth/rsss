@@ -1,215 +1,270 @@
-# PRD: Local-First Mode with SQLite WASM + OPFS
+# PRD: Finish Local-First SQLite WASM Mode
 
 ## 1. Introduction / Overview
 
-RSSS today reads and writes exclusively through `remoteAdapter` (`src/client/db/remote-adapter.ts`), which calls the Hono API backed by a per-user `UserDO` Durable Object. Every page load and every user interaction makes a network round-trip. The README's "Local First" section is aspirational — there is no local store yet.
+RSSS now has most of the local-first structure described in
+`README.md#architecture`: a shared schema, a `DbAdapter` abstraction,
+local reads and writes, pull sync, push sync, settings, and a sync status
+component. The remaining work is not to start local-first from scratch.
+It is to make the existing implementation production-correct, browser-safe,
+and verifiably backed by SQLite WASM persisted to OPFS.
 
-This feature adds a true local-first mode in the browser. Subscriptions, items (metadata), and per-item read/starred state all live in a SQLite database stored in OPFS via `@sqlite.org/sqlite-wasm`. The Durable Object remains the source of truth and merge point; the client syncs deltas in both directions.
+The largest open risk is the SQLite runtime boundary. The current client code
+uses `@sqlite.org/sqlite-wasm` directly from `src/client/db/sqlite-init.ts`
+and checks for `FileSystemSyncAccessHandle` on `globalThis`. The SQLite WASM
+docs in `DOCS/*.md` say persistent OPFS SQLite must run in a Worker context,
+and recommend Worker or Promise-worker APIs for browser apps. This means RSSS
+needs a focused completion pass around SQLite worker initialization, OPFS
+capability detection, packaging, and browser verification.
 
-The `DbAdapter` interface in `src/client/db/types.ts` already abstracts the data layer, so the change is largely additive: a second adapter, a sync engine, a settings surface, and bootstrap/migration plumbing.
+This PRD defines what still needs to be implemented for a reliable v1.
 
 ## 2. Goals
 
-- Provide a per-device opt-in local-first mode that survives reload, offline use, and temporary backend outages.
-- Reuse the existing `DbAdapter` contract so route components do not change.
-- Keep the Durable Object as the canonical store. The client never invents data the server has not seen.
-- Sync deltas, not snapshots, after the first bootstrap. Reuse the existing `/api/sync?since=...` endpoint.
-- Resolve concurrent edits across devices with last-write-wins on `updated_at`.
-- Degrade gracefully on browsers/contexts without OPFS — fall back to `remoteAdapter` transparently.
-- Keep SQLite WASM out of the initial bundle for users who never enable the feature.
+- Ensure opted-in users read and write from an OPFS-backed SQLite database.
+- Keep remote API behavior unchanged for users who do not opt in.
+- Run SQLite WASM work off the main UI thread.
+- Preserve the existing `DbAdapter` contract used by `State`.
+- Make bootstrap, pull, push, disable, and reset flows browser-verifiable.
+- Keep local-first disabled when OPFS persistence is unavailable.
+- Add tests and browser checks that prove data persists across reload.
 
-## 3. User Stories
+## 3. Current State
 
-### US-001: Extract shared SQL schema
-**Description:** As a developer, I want a single `schema.sql` file shared between the Durable Object and the browser SQLite database so the two stores cannot drift.
+The following local-first pieces already exist and should be treated as
+implemented baseline:
 
-**Acceptance Criteria:**
-- [ ] New file `src/shared/schema.sql` (or `src/shared/db/schema.sql`) contains the `feeds` and `items` table definitions, indexes, and `updated_at` triggers currently defined inline in `src/server/durable-objects/index.ts`.
-- [ ] `src/server/durable-objects/index.ts` imports and executes the shared schema instead of inline strings. No behavior change for the DO.
-- [ ] Server-side migration logic (the `ALTER TABLE` block adding `updated_at` to pre-existing rows) stays in the DO — it is server-only.
-- [ ] Existing `npm run test:db` passes against the refactored DO.
-- [ ] Typecheck and lint pass.
+- `@sqlite.org/sqlite-wasm` is installed.
+- `src/shared/schema.ts` defines shared feed/item SQL.
+- `src/client/db/local-adapter.ts` implements `DbAdapter`.
+- `src/client/db/index.ts` selects local vs. remote adapters.
+- `src/client/db/bootstrap.ts` runs first-time bootstrap.
+- `src/client/db/pull-sync.ts` pulls `/api/sync`.
+- `src/client/db/push-sync.ts` drains an `outbox` table.
+- `src/client/routes/settings.ts` exposes local storage controls.
+- `src/client/components/sync-status.ts` displays sync state.
+- `src/server/isolation-headers.ts` and `vite.config.js` add COOP/COEP.
+- Tests exist for sqlite init, local adapter, pull sync, push sync,
+  bootstrap, local-first settings, adapter factory, and server LWW logic.
 
-### US-002: Configure COOP/COEP headers for OPFS
-**Description:** As a developer, I need cross-origin isolation enabled so the browser exposes the synchronous OPFS access handle that sqlite-wasm needs for its OPFS VFS.
+The following gaps remain:
 
-**Acceptance Criteria:**
-- [ ] Vite dev server (`vite.config.js`) sends `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` on every response.
-- [ ] Cloudflare Worker (`src/server/index.ts` / `wrangler.jsonc`) sends the same two headers for HTML and JS responses in production.
-- [ ] `self.crossOriginIsolated === true` in DevTools after `npm start`.
-- [ ] Existing static assets, OAuth flow, and Bluesky login still work end-to-end after the headers are added.
-- [ ] Typecheck and lint pass.
-- [ ] Verify in browser using dev-browser skill.
+- SQLite is not clearly isolated behind a Worker or promise-worker API.
+- OPFS support detection is likely testing the wrong global context.
+- The build explicitly adds `sqlite-init` as a separate entry, which may load
+  SQLite for users who never opt in.
+- No browser test proves OPFS persistence across reload or restart.
+- The service worker described in `DOCS/README.md` is not present.
+- Pull and push sequencing can leave the UI stale after online sync.
+- Conflict, timestamp, and outbox semantics need final hardening.
+- README and the existing implementation disagree in several details.
 
-### US-003: Add sqlite-wasm dependency, lazy-loaded
-**Description:** As a developer, I want the SQLite WASM bundle to load only when local-first is enabled so users who do not opt in pay no cost.
+## 4. User Stories
 
-**Acceptance Criteria:**
-- [ ] Add `@sqlite.org/sqlite-wasm` to dependencies.
-- [ ] The new local adapter module is reached only via dynamic `import()` from the adapter factory; static imports of it are forbidden.
-- [ ] `npm run build` produces a separate chunk for the sqlite-wasm code; verify by inspecting `public/` after build.
-- [ ] No regression in the size of the initial entry chunk for users with the feature disabled (compare before/after).
-- [ ] Typecheck and lint pass.
-
-### US-004: Implement OPFS-backed `localAdapter`
-**Description:** As a developer, I need a `DbAdapter` implementation that satisfies every method in `src/client/db/types.ts` against a SQLite database in OPFS.
-
-**Acceptance Criteria:**
-- [ ] New file `src/client/db/local-adapter.ts` exports `localAdapter:DbAdapter`.
-- [ ] First call initializes sqlite-wasm with the OPFS VFS (`opfs-sahpool` or the standard `opfs` VFS — whichever is supported in the target browsers) and runs the shared schema from US-001.
-- [ ] All read methods (`getFeeds`, `getItems`, `getItemByRoute`, `getCounts`) return the same shapes as `remoteAdapter`.
-- [ ] All write methods (`addFeed`, `deleteFeed`, `updateItem`, `markAllRead`) update the local DB and stamp `updated_at = datetime('now')` on every affected row, and enqueue an outbound sync record (see US-008).
-- [ ] New file `test/local-adapter.ts` runs in a browser test runner against an in-memory SQLite (skip OPFS in CI) and exercises every method of the adapter.
-- [ ] Typecheck and lint pass.
-
-### US-005: Adapter factory with OPFS detection and fallback
-**Description:** As a user on a browser without OPFS support, I want the app to keep working — falling back silently to the remote adapter — rather than breaking.
+### US-001: Move SQLite Runtime Behind a Worker Boundary
+**Description:** As a user, I want local database operations to avoid blocking
+the UI so reading and toggling items stays responsive.
 
 **Acceptance Criteria:**
-- [ ] New `src/client/db/index.ts` exports `getAdapter():Promise<DbAdapter>` (or similar) that returns `localAdapter` when (a) the user has opted in **and** (b) feature detection reports OPFS + `crossOriginIsolated`; otherwise returns `remoteAdapter`.
-- [ ] Feature detection probes `navigator.storage?.getDirectory`, `crossOriginIsolated`, and the presence of `FileSystemSyncAccessHandle`. Result cached for the session.
-- [ ] When the user has opted in but support is missing, the settings page shows a clear "Local storage unavailable in this browser" notice (see US-006).
-- [ ] `state.ts` is refactored to call `await getAdapter()` once and reuse the result, instead of importing `remoteAdapter` directly.
-- [ ] Existing routes (feeds, items, item-by-route) still function for users who never enable the feature.
+- [ ] Add a dedicated SQLite Worker module for browser local-first storage.
+- [ ] The Worker initializes `@sqlite.org/sqlite-wasm` once per tab session.
+- [ ] The Worker opens the per-user SQLite DB in OPFS.
+- [ ] Main-thread code talks to the Worker through promise-based messages.
+- [ ] `createLocalAdapter` keeps the `DbAdapter` interface unchanged.
+- [ ] Long bootstrap and query operations do not run on the main thread.
 - [ ] Typecheck and lint pass.
 - [ ] Verify in browser using dev-browser skill.
 
-### US-006: Settings UI with two toggles
-**Description:** As a user, I want to opt in to local storage of my subscriptions and, separately, the content of items, so I can choose how much disk I'm willing to spend.
+### US-002: Fix OPFS Capability Detection
+**Description:** As a user, I want local-first to enable only when the browser
+can actually persist SQLite to OPFS.
 
 **Acceptance Criteria:**
-- [ ] New settings route or settings panel exposes two toggles: "Sync subscriptions and read state to this device" and "Also store article content locally for offline reading".
-- [ ] Subscriptions toggle is independent of and a prerequisite for the content toggle. Disabling subscriptions disables and greys out content.
-- [ ] Settings persist in `localStorage` under a single namespaced key (e.g. `rsss.localFirst`).
-- [ ] Toggling on triggers the bootstrap flow (US-010); toggling off triggers the reset flow (US-011) after a confirmation dialog.
-- [ ] When OPFS is unavailable, both toggles are disabled and an explanatory notice is shown.
-- [ ] Typecheck and lint pass.
+- [ ] Capability detection runs in, or consults, the SQLite Worker context.
+- [ ] Detection checks `navigator.storage.getDirectory`.
+- [ ] Detection confirms the selected SQLite VFS is available.
+- [ ] Detection does not depend on main-thread-only false positives.
+- [ ] Unsupported browsers fall back to `remoteAdapter`.
+- [ ] Settings shows a clear unavailable state when persistence is missing.
+- [ ] Unit tests cover supported, unsupported, and failed-open cases.
 - [ ] Verify in browser using dev-browser skill.
 
-### US-007: Pull-sync (server -> local) using existing `/api/sync`
-**Description:** As a user, I want my local database to receive changes made on other devices or by the server's feed-refresh alarm.
+### US-003: Prove OPFS Persistence Across Reload
+**Description:** As a user, I want local data to survive page reloads and app
+restarts after I enable local-first.
 
 **Acceptance Criteria:**
-- [ ] `localAdapter.sync()` calls `/api/sync?since=<lastPullAt>` and upserts returned feeds and items into the local SQLite DB.
-- [ ] `lastPullAt` is stored in a small `sync_meta` table inside the local DB (single-row).
-- [ ] When the "store content locally" toggle is off, item rows are stored with `content` and `description` set to `NULL` and re-fetched on demand from `/api/items/by-route` for the currently-open item.
-- [ ] Pull-sync runs on app startup (when authenticated) and on the `online` window event.
-- [ ] On the first sync after opt-in, `since` is omitted so the server returns the full snapshot (see US-010).
-- [ ] Typecheck and lint pass.
-
-### US-008: Push-sync (local -> server)
-**Description:** As a user, I want changes I make offline (toggling read/starred, adding/removing feeds) to be uploaded once I'm back online.
-
-**Acceptance Criteria:**
-- [ ] Local writes append a record to a local `outbox` table containing the operation, target row id, payload, and a client-generated `client_updated_at`.
-- [ ] A push step drains the outbox by calling the matching existing API endpoints (`POST /api/feeds`, `DELETE /api/feeds/:id`, `PATCH /api/items/:id`, `POST /api/items/mark-all-read`).
-- [ ] Push runs after every successful pull, and on the `online` event.
-- [ ] If a push call fails with 5xx or network error, the outbox row is retained and retried on the next cycle. 4xx responses other than 401 mark the row as failed and surface a notification.
-- [ ] On 401, the user is redirected through the login flow; outbox is preserved.
-- [ ] New file `test/sync.ts` covers happy path, retry, and 4xx-rejection.
-- [ ] Typecheck and lint pass.
-
-### US-009: Last-write-wins conflict resolution
-**Description:** As a user using the same account on multiple devices, I want the most recent edit to a row to win, with the server arbitrating.
-
-**Acceptance Criteria:**
-- [ ] Push payloads include `client_updated_at`. The server (DO) compares against the row's current `updated_at` and applies the change only if `client_updated_at > existing.updated_at`. This requires extending the existing PATCH/POST endpoints in `src/server/durable-objects/index.ts`.
-- [ ] Rejected pushes are returned to the client with the server's authoritative row, which the client then upserts locally.
-- [ ] On pull, every returned row replaces its local counterpart unconditionally (server is source of truth at pull time).
-- [ ] New unit tests in `test/sync.ts` cover: (a) local edit wins over older server row, (b) server edit wins over older local row, (c) ties go to the server.
-- [ ] Typecheck and lint pass.
-
-### US-010: First-time bootstrap
-**Description:** As a user enabling local-first for the first time on a device, I want to see a clear progress indicator while my data is downloaded and my reads continue to work.
-
-**Acceptance Criteria:**
-- [ ] When the subscriptions toggle is turned on, the app initializes OPFS, runs the schema, and performs one `/api/sync` call without `since`.
-- [ ] During bootstrap, reads continue to be served from `remoteAdapter` so the UI is never blank.
-- [ ] A non-blocking progress indicator shows row counts as they land (feeds, items).
-- [ ] Bootstrap is idempotent — re-running it on an existing local DB causes upserts, not duplicates or errors.
-- [ ] If bootstrap fails, the toggle reverts to off and an error notice is shown; the local DB file is deleted.
-- [ ] Typecheck and lint pass.
+- [ ] Add a browser test that enables local-first and bootstraps data.
+- [ ] The test reloads the page and verifies feeds/items load offline-capable
+  from the local SQLite DB.
+- [ ] The test confirms no full bootstrap repeats after reload.
+- [ ] The test disables local-first and verifies the OPFS file is removed.
+- [ ] Document any browser that cannot run this test reliably in CI.
 - [ ] Verify in browser using dev-browser skill.
 
-### US-011: Reset / disable local-first
-**Description:** As a user, I want to turn local-first off and have my local SQLite file deleted so I'm not leaving data on a shared machine.
+### US-004: Keep SQLite WASM Out of the Initial App Path
+**Description:** As a user who does not enable local-first, I should not pay
+the SQLite WASM download or parse cost.
 
 **Acceptance Criteria:**
-- [ ] Disabling the subscriptions toggle prompts a confirmation dialog naming what will be deleted.
-- [ ] On confirm, any pending outbox rows are flushed (best-effort; offline = abandon with warning), the OPFS file is removed via `FileSystemDirectoryHandle.removeEntry`, and the adapter selection flips to `remoteAdapter` for the rest of the session.
-- [ ] A "Reset local data" button in settings is available even when the toggle is on, performing a full wipe + re-bootstrap.
+- [ ] Remove `sqlite-init` as a standalone Vite build input unless required.
+- [ ] Confirm `@sqlite.org/sqlite-wasm` is loaded only after opt-in.
+- [ ] Confirm the Worker and WASM files are emitted as lazy assets.
+- [ ] Compare the initial client bundle before and after the change.
+- [ ] Add a small build note documenting how to inspect the chunks.
 - [ ] Typecheck and lint pass.
-- [ ] Verify in browser using dev-browser skill.
 
-### US-012: Sync status indicator
-**Description:** As a user, I want to see whether the app is online, when it last synced, and whether there are pending local changes.
+### US-005: Harden Pull/Push Ordering and UI Refresh
+**Description:** As a user, I want the visible list, counts, and reader state
+to converge after startup and after coming back online.
 
 **Acceptance Criteria:**
-- [ ] A small status element (e.g. in the header or footer) displays one of: "Synced HH:MM", "Offline — N pending", "Syncing…", "Sync error" with a tooltip showing the last error message.
-- [ ] The element is hidden when local-first is disabled.
-- [ ] Status is driven by signals (`@preact/signals`) updated by the sync engine; multiple signal writes use `batch()` per the project style.
-- [ ] Typecheck and lint pass.
+- [ ] Startup sync runs in a deterministic order.
+- [ ] Online-event sync refreshes feeds, items, counts, and route item state.
+- [ ] Push runs after local writes when online, or is scheduled promptly.
+- [ ] Pending outbox count is updated after every push attempt.
+- [ ] Pull and push errors update sync status without hiding local data.
+- [ ] Tests cover startup sync and online-event refresh behavior.
+
+### US-006: Finish Server/Client Conflict Semantics
+**Description:** As a multi-device user, I want edits to converge without
+duplicate feed rows or lost read/star state.
+
+**Acceptance Criteria:**
+- [ ] Every outbox operation includes `client_op_id`.
+- [ ] Server mutations treat duplicate `client_op_id` retries idempotently,
+  or the PRD documents why URL/row constraints are sufficient for v1.
+- [ ] Server conflict responses return authoritative rows in a consistent
+  shape for feed, item, and mark-all-read operations.
+- [ ] Client 409 handling updates local rows and clears the outbox row.
+- [ ] Ties and stale client timestamps are covered by tests.
+- [ ] Tests cover feed add retry, feed delete conflict, item update conflict,
+  and mark-all-read conflict.
+
+### US-007: Clarify Content Storage Behavior
+**Description:** As a user, I want the content storage toggle to have clear,
+predictable behavior when I turn it on or off.
+
+**Acceptance Criteria:**
+- [ ] Define whether disabling content storage deletes existing local content.
+- [ ] If disabling deletes content, implement a local SQL cleanup.
+- [ ] If disabling only affects future pulls, document that in settings copy.
+- [ ] Reader route fetches missing content from the server when online.
+- [ ] Offline reader state handles missing content without a crash.
+- [ ] Tests cover `storeContent` true, false, and toggled-off behavior.
 - [ ] Verify in browser using dev-browser skill.
 
-## 4. Functional Requirements
+### US-008: Reconcile PWA Documentation with Reality
+**Description:** As a developer, I want docs to match the app so future work
+does not chase nonexistent files or wrong architecture.
 
-- **FR-1:** A new `localAdapter` MUST implement every method of the `DbAdapter` interface in `src/client/db/types.ts`.
-- **FR-2:** `localAdapter` MUST persist its data in a single OPFS-backed SQLite database file scoped to the authenticated user (e.g. filename derived from a stable user id).
-- **FR-3:** The client MUST NOT load `@sqlite.org/sqlite-wasm` until the user has explicitly opted in **and** OPFS is detected as available.
-- **FR-4:** The client MUST share the table-creation SQL with the Durable Object via a single source-of-truth file. Schema drift is a build/test failure.
-- **FR-5:** The client MUST send `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` headers on document responses in both dev and production.
-- **FR-6:** When OPFS is unavailable, the adapter factory MUST return `remoteAdapter` regardless of the user's toggle state, and the settings UI MUST inform the user.
-- **FR-7:** Pull sync MUST request only the delta since `lastPullAt` after the first bootstrap, using the existing `/api/sync?since=` endpoint.
-- **FR-8:** Push sync MUST send `client_updated_at` with every mutating call. The server MUST reject the change when its current `updated_at` is greater, returning the authoritative row.
-- **FR-9:** On a successful pull, the local copy of every returned row MUST be replaced by the server copy.
-- **FR-10:** Local writes MUST be buffered in an `outbox` table while offline and drained automatically when the browser fires the `online` event.
-- **FR-11:** Disabling the subscriptions toggle MUST delete the OPFS file after a flush attempt and a confirmation prompt.
-- **FR-12:** When the "store content locally" toggle is off, item rows in the local DB MUST omit `content`/`description`; the reader view MUST fetch the body on demand.
-- **FR-13:** The status indicator MUST reflect online/offline state, last successful sync time, pending outbox count, and last error.
+**Acceptance Criteria:**
+- [ ] Decide whether v1 includes a service worker.
+- [ ] If yes, add the service worker and registration described in docs.
+- [ ] If no, update `DOCS/README.md` and README to remove that claim.
+- [ ] Update README file tree comments to match `@sqlite.org/sqlite-wasm`.
+- [ ] Document the chosen SQLite VFS and Worker approach.
+- [ ] Document browser support and fallback behavior.
 
-## 5. Non-Goals (Out of Scope)
+### US-009: Add Local-First Operational Recovery
+**Description:** As a user, I want a clear recovery path when the local DB is
+corrupt, locked, unavailable, or too full.
 
-- No CRDT-based merging. Last-write-wins is sufficient for v1.
-- No client-side feed fetching or RSS parsing. The Durable Object alarm remains the only entity that pulls from upstream feeds.
-- No background sync via Service Worker / Background Sync API. The sync engine runs only when a tab is open.
-- No cross-account or shared-device profile management. One OPFS file per authenticated identity per browser profile.
-- No encryption-at-rest for the OPFS database in v1. Document the implication in settings copy.
-- No migration from any existing IndexedDB store (none exists).
-- No native (mobile/desktop) packaging. Browser only.
-- No undo / version history for synced rows.
+**Acceptance Criteria:**
+- [ ] Opening the local DB handles SQLite open errors distinctly.
+- [ ] Corruption or incompatible schema shows a reset-local-data path.
+- [ ] Quota errors show an actionable settings error.
+- [ ] Reset drains outbox best-effort before wiping.
+- [ ] Reset closes the Worker DB handle before OPFS deletion.
+- [ ] Tests cover failed open, failed bootstrap, and reset after failure.
 
-## 6. Design Considerations
+### US-010: Verify Styling and Settings UX
+**Description:** As a user, I want local-first controls and status to fit the
+existing UI and remain accessible.
 
-- Reuse the existing settings page pattern and the project's `@substrate-system/check-box` component for the two toggles.
-- The status indicator should fit the existing header style — small, monochrome, with a tooltip.
-- Confirmation dialog for reset should reuse whatever dialog primitive the project already has (or document if a new one is required — keep it minimal).
-- Adhere to the user's CSS conventions: nested selectors, variables in `_variables.css` / `_vars.css`, no font sizes below 1rem, ternary and type-annotation style as per global CLAUDE.md.
+**Acceptance Criteria:**
+- [ ] Settings controls remain keyboard accessible.
+- [ ] Sync status is announced through useful text and tooltip copy.
+- [ ] CSS follows project rules: variables for colors and no border radius
+  except icon/icon-button cases.
+- [ ] Text fits on mobile and desktop.
+- [ ] Browser verification covers settings, bootstrap progress, sync status,
+  reset, and unsupported-browser state.
 
-## 7. Technical Considerations
+## 5. Functional Requirements
 
-- **OPFS access:** `@sqlite.org/sqlite-wasm` ships two OPFS VFSes — the older synchronous-handle one (requires worker) and `opfs-sahpool`. Pick `opfs-sahpool` for simplicity unless concurrency requires otherwise. The decision should be documented in code, not this PRD.
-- **Cross-origin isolation:** Adding COOP/COEP can break embeds and any third-party resource without `Cross-Origin-Resource-Policy` headers. Audit current third-party assets (Bluesky avatars, etc.) and add `crossorigin="anonymous"` where needed; OAuth popups must still work.
-- **Existing sync endpoint:** `src/server/durable-objects/index.ts` already exposes a sync endpoint that filters by `updated_at > since`. Confirm response shape and pagination behavior before reuse; extend if needed.
-- **`updated_at` semantics:** The DO already auto-stamps via triggers. The client must do the same — either by trigger or by explicit update — and must send a `client_updated_at` field that the server uses for LWW comparison.
-- **Outbox idempotency:** Adding a feed twice (offline retry) should not create duplicates. The server's existing dedup-on-URL behavior should be confirmed; if absent, push payloads should include a `client_op_id` to make replays safe.
-- **User-scoped filename:** Use the AT Protocol DID as the OPFS filename so logging in/out across accounts on the same browser does not cross-contaminate.
-- **Service Worker (`src/sw/`):** Verify that adding COOP/COEP doesn't break the existing SW registration; SWs are subject to their own COEP rules.
-- **Bundle size:** sqlite-wasm is ~1MB compressed. Lazy-loading is required — confirm no static reference creeps in via the factory.
-- **Testing:** OPFS is hard to exercise headlessly. Unit-test against in-memory SQLite (`:memory:`); cover OPFS-specific paths with a single manual playwright test or document the gap.
+- **FR-1:** Local-first reads must use browser SQLite persisted to OPFS.
+- **FR-2:** SQLite initialization and query execution must happen in a Worker.
+- **FR-3:** Main-thread app code must keep using `DbAdapter`.
+- **FR-4:** `getAdapter(did)` must return `remoteAdapter` unless the user has
+  opted in and OPFS-backed SQLite is verified available.
+- **FR-5:** The first local sync must seed the DB from `/api/sync` without a
+  `since` parameter.
+- **FR-6:** Later pull syncs must call `/api/sync?since=<last_pull_at>`.
+- **FR-7:** Local writes must update SQLite first and enqueue an outbox row.
+- **FR-8:** Online push sync must drain outbox rows in FIFO order.
+- **FR-9:** Failed network or 5xx push attempts must preserve outbox rows.
+- **FR-10:** Auth or billing failures must preserve local data and outbox rows.
+- **FR-11:** Conflict responses must update local SQLite with server truth.
+- **FR-12:** Disabling local-first must remove the OPFS database after a
+  confirmation prompt.
+- **FR-13:** Reset must wipe and re-bootstrap local data.
+- **FR-14:** SQLite WASM must not be part of the default initial app bundle.
+- **FR-15:** Docs must accurately describe the implemented local-first path.
 
-## 8. Success Metrics
+## 6. Non-Goals
 
-- After opt-in, navigating between feed/items/reader views performs zero blocking network requests for read paths (verified in DevTools network tab).
-- Cold reload time on opted-in devices drops by at least 50% vs. baseline (current measurement TBD as part of US-002).
-- Toggling read/starred state shows up in the UI in under 50ms, regardless of network latency.
-- Two browsers signed in to the same account converge within one sync cycle (~ next online event) on conflicting edits, with the more recent edit winning.
-- Users on browsers without OPFS see no functional regression relative to today.
+- No CRDT merge system for v1.
+- No client-side RSS fetching or parsing.
+- No encryption-at-rest for OPFS in this pass.
+- No multi-tab leader election in v1 unless Worker/OPFS locking forces it.
+- No migration from IndexedDB.
+- No native desktop or mobile wrapper.
+- No background sync API unless a service worker is explicitly added.
 
-## 9. Open Questions
+## 7. Design Considerations
 
-- Does the existing `/api/sync` endpoint return a single page or paginate? If single-page, large initial bootstraps may need explicit chunking — should that be added now or deferred until a real user hits the limit?
-- For the "content stored locally" toggle, do we evict existing locally-stored content when the user toggles it off, or only stop fetching new content?
-- Should the OPFS file name include a schema version suffix (e.g. `rsss-{did}-v1.sqlite3`) so future incompatible schema changes can sidestep migration entirely?
-- Do we want a "force full re-sync" debug action visible to all users or hidden behind a query param?
-- Cloudflare Workers static asset response headers — is the right place to add COOP/COEP `wrangler.jsonc` (`assets.headers`) or middleware in `src/server/index.ts`? Decide during US-002.
-- Reference docs: https://sqlite.org/wasm/doc/trunk/index.md — confirm browser support matrix matches our browserslist config before locking in `opfs-sahpool`.
+- Reuse the existing settings route and `@substrate-system/check-box`.
+- Keep local-first controls in the Settings page.
+- Keep status compact in the existing header.
+- Avoid adding explanatory in-app text beyond actionable state and errors.
+- Follow AGENTS.md CSS rules: global color variables and no border radius
+  except icon or icon-button cases.
+- Use `@preact/signals` for state and attach mutating app behavior to `State`.
+
+## 8. Technical Considerations
+
+- `DOCS/sqlite-persistence.md` says OPFS is Worker-context storage. This should
+  drive the implementation shape.
+- `opfs-sahpool` may avoid COOP/COEP in some cases, but this app already sends
+  COOP/COEP. Keep the headers unless they break OAuth or assets.
+- The current `isLocalFirstSupported()` and `isOpfsSupported()` checks should
+  be revalidated because they inspect the main `globalThis`.
+- The current `removeOpfsDb()` may fail if a Worker still holds the database.
+  Close the DB before removing the OPFS entry.
+- The shared schema is TypeScript SQL strings, not a `.sql` file. That is fine
+  if tests prevent server/client drift.
+- The Durable Object remains the canonical merge point.
+- Browser tests should be preferred for OPFS behavior. Unit tests can keep
+  using in-memory SQLite.
+
+## 9. Success Metrics
+
+- After opt-in and bootstrap, feed and item read paths work after reload with
+  the network disabled.
+- Toggling read/star state updates UI in under 50 ms on a normal local device.
+- SQLite WASM assets do not load for a fresh user who never opens local-first.
+- Coming back online drains pending outbox rows without manual refresh.
+- Unsupported browsers continue to use the remote adapter without data loss.
+- Browser verification shows local-first enable, reload, offline read, reset,
+  and disable flows all work.
+
+## 10. Open Questions
+
+- Should local-first v1 support multiple open tabs, or is single-tab behavior
+  acceptable with a clear fallback on lock errors?
+- Should disabling `storeContent` purge existing local content immediately?
+- Should `/api/sync` paginate before launch, or can v1 assume one response?
+- Should the OPFS filename include a schema version suffix?
+- Should a service worker be implemented now, or should PWA docs be corrected
+  to state that offline data requires an already-loaded app tab?

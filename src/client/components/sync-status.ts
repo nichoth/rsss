@@ -5,6 +5,7 @@ import {
     syncedAt,
     syncError,
     syncPending,
+    syncDeadLetters,
     isLocalFirstActive
 } from '../db/sync-status.js'
 import { billingStatus } from '../billing-status.js'
@@ -27,9 +28,10 @@ export const SyncStatus:FunctionComponent = function () {
         return html`
             <span
                 class="sync-status free"
+                aria-label="Local only: free plan changes stay on this device"
                 title="Free plan -- changes stay on this device"
             >
-                Local only ·${' '}
+                Local only -${' '}
                 <a href="/signup">Upgrade</a>
             </span>
         `
@@ -41,29 +43,45 @@ export const SyncStatus:FunctionComponent = function () {
     const at = syncedAt.value
     const err = syncError.value
     const pending = syncPending.value
+    const deadLetters = syncDeadLetters.value
 
     let label:string
     let cls:string
     let title:string|undefined
+    let a11yLabel:string
 
     if (status === 'syncing') {
         label = 'Syncing...'
         cls = 'sync-status syncing'
+        a11yLabel = label
     } else if (status === 'offline') {
-        label = pending > 0 ? `Offline – ${pending} pending` : 'Offline'
+        label = pending > 0 ? `Offline - ${pending} pending` : 'Offline'
         cls = 'sync-status offline'
+        a11yLabel = label
     } else if (status === 'error') {
         label = 'Sync error'
         cls = 'sync-status error'
         title = err ?? undefined
+        a11yLabel = err ? `${label}: ${err}` : label
+    } else if (status === 'warning') {
+        label = deadLetters > 0
+            ? `Sync warning - ${deadLetters} blocked`
+            : 'Sync warning'
+        cls = 'sync-status warning'
+        title = 'Some local changes stopped retrying after 10 failures'
+        a11yLabel = `${label}: ${title}`
     } else {
         label = at ? `Synced ${formatTime(at)}` : 'Synced'
         cls = 'sync-status idle'
+        a11yLabel = label
     }
 
     return html`
         <span
             class=${cls}
+            role="status"
+            aria-live="polite"
+            aria-label=${a11yLabel}
             title=${title}
         >${label}</span>
     `

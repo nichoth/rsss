@@ -6,6 +6,7 @@ import type {
     ItemsResponse,
     CountsResponse
 } from '../src/client/db/types.js'
+import { linkMatchesItemRoute } from '../src/shared/item-route.js'
 
 /**
  * Tests for the database adapter interface
@@ -92,7 +93,7 @@ function createMockAdapter ():DbAdapter & {
 
         async getItemByRoute (itemRoute:string): Promise<Item|null> {
             const item = items.find((entry) =>
-                entry.link?.includes(itemRoute)
+                linkMatchesItemRoute(entry.link, itemRoute)
             )
             return item || null
         },

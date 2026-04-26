@@ -1,6 +1,6 @@
-import type { SqlValue } from '@sqlite.org/sqlite-wasm'
 import type { Sqlite3Db } from './sqlite-init.js'
 import { storeContent } from '../local-first-settings.js'
+import { execDb, queryDb } from './local-db.js'
 import {
     setSyncSyncing,
     setSyncDone,
@@ -15,6 +15,13 @@ export class SyncBillingError extends Error {
     }
 }
 
+export class PullSyncAuthError extends Error {
+    constructor () {
+        super('pullSync: 401 unauthorized -- re-auth required')
+        this.name = 'PullSyncAuthError'
+    }
+}
+
 export interface SyncResponse {
     feeds:Record<string, unknown>[]
     items:Record<string, unknown>[]
@@ -23,25 +30,33 @@ export interface SyncResponse {
     isFullSync:boolean
 }
 
-function getLastPullAt (db:Sqlite3Db):string|null {
-    const rows:{ last_pull_at:string|null }[] = []
-    db.exec({
-        sql: 'SELECT last_pull_at FROM sync_meta WHERE id = 1',
-        rowMode: 'object',
-        resultRows: rows as Record<string, SqlValue>[]
-    })
+interface PendingOutboxRefs {
+    feedIds:Set<number>
+    itemIds:Set<number>
+    markAllReadFeedIds:Set<number>
+    markAllReadAll:boolean
+}
+
+async function getLastPullAt (db:Sqlite3Db):Promise<string|null> {
+    const rows = await queryDb<{ last_pull_at:string|null }>(
+        db,
+        'SELECT last_pull_at FROM sync_meta WHERE id = 1'
+    )
     return rows[0]?.last_pull_at ?? null
 }
 
-function setLastPullAt (db:Sqlite3Db, value:string):void {
-    db.exec({
+async function setLastPullAt (db:Sqlite3Db, value:string):Promise<void> {
+    await execDb(db, {
         sql: 'UPDATE sync_meta SET last_pull_at = ? WHERE id = 1',
         bind: [value]
     })
 }
 
-function upsertFeed (db:Sqlite3Db, feed:Record<string, unknown>):void {
-    db.exec({
+async function upsertFeed (
+    db:Sqlite3Db,
+    feed:Record<string, unknown>
+):Promise<void> {
+    await execDb(db, {
         sql: `INSERT INTO feeds
             (id, url, title, description, site_url, last_fetched,
              created_at, updated_at)
@@ -66,11 +81,11 @@ function upsertFeed (db:Sqlite3Db, feed:Record<string, unknown>):void {
     })
 }
 
-function upsertItem (
+async function upsertItem (
     db:Sqlite3Db,
     item:Record<string, unknown>,
     keepContent:boolean
-):void {
+):Promise<void> {
     const content = keepContent
         ? (item.content as string|null) ?? null
         : null
@@ -78,7 +93,7 @@ function upsertItem (
         ? (item.description as string|null) ?? null
         : null
 
-    db.exec({
+    await execDb(db, {
         sql: `INSERT INTO items
             (id, feed_id, guid, title, link, description, content,
              author, pub_date, is_read, is_starred, created_at, updated_at)
@@ -113,9 +128,73 @@ function upsertItem (
     })
 }
 
+async function getPendingOutboxRefs (
+    db:Sqlite3Db
+):Promise<PendingOutboxRefs> {
+    const rows = await queryDb<{ op:string; target_id:number|null }>(
+        db,
+        `SELECT op, target_id
+         FROM outbox
+         WHERE op IN (
+            'add_feed',
+            'delete_feed',
+            'update_item',
+            'mark_all_read'
+         )`
+    )
+
+    const refs:PendingOutboxRefs = {
+        feedIds: new Set(),
+        itemIds: new Set(),
+        markAllReadFeedIds: new Set(),
+        markAllReadAll: false
+    }
+
+    for (const row of rows) {
+        if (
+            (row.op === 'add_feed' || row.op === 'delete_feed') &&
+            row.target_id !== null
+        ) {
+            refs.feedIds.add(row.target_id)
+        } else if (row.op === 'update_item' && row.target_id !== null) {
+            refs.itemIds.add(row.target_id)
+        } else if (row.op === 'mark_all_read') {
+            if (row.target_id === null) {
+                refs.markAllReadAll = true
+            } else {
+                refs.markAllReadFeedIds.add(row.target_id)
+            }
+        }
+    }
+
+    return refs
+}
+
+function shouldSkipFeed (
+    feed:Record<string, unknown>,
+    refs:PendingOutboxRefs
+):boolean {
+    return refs.feedIds.has(feed.id as number)
+}
+
+function shouldSkipItem (
+    item:Record<string, unknown>,
+    refs:PendingOutboxRefs
+):boolean {
+    const id = item.id as number
+    const feedId = item.feed_id as number
+    return (
+        refs.itemIds.has(id) ||
+        refs.feedIds.has(feedId) ||
+        refs.markAllReadAll ||
+        refs.markAllReadFeedIds.has(feedId)
+    )
+}
+
 export interface PullSyncOptions {
     onFeedUpserted?:(count:number) => void
     onItemUpserted?:(count:number) => void
+    trackStatus?:boolean
 }
 
 /**
@@ -128,10 +207,10 @@ export async function pullSync (
     fetchFn:typeof fetch = fetch,
     opts:PullSyncOptions = {}
 ):Promise<void> {
-    const trackStatus = isLocalFirstActive.value
+    const trackStatus = opts.trackStatus ?? isLocalFirstActive.value
     if (trackStatus) setSyncSyncing()
 
-    const lastPullAt = getLastPullAt(db)
+    const lastPullAt = await getLastPullAt(db)
     const url = lastPullAt
         ? `/api/sync?since=${encodeURIComponent(lastPullAt)}`
         : '/api/sync'
@@ -146,6 +225,10 @@ export async function pullSync (
             )
         }
         throw err
+    }
+
+    if (res.status === 401) {
+        throw new PullSyncAuthError()
     }
 
     if (res.status === 402) {
@@ -163,25 +246,28 @@ export async function pullSync (
 
     const data = (await res.json()) as SyncResponse
     const keepContent = storeContent.value
+    const pendingRefs = await getPendingOutboxRefs(db)
 
-    db.exec('BEGIN')
+    await execDb(db, 'BEGIN')
     try {
         let feedCount = 0
         for (const feed of data.feeds) {
-            upsertFeed(db, feed)
+            if (shouldSkipFeed(feed, pendingRefs)) continue
+            await upsertFeed(db, feed)
             feedCount++
             opts.onFeedUpserted?.(feedCount)
         }
         let itemCount = 0
         for (const item of data.items) {
-            upsertItem(db, item, keepContent)
+            if (shouldSkipItem(item, pendingRefs)) continue
+            await upsertItem(db, item, keepContent)
             itemCount++
             opts.onItemUpserted?.(itemCount)
         }
-        setLastPullAt(db, data.latestUpdatedAt)
-        db.exec('COMMIT')
+        await setLastPullAt(db, data.latestUpdatedAt)
+        await execDb(db, 'COMMIT')
     } catch (err) {
-        db.exec('ROLLBACK')
+        await execDb(db, 'ROLLBACK')
         if (trackStatus) {
             setSyncError(
                 err instanceof Error ? err.message : String(err)
