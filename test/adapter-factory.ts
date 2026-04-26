@@ -8,11 +8,16 @@ import {
     _resetAdapterCache
 } from '../src/client/db/index.js'
 import { remoteAdapter } from '../src/client/db/remote-adapter.js'
+import {
+    resetTabCoordinationForTests,
+    setLocalTabBlocked
+} from '../src/client/db/tab-coordination.js'
 
 function setup () {
     syncSubscriptions.value = false
     _resetSupportedCache()
     _resetAdapterCache()
+    resetTabCoordinationForTests()
 }
 
 test('isLocalFirstSupported returns false when navigator.storage missing',
@@ -42,7 +47,8 @@ test('getAdapter returns remoteAdapter when syncSubscriptions is false',
         setup()
         syncSubscriptions.value = false
         const adapter = await getAdapter('did:plc:test')
-        t.equal(adapter, remoteAdapter, 'returns remoteAdapter when opt-in off')
+        t.equal(adapter, remoteAdapter,
+            'returns remoteAdapter when opt-in off')
     }
 )
 
@@ -72,6 +78,31 @@ test('getAdapter returns remoteAdapter when did is absent', async (t) => {
     const adapter = await getAdapter(undefined)
     t.equal(adapter, remoteAdapter, 'returns remoteAdapter when did missing')
 })
+
+test('getAdapter returns remoteAdapter when another tab owns OPFS',
+    async (t) => {
+        setup()
+        syncSubscriptions.value = true
+        Object.defineProperty(navigator, 'storage', {
+            value: { getDirectory: () => Promise.resolve({}) },
+            configurable: true
+        })
+        Object.defineProperty(globalThis, 'crossOriginIsolated', {
+            value: true,
+            configurable: true
+        })
+        Object.defineProperty(globalThis, 'FileSystemSyncAccessHandle', {
+            value: function FileSystemSyncAccessHandle () {},
+            configurable: true
+        })
+        setLocalTabBlocked()
+
+        const adapter = await getAdapter('did:plc:test')
+
+        t.equal(adapter, remoteAdapter,
+            'falls back to remoteAdapter when tab lock is blocked')
+    }
+)
 
 test('db barrel exports bootstrap DB accessor', (t) => {
     t.equal(

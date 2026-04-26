@@ -5,6 +5,14 @@ import {
 } from '../local-first-settings.js'
 import { openLocalDb, removeOpfsDb } from './sqlite-init.js'
 import { pullSync } from './pull-sync.js'
+import {
+    isLocalTabBlocked,
+    LOCAL_TAB_LOCK_ERROR,
+    localTabLockError,
+    markLocalTabPrimary,
+    setLocalTabBlocked,
+    startTabCoordination
+} from './tab-coordination.js'
 import type { Sqlite3Db } from './sqlite-init.js'
 
 export const bootstrapInProgress:Signal<boolean> = signal(false)
@@ -41,6 +49,12 @@ export async function bootstrapLocalDb (
     })
 
     try {
+        startTabCoordination()
+        if (isLocalTabBlocked()) {
+            throw new Error(localTabLockError.value ?? (
+                LOCAL_TAB_LOCK_ERROR
+            ))
+        }
         const db = await openLocalDb(did)
 
         await pullSync(db, fetchFn, {
@@ -53,8 +67,12 @@ export async function bootstrapLocalDb (
         })
 
         _bootstrappedDb = db
+        markLocalTabPrimary()
         bootstrapInProgress.value = false
     } catch (err) {
+        if (err instanceof Error && err.message === LOCAL_TAB_LOCK_ERROR) {
+            setLocalTabBlocked()
+        }
         const msg = err instanceof Error ? err.message : String(err)
         batch(() => {
             bootstrapError.value = msg

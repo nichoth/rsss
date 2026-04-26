@@ -12,6 +12,14 @@ import {
     removeOpfsDb
 } from './sqlite-init.js'
 import {
+    isLocalTabBlocked,
+    LOCAL_TAB_LOCK_ERROR,
+    markLocalTabPrimary,
+    markLocalTabReleased,
+    setLocalTabBlocked,
+    startTabCoordination
+} from './tab-coordination.js'
+import {
     bootstrapInProgress,
     getBootstrappedDb,
     clearBootstrappedDb,
@@ -23,6 +31,11 @@ import type { Sqlite3Db } from './sqlite-init.js'
 
 export { remoteAdapter } from './remote-adapter.js'
 export { initSqlite, OPFSUnavailableError } from './sqlite-init.js'
+export {
+    getLocalTabLockError,
+    localTabLockError,
+    startTabCoordination
+} from './tab-coordination.js'
 export type { Sqlite3, Sqlite3Db } from './sqlite-init.js'
 export type * from './types.js'
 export {
@@ -74,6 +87,10 @@ export async function getAdapter (did?:string):Promise<DbAdapter> {
         did &&
         !bootstrapInProgress.value
     ) {
+        startTabCoordination()
+        if (isLocalTabBlocked()) {
+            return remoteAdapter
+        }
         if (_cachedAdapter && _cachedAdapterDid === did) {
             return _cachedAdapter
         }
@@ -84,9 +101,13 @@ export async function getAdapter (did?:string):Promise<DbAdapter> {
             _cachedDb = db
             _cachedAdapter = createLocalAdapter(db)
             _cachedAdapterDid = did
+            markLocalTabPrimary()
             return _cachedAdapter
         } catch (err) {
             if (err instanceof OPFSUnavailableError) {
+                if (err.message === LOCAL_TAB_LOCK_ERROR) {
+                    setLocalTabBlocked()
+                }
                 return remoteAdapter
             }
             throw err
@@ -139,6 +160,7 @@ export async function disableLocalFirst (
     }
     clearBootstrappedDb()
     _resetAdapterCache()
+    markLocalTabReleased()
     await removeOpfsDb(did)
     batch(() => {
         setSyncSubscriptions(false)
@@ -164,6 +186,7 @@ export async function resetLocalFirst (
     }
     clearBootstrappedDb()
     _resetAdapterCache()
+    markLocalTabReleased()
     await removeOpfsDb(did)
     await bootstrapLocalDb(did, fetchFn)
 }

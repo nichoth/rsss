@@ -41,6 +41,10 @@
 - **Server feed fetch security**: Feed fetches should go through
   `src/server/feed-fetch.ts` so URL validation, fetch timeout, and the
   5MB response cap stay centralized.
+- **OPFS tab coordination**: Local-first OPFS ownership is coordinated in
+  `src/client/db/tab-coordination.ts` with BroadcastChannel `rsss-tab`.
+  Check this coordinator before opening SQLite so second tabs fall back to
+  `remoteAdapter` instead of contending for the exclusive OPFS lock.
 
 ---
 
@@ -276,4 +280,35 @@ Thread: https://ampcode.com/threads/unknown
 - **Learnings for future iterations:**
   - Keep sync-status signals in their own module (`sync-status.ts`) to avoid circular imports between pull-sync, push-sync, and state.
   - `isLocalFirstActive` must be set in `state.ts` when `getLocalDb()` returns non-null; pull/push-sync check it before updating status to avoid polluting non-local-first sessions.
+---
+
+## 2026-04-25 21:55 PDT - US-020
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Multi-tab OPFS coordination.
+  - Added a `rsss-tab` BroadcastChannel coordinator that announces the
+    primary local-first tab, blocks secondary tabs from opening OPFS, and
+    clears the blocked state when the primary broadcasts `released`.
+  - `getAdapter()` now falls back to `remoteAdapter` when another tab owns
+    the local DB, and marks the tab primary after a successful OPFS open.
+  - Bootstrap uses the same tab-lock guard and surfaces "Local data is open
+    in another tab" through the settings UI.
+  - OPFS exclusive-lock-like open failures are converted to
+    `OPFSUnavailableError` with the tab-lock message.
+- Files changed:
+  - `src/client/db/tab-coordination.ts`
+  - `src/client/db/index.ts`
+  - `src/client/db/bootstrap.ts`
+  - `src/client/db/sqlite-init.ts`
+  - `src/client/routes/settings.ts`
+  - `test/tab-coordination.ts`
+  - `test/adapter-factory.ts`
+  - `package.json`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Multi-tab local-first state is centralized in
+    `src/client/db/tab-coordination.ts`; OPFS callers should check it before
+    opening SQLite.
+  - Adapter factory tests should run serially with other tapout browser tests
+    because tapout binds a fixed local port.
 ---

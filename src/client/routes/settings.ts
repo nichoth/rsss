@@ -22,7 +22,8 @@ import {
     resetLocalFirst,
     getBootstrappedDb,
     getLocalDb,
-    getOutboxCount
+    getOutboxCount,
+    localTabLockError
 } from '../db/index.js'
 import '@substrate-system/check-box'
 import './settings.css'
@@ -43,6 +44,7 @@ export const SettingsRoute:FunctionComponent<{
     const supported = isLocalFirstSupported()
     const inProgress = bootstrapInProgress.value
     const bError = bootstrapError.value
+    const tabLockError = localTabLockError.value
     const billing = useComputed(() => billingStatus.value)
     const isEntitled = Boolean(billing.value?.entitled)
     const planLabel = billing.value?.planId ?? 'sync'
@@ -170,6 +172,11 @@ export const SettingsRoute:FunctionComponent<{
             ${!supported && html`
                 <p class="unsupported-note">
                     Local storage is not supported in this browser.
+                </p>
+            `}
+            ${tabLockError && html`
+                <p class="unsupported-note">
+                    ${tabLockError}
                 </p>
             `}
             <div class="local-first-toggle">

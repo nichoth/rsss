@@ -1,4 +1,5 @@
 import { SCHEMA_SQL } from '../../shared/schema.js'
+import { LOCAL_TAB_LOCK_ERROR } from './tab-coordination.js'
 
 export const SYNC_META_SQL = `
     CREATE TABLE IF NOT EXISTS sync_meta (
@@ -22,8 +23,8 @@ const OUTBOX_SQL = `
 `
 
 export class OPFSUnavailableError extends Error {
-    constructor () {
-        super('OPFS is not available in this browser')
+    constructor (message = 'OPFS is not available in this browser') {
+        super(message)
         this.name = 'OPFSUnavailableError'
     }
 }
@@ -85,22 +86,39 @@ export async function openLocalDb (did:string):Promise<Sqlite3Db> {
         throw new OPFSUnavailableError()
     }
 
-    const poolUtil = await (
-        sqlite3 as unknown as {
-            installOpfsSAHPoolVfs:(opts:{
-                directory:string
-            }) => Promise<{
-                OpfsSAHPoolDb:new (filename:string) => Sqlite3Db
-            }>
-        }
-    ).installOpfsSAHPoolVfs({ directory: 'rsss-db' })
+    try {
+        const poolUtil = await (
+            sqlite3 as unknown as {
+                installOpfsSAHPoolVfs:(opts:{
+                    directory:string
+                }) => Promise<{
+                    OpfsSAHPoolDb:new (filename:string) => Sqlite3Db
+                }>
+            }
+        ).installOpfsSAHPoolVfs({ directory: 'rsss-db' })
 
-    const filename = getOpfsFilename(did)
-    const db = new poolUtil.OpfsSAHPoolDb(filename)
-    db.exec(SCHEMA_SQL)
-    db.exec(OUTBOX_SQL)
-    db.exec(SYNC_META_SQL)
-    return db
+        const filename = getOpfsFilename(did)
+        const db = new poolUtil.OpfsSAHPoolDb(filename)
+        db.exec(SCHEMA_SQL)
+        db.exec(OUTBOX_SQL)
+        db.exec(SYNC_META_SQL)
+        return db
+    } catch (err) {
+        if (isExclusiveLockError(err)) {
+            throw new OPFSUnavailableError(LOCAL_TAB_LOCK_ERROR)
+        }
+        throw err
+    }
+}
+
+function isExclusiveLockError (err:unknown):boolean {
+    const msg = err instanceof Error ? err.message : String(err)
+    return (
+        /lock/i.test(msg) ||
+        /busy/i.test(msg) ||
+        /already.*open/i.test(msg) ||
+        /no available.*access handle/i.test(msg)
+    )
 }
 
 export function getOpfsFilename (did:string):string {

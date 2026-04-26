@@ -18,6 +18,7 @@
     "test:push-sync": "esbuild ./test/push-sync.ts --bundle --loader:.wasm=dataurl | tapout",
     "test:bootstrap": "esbuild ./test/bootstrap.ts --bundle --loader:.wasm=dataurl | tapout",
     "test:feed": "esbuild test/feed-fetch-security.ts --bundle | tapout",
+    "test:tab-coordination": "esbuild test/tab-coordination.ts --bundle | tapout",
     "build": "mkdir -p ./public && rm -rf ./public/* && npx vite build $([ \"$NODE_ENV\" != \"production\" ] && echo \"--mode staging\")",
     "start": "vite",
     "toc": "markdown-toc --maxdepth 3 -i README.md",
