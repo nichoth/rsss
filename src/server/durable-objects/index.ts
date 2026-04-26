@@ -230,31 +230,10 @@ export class UserDO extends DurableObject<Env> {
                     JSON.stringify(feed)
                 )
 
-                // Fetch feed content before responding
-                // so client sees items immediately
-                await this.fetchFeed(
-                    feed as unknown as Feed
-                )
-
-                // Count items after fetch
-                const itemCount = this.sql.exec(
-                    'SELECT COUNT(*) as count' +
-                    ' FROM items WHERE feed_id = ?',
-                    (feed as unknown as Feed).id
-                ).one()
-                console.log(
-                    '[DO] Items after fetch:',
-                    JSON.stringify(itemCount)
-                )
-
-                // Return updated feed with title/description
-                const updatedFeed = this.sql.exec(
-                    'SELECT * FROM feeds WHERE url = ?',
-                    body.url
-                ).one()
+                this.ctx.waitUntil(this.fetchFeed(feed as unknown as Feed))
 
                 return c.json(
-                    { feed: updatedFeed },
+                    { feed },
                     201
                 )
             } catch (_err) {

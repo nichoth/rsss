@@ -6,6 +6,7 @@ import './db-adapter.js'
 import './server-lww.js'
 import './feed-fetch-security.js'
 import './feed-parser.js'
+import './feed-create.js'
 import './api-router.js'
 
 test('all done', () => {

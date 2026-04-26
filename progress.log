@@ -34,6 +34,10 @@
 
 ## Codebase Patterns
 
+- **Durable Object route tests**: Route behavior can be tested without a real
+  DO instance by using `Object.create(UserDO.prototype)`, assigning a focused
+  fake `sql` object and `ctx.waitUntil`, then calling the private
+  `createRouter()` through a typed test shim.
 - **Feed parser tests**: Durable Object parser behavior can be tested without
   constructing a DO by importing `UserDO`, creating
   `Object.create(UserDO.prototype)`, and calling the private parser through a
@@ -110,6 +114,30 @@ Thread: https://ampcode.com/threads/unknown
     `media:title` and `dc:creator`.
   - Durable Object parser tests need the `cloudflare:workers` esbuild alias.
   - Tapout browser tests share port 8123; run focused scripts serially.
+---
+
+## 2026-04-25 22:41 PDT - US-027
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Made `POST /feeds` return after inserting the feed
+  row instead of waiting for the initial feed fetch.
+  - The initial `fetchFeed(feed)` call is now registered with
+    `this.ctx.waitUntil(...)` so items can arrive on a later sync cycle.
+  - Added a focused DO route regression test that holds `fetchFeed` open and
+    verifies the response still resolves with 201.
+- Files changed:
+  - `src/server/durable-objects/index.ts`
+  - `test/feed-create.ts`
+  - `test/index.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - DO route behavior can be tested without constructing the full Durable
+    Object by creating `Object.create(UserDO.prototype)`, assigning focused
+    fake `sql` and `ctx.waitUntil` objects, and calling `createRouter()` via
+    a typed test shim.
+  - Initial feed metadata is no longer available in the `POST /feeds`
+    response; clients should rely on the inserted feed row and later sync or
+    refresh results for fetched title/item data.
 ---
 
 ## 2026-04-25 22:11 PDT - US-023
