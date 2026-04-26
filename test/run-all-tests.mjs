@@ -7,6 +7,7 @@ const commands = [
     'node test/routes-oauth-callback-static.mjs',
     'node test/sidebar-static.mjs',
     'node test/server-routing-static.mjs',
+    'node test/vite-build-inputs.mjs',
     'node test/vite-isolation-headers.mjs',
     [
         'esbuild ./test/index.ts --bundle',

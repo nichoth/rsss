@@ -61,9 +61,10 @@ export default defineConfig(({ mode }) => {
             client: {
                 build: {
                     rollupOptions: {
+                        // Inspect lazy SQLite packaging with:
+                        // npm run build && find public -type f | sort
                         input: {
                             index: './index.html',
-                            'sqlite-init': './src/client/db/sqlite-init.ts',
                         },
                     },
                 },

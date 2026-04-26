@@ -75,6 +75,11 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Lazy SQLite Vite packaging**: Keep the client build input to
+  `index.html`. The SQLite worker and WASM assets are emitted from
+  `new Worker(new URL('./sqlite-worker.ts', import.meta.url))` and the
+  worker's dynamic `import('@sqlite.org/sqlite-wasm')`; do not add
+  `sqlite-init` as a standalone Vite entry.
 - **Local-first support detection**: `isLocalFirstSupported()` is async and
   must confirm OPFS through the SQLite worker probe before returning true.
   Settings UI should read the `localFirstSupported` signal; do not gate local
@@ -1436,4 +1441,26 @@ Thread: https://ampcode.com/threads/unknown
   - Tests that force browser support to true must mock
     `setSQLiteWorkerClientFactoryForTests`; otherwise bundled tests may try
     to construct the real Vite worker URL.
+---
+
+## 2026-04-26 14:41 PDT - US-061
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Removed `sqlite-init` as a standalone Vite client
+  build input.
+  - Added a focused static regression for client build inputs.
+  - Kept the client entry at `index.html` only while preserving lazy
+    SQLite worker and WASM asset emission through the worker factory path.
+  - Added the chunk-inspection command as a short code comment in
+    `vite.config.js`.
+- Files changed:
+  - `vite.config.js`
+  - `test/vite-build-inputs.mjs`
+  - `test/run-all-tests.mjs`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Vite emits the SQLite worker and WASM assets from the lazy worker URL;
+    `sqlite-init` does not need to be a Rollup input.
+  - `public/client/index.html` should only reference the app entry and CSS;
+    SQLite assets should appear as separate files without initial HTML tags.
 ---
