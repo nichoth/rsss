@@ -75,6 +75,9 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Repository configuration tests**: Focused repository-level assertions can
+  live in `.mjs` files under `test/` and be listed in
+  `test/run-all-tests.mjs` before browser-bundled tapout tests.
 - **Client Feed/Item type authority**: `src/client/db/types.ts` owns the
   canonical client `Feed` and `Item` interfaces. `state.ts` imports and
   re-exports those types for existing UI imports instead of redefining them.
@@ -1060,4 +1063,25 @@ Thread: https://ampcode.com/threads/unknown
     session data stays in KV under `session:${sid}`.
   - Focused session cookie tests can use a tiny in-memory KV object and run
     with `npx esbuild ./test/session-cookie.ts --bundle | npx tapout`.
+---
+
+## 2026-04-26 11:59 PDT - US-047
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added GitHub Actions CI for mainline pushes and PRs.
+  - Created `.github/workflows/ci.yml` running `npm test` and
+    `npm run typecheck` on `push` and `pull_request` to `main`.
+  - Added `typecheck` and `engines.node` metadata to `package.json`.
+  - Added a focused repository test for the CI workflow contract and wired it
+    into `npm test`.
+- Files changed:
+  - `.github/workflows/ci.yml`
+  - `package.json`
+  - `package-lock.json`
+  - `test/ci-workflow.mjs`
+  - `test/run-all-tests.mjs`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Repository-level configuration checks can live in focused `.mjs` tests and
+    be called from `test/run-all-tests.mjs` before browser-bundled tests.
 ---
