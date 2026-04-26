@@ -75,6 +75,11 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Client routing helpers**: Pure item-route helpers live in
+  `src/client/routing.ts` and use canonical `Item` types from
+  `src/client/db/types.ts`. `state.ts` re-exports these helpers for legacy
+  component imports, but new routing tests should import the helper module
+  directly.
 - **Billing email app links**: Route handlers should pass request-origin
   `baseUrl` into subscription billing emails. Email templates should derive
   in-app links with `new URL(path, baseUrl)` so text and HTML never emit
@@ -1277,4 +1282,25 @@ Thread: https://ampcode.com/threads/unknown
     from route handlers and derive absolute in-app links with `new URL()`.
   - `test/readme-deploy.mjs` already guards README Wrangler KV namespace
     syntax, so README deploy command regressions do not need browser tests.
+---
+
+## 2026-04-26 13:42 PDT - US-056
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Extracted client item-route helpers from state.
+  - Added `src/client/routing.ts` for pure routing helpers backed by
+    canonical `Item` types from `src/client/db/types.ts`.
+  - Updated `state.ts` to import routing helpers and re-export them for
+    existing component imports.
+  - Updated route-helper coverage to import `findItemByRoute` directly from
+    the routing module.
+- Files changed:
+  - `src/client/routing.ts`
+  - `src/client/state.ts`
+  - `test/state-route.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Pure item-route helpers should live in `src/client/routing.ts`; keep
+    state management code in `state.ts` and route matching code in the helper
+    module.
 ---

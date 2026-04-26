@@ -1,10 +1,12 @@
 import { signal } from '@preact/signals'
+import type { Signal } from '@preact/signals'
 import { test } from '@substrate-system/tapzero'
-import {
-    type AppState,
-    type Item,
-    findItemByRoute
-} from '../src/client/state.js'
+import type { Item } from '../src/client/db/types.js'
+import { findItemByRoute } from '../src/client/routing.js'
+
+type RouteState = {
+    items:Signal<Item[]>
+}
 
 function item (
     id:number,
@@ -42,7 +44,7 @@ test('findItemByRoute returns exact match for overlapping paths', t => {
                 'Exact Item'
             )
         ])
-    } as AppState
+    } as RouteState
 
     const result = findItemByRoute(state, '/post/example.com/posts/item')
 
