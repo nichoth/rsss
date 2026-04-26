@@ -21,6 +21,7 @@ import './session-cookie.js'
 import './feed-cache-column.js'
 import './do-migrations.js'
 import './header-component.js'
+import './sqlite-worker.js'
 
 test('all done', () => {
     if (window) {

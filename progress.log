@@ -75,6 +75,11 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **SQLite worker bridge testing**: Keep the mockable
+  `SQLiteWorkerClient` separate from the Vite-specific worker factory that
+  uses `new URL(..., import.meta.url)`. Browser-bundled tapout tests can
+  import the client without esbuild `import.meta` warnings, while app code can
+  import the factory for lazy worker packaging.
 - **Client routing helpers**: Pure item-route helpers live in
   `src/client/routing.ts` and use canonical `Item` types from
   `src/client/db/types.ts`. `state.ts` re-exports these helpers for legacy
@@ -1325,4 +1330,36 @@ Thread: https://ampcode.com/threads/unknown
 - **Learnings for future iterations:**
   - Static route documentation regressions can live in focused `.mjs` tests
     and should be added to `test/run-all-tests.mjs`.
+---
+
+## 2026-04-26 13:55 PDT - US-058
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added the SQLite worker message bridge.
+  - Added typed request/response protocol definitions for worker `open`,
+    `exec`, `query`, and `close` messages.
+  - Added a promise-based `SQLiteWorkerClient` that resolves responses by
+    request id and propagates worker response errors and worker crash errors.
+  - Added a Vite-specific factory that creates the SQLite module worker
+    lazily, keeping the testable client free of `import.meta` bundling noise.
+  - Added a SQLite worker module that initializes `@sqlite.org/sqlite-wasm`
+    inside the worker and handles `open`, `exec`, `query`, and `close`.
+  - Added focused mocked-worker tests and wired them into the browser bundle
+    test set.
+- Files changed:
+  - `src/client/db/sqlite-worker-protocol.ts`
+  - `src/client/db/sqlite-worker-client.ts`
+  - `src/client/db/sqlite-worker-factory.ts`
+  - `src/client/db/sqlite-worker.ts`
+  - `test/sqlite-worker.ts`
+  - `test/index.ts`
+  - `package.json`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Keep `SQLiteWorkerClient` mockable and separate from the Vite worker
+    factory so focused tapout tests do not trip esbuild `import.meta`
+    warnings.
+  - Worker protocol types live in `sqlite-worker-protocol.ts`; reuse those
+    for future worker-backed DB calls rather than adding ad hoc message
+    shapes.
 ---
