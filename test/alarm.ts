@@ -10,7 +10,6 @@ interface FeedRow {
     last_fetched:string|null
     created_at:string
     updated_at:string
-    is_locally_cached:number
 }
 
 interface QueryResult {
@@ -38,8 +37,7 @@ function createFeed (id:number, url = `https://example.com/${id}.xml`) {
         site_url: null,
         last_fetched: null,
         created_at: '2026-04-26 00:00:00',
-        updated_at: '2026-04-26 00:00:00',
-        is_locally_cached: 1
+        updated_at: '2026-04-26 00:00:00'
     }
 }
 

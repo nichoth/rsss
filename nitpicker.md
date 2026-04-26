@@ -258,7 +258,7 @@ Also, on Resend transient failure, `sendOnce` throws — the caller catches and 
 
 The column is created, migrated in, has a PATCH endpoint to toggle it, but **nothing reads it**. No client UI, no sync filter, no documentation of intent. Either commit to it and ship it, or rip it out. Half-finished schema columns rot.
 
-* [ ] complete
+* [x] complete
 
 ### 22. `getItemByRoute` matches on `LIKE %route%` and returns the first hit; cross-feed collisions return wrong item
 **File**: `src/server/durable-objects/index.ts:376–416`, `src/client/db/local-adapter.ts:185–209`

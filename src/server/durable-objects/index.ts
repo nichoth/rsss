@@ -32,7 +32,6 @@ interface Feed {
     last_status:number|null
     created_at:string
     updated_at:string
-    is_locally_cached:number
 }
 
 type XmlValue = string | number | boolean | null | XmlObject | XmlValue[]
@@ -86,11 +85,10 @@ export class UserDO extends DurableObject<Env> {
         // 1. Create tables (shared schema)
         this.sql.exec(TABLES_SQL)
 
-        // 2. Server-only migrations: backfill updated_at and is_locally_cached
-        // on rows that existed before those columns were added.
+        // 2. Server-only migrations: backfill columns on rows that existed
+        // before those columns were added.
         // Must run after table creation but before updated_at indexes.
         this.migrateAddUpdatedAt()
-        this.migrateAddIsLocallyCached()
         this.migrateAddFeedFailureColumns()
 
         // 3. Create indexes and triggers (shared schema) - idempotent
@@ -125,19 +123,6 @@ export class UserDO extends DurableObject<Env> {
             this.sql.exec('ALTER TABLE items ADD COLUMN updated_at TEXT')
             this.sql.exec('UPDATE items SET updated_at = COALESCE(created_at, ' +
                 " datetime('now'))")
-        }
-    }
-
-    /**
-     * Migration: Add is_locally_cached column to feeds table
-     */
-    private migrateAddIsLocallyCached () {
-        const columns = this.sql.exec('PRAGMA table_info(feeds)').toArray()
-        const hasColumn = columns.some((col: unknown) =>
-            (col as { name: string }).name === 'is_locally_cached'
-        )
-        if (!hasColumn) {
-            this.sql.exec('ALTER TABLE feeds ADD COLUMN is_locally_cached INTEGER DEFAULT 1')
         }
     }
 
@@ -281,28 +266,6 @@ export class UserDO extends DurableObject<Env> {
             }
 
             return c.json({ feed })
-        })
-
-        // Update a feed (e.g. toggle caching)
-        app.patch('/feeds/:id', async (c) => {
-            const id = parseInt(c.req.param('id'))
-            const body = await c.req.json<{ is_locally_cached?: boolean }>()
-
-            const feed = this.sql.exec('SELECT id FROM feeds WHERE id = ?', id).one()
-            if (!feed) {
-                return c.json({ error: 'Feed not found' }, 404)
-            }
-
-            if (body.is_locally_cached !== undefined) {
-                this.sql.exec(
-                    'UPDATE feeds SET is_locally_cached = ? WHERE id = ?',
-                    body.is_locally_cached ? 1 : 0,
-                    id
-                )
-            }
-
-            const updated = this.sql.exec('SELECT * FROM feeds WHERE id = ?', id).one()
-            return c.json({ feed: updated })
         })
 
         // Delete a feed

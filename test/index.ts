@@ -11,6 +11,7 @@ import './api-router.js'
 import './alarm.js'
 import './autumn-billing.js'
 import './email.js'
+import './feed-cache-column.js'
 
 test('all done', () => {
     if (window) {

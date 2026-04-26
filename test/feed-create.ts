@@ -10,7 +10,6 @@ interface FeedRow {
     last_fetched:string|null
     created_at:string
     updated_at:string
-    is_locally_cached:number
 }
 
 function result (rows:unknown[]) {
@@ -46,8 +45,7 @@ function createFeedSql () {
                     site_url: null,
                     last_fetched: null,
                     created_at: '2026-04-26 00:00:00',
-                    updated_at: '2026-04-26 00:00:00',
-                    is_locally_cached: 1
+                    updated_at: '2026-04-26 00:00:00'
                 })
                 return result([])
             }

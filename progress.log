@@ -58,6 +58,9 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Local content caching scope**: Feed-level local caching is not supported.
+  Use the local-first `storeContent` setting for article content storage;
+  do not add `is_locally_cached` or per-feed cache toggles.
 - **Autumn subscription status narrowing**: `verifySubscription` should
   treat Autumn SDK statuses as untrusted runtime values and narrow them
   through a local type guard before returning app-level billing state.
@@ -681,4 +684,32 @@ Thread: https://ampcode.com/threads/unknown
     the response.
   - Browser-bundled email tests can stub `globalThis.fetch` to exercise
     Resend behavior without touching the network.
+---
+
+## 2026-04-25 23:32 PDT - US-034
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Removed the unfinished `is_locally_cached` feed
+  column path.
+  - Removed the column from the shared SQLite schema.
+  - Removed the Durable Object migration that added the column to old feed
+    tables.
+  - Removed the `PATCH /feeds/:id` endpoint that only toggled that column.
+  - Added focused regression coverage for the removed schema column and
+    route.
+- Files changed:
+  - `src/shared/schema.ts`
+  - `src/server/durable-objects/index.ts`
+  - `test/feed-cache-column.ts`
+  - `test/feed-create.ts`
+  - `test/alarm.ts`
+  - `test/index.ts`
+  - `nitpicker.md`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Feed-level local caching is not a supported feature; content storage is
+    controlled by the existing local-first `storeContent` setting instead.
+  - When removing DO route behavior, add a focused route test by constructing
+    `Object.create(UserDO.prototype)` and calling the private router through
+    a typed test shim.
 ---
