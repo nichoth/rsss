@@ -232,6 +232,14 @@ Thread: https://ampcode.com/threads/unknown
   `src/client/debug-storage.ts` for app DEBUG localStorage handling. Dev and
   staging should seed the default only when missing; production should remove
   only the app-seeded default value.
+- **OPFS persistence browser coverage**: Tapout browser tests do not provide
+  a real cross-origin-isolated OPFS environment. Use
+  `setSQLiteWorkerClientFactoryForTests` with a persistent worker-backed fake
+  for CI coverage, and keep a manual browser script for the real OPFS file
+  check.
+- **Aggregate tests with sqlite-wasm**: If a test imported through
+  `test/index.ts` imports `@sqlite.org/sqlite-wasm/sqlite3.wasm`,
+  `test/run-all-tests.mjs` must pass `--loader:.wasm=dataurl` to esbuild.
 
 ## 2026-04-26 12:19 PDT - US-050
 Thread: https://ampcode.com/threads/unknown
@@ -1463,4 +1471,30 @@ Thread: https://ampcode.com/threads/unknown
     `sqlite-init` does not need to be a Rollup input.
   - `public/client/index.html` should only reference the app entry and CSS;
     SQLite assets should appear as separate files without initial HTML tags.
+---
+
+## 2026-04-26 14:50 PDT - US-062
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added local-first OPFS persistence coverage.
+  - Added a browser-bundled test that enables local-first, bootstraps fixture
+    feed/item data, renders the UI, simulates a reload, verifies the rows are
+    still readable, then disables local-first and verifies the local DB is not
+    reopened.
+  - Added a static artifact test and wired both checks into
+    `test/run-all-tests.mjs`.
+  - Added `test/manual/local-first-opfs-persistence.js` for real browser OPFS
+    verification because tapout does not run with cross-origin isolation.
+- Files changed:
+  - `test/local-first-opfs-persistence.ts`
+  - `test/local-first-opfs-persistence-static.mjs`
+  - `test/manual/local-first-opfs-persistence.js`
+  - `test/index.ts`
+  - `test/run-all-tests.mjs`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Use `setSQLiteWorkerClientFactoryForTests` to exercise the async
+    worker-backed local DB path without requiring real OPFS in tapout.
+  - Add `--loader:.wasm=dataurl` to the aggregate browser bundle whenever
+    `test/index.ts` imports sqlite-wasm-backed tests.
 ---

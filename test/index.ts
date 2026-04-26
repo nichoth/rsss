@@ -22,6 +22,7 @@ import './feed-cache-column.js'
 import './do-migrations.js'
 import './header-component.js'
 import './sqlite-worker.js'
+import './local-first-opfs-persistence.js'
 
 test('all done', () => {
     if (window) {

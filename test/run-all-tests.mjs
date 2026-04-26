@@ -7,12 +7,14 @@ const commands = [
     'node test/routes-oauth-callback-static.mjs',
     'node test/sidebar-static.mjs',
     'node test/server-routing-static.mjs',
+    'node test/local-first-opfs-persistence-static.mjs',
     'node test/vite-build-inputs.mjs',
     'node test/vite-isolation-headers.mjs',
     [
         'esbuild ./test/index.ts --bundle',
         '--alias:cloudflare:workers=./test/cloudflare-workers-stub.ts',
         '--loader:.css=text',
+        '--loader:.wasm=dataurl',
         '| tapout'
     ].join(' ')
 ]
