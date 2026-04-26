@@ -59,7 +59,33 @@
 - **Pending outbox pull protection**: `pullSync` skips server rows covered by
   pending outbox operations (`update_item`, `mark_all_read`, `add_feed`,
   `delete_feed`) so stale pulls cannot overwrite local optimistic writes.
+- **Optimistic feed ID reconciliation**: On successful `add_feed` push,
+  delete the optimistic local feed row before upserting the server feed row.
+  Do this in one transaction because `feeds.url` is unique.
 
+---
+
+## 2026-04-25 22:11 PDT - US-023
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Reconciled optimistic feed insert IDs after
+  successful `add_feed` outbox pushes.
+  - `pushSync` now parses the `{ feed }` body on `add_feed` 2xx responses,
+    deletes the optimistic local row, upserts the server feed row, and deletes
+    the outbox row in one transaction.
+  - Added a focused regression test that adds a feed locally, simulates a
+    server response with a different canonical ID, and verifies only the
+    server-ID row remains.
+- Files changed:
+  - `src/client/db/push-sync.ts`
+  - `test/push-sync.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `add_feed` is different from the other 2xx outbox operations because the
+    local optimistic ID is not authoritative; successful pushes must reconcile
+    against the server's `{ feed }` response.
+  - Delete the optimistic feed before upserting the server feed so the unique
+    `feeds.url` constraint does not reject the canonical row.
 ---
 
 ## 2026-04-25 22:06 PDT - US-022

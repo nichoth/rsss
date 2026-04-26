@@ -10,6 +10,7 @@ import {
     pushSync,
     PushSyncAuthError
 } from '../src/client/db/push-sync.js'
+import { createLocalAdapter } from '../src/client/db/local-adapter.js'
 import type { Sqlite3Db } from '../src/client/db/sqlite-init.js'
 
 setTestMode(true, wasmUrl as string)
@@ -131,6 +132,46 @@ test('pushSync: happy path deletes outbox row on 2xx', async (t) => {
 
         const row = queryOne(db, 'SELECT * FROM outbox WHERE id IS NOT NULL')
         t.equal(row, undefined, 'outbox row deleted on 2xx')
+    } finally {
+        db.close()
+    }
+})
+
+test('pushSync: add_feed 2xx replaces optimistic feed ID', async (t) => {
+    const db = await openLocalDb('did:test:push-add-feed-id')
+    try {
+        const adapter = createLocalAdapter(db)
+        const optimisticFeed = await adapter.addFeed(
+            'https://example.com/canonical.xml'
+        )
+        const serverFeed = {
+            id: optimisticFeed.id + 100,
+            url: 'https://example.com/canonical.xml',
+            title: 'Canonical Feed',
+            description: null,
+            site_url: 'https://example.com',
+            last_fetched: '2026-01-03 00:00:00',
+            created_at: '2026-01-03 00:00:00',
+            updated_at: '2026-01-03 00:00:00'
+        }
+
+        await pushSync(db, makeFetch(201, { feed: serverFeed }))
+
+        const feeds = queryAll<{ id:number; title:string|null }>(
+            db,
+            `SELECT id, title
+             FROM feeds
+             WHERE url = ?
+             ORDER BY id ASC`,
+            ['https://example.com/canonical.xml']
+        )
+
+        t.equal(feeds.length, 1, 'only one feed row remains')
+        t.equal(feeds[0]?.id, serverFeed.id, 'server feed ID is stored')
+        t.equal(feeds[0]?.title, 'Canonical Feed', 'server row is upserted')
+
+        const outboxRows = queryAll(db, 'SELECT * FROM outbox')
+        t.equal(outboxRows.length, 0, 'outbox row deleted after reconcile')
     } finally {
         db.close()
     }

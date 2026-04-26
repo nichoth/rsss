@@ -98,6 +98,36 @@ function upsertFeedFromServer (
     })
 }
 
+function extractFeed (
+    body:unknown
+):Record<string, unknown>|null {
+    if (!body || typeof body !== 'object') return null
+
+    const feed = (body as Record<string, unknown>).feed
+    if (!feed || typeof feed !== 'object') return null
+
+    return feed as Record<string, unknown>
+}
+
+function reconcileSuccessfulAddFeed (
+    db:Sqlite3Db,
+    row:OutboxRow,
+    body:unknown
+):void {
+    const feed = extractFeed(body)
+    if (!feed || typeof feed.id !== 'number') {
+        throw new Error('pushSync: add_feed response missing feed')
+    }
+
+    if (row.target_id !== null) {
+        db.exec({
+            sql: 'DELETE FROM feeds WHERE id = ?',
+            bind: [row.target_id]
+        })
+    }
+    upsertFeedFromServer(db, feed)
+}
+
 function upsertItemFromServer (
     db:Sqlite3Db,
     item:Record<string, unknown>
@@ -221,6 +251,19 @@ export async function pushSync (
             })
 
             if (res.ok) {
+                if (row.op === 'add_feed') {
+                    const body = await res.json()
+                    db.exec('BEGIN')
+                    try {
+                        reconcileSuccessfulAddFeed(db, row, body)
+                        deleteOutboxRow(db, row.id)
+                        db.exec('COMMIT')
+                    } catch (err) {
+                        db.exec('ROLLBACK')
+                        throw err
+                    }
+                    continue
+                }
                 deleteOutboxRow(db, row.id)
                 continue
             }
