@@ -11,7 +11,7 @@ See [rsss.space](https://rsss.space/).
 - [Develop](#develop)
 - [Architecture](#architecture)
   * [Local First](#local-first)
-  * [Sync (remote <-> local)](#sync-remote---local)
+  * [Sync (remote local)](#sync-remote--local)
   * [Worker (Hono) - Main entry point](#worker-hono---main-entry-point)
   * [Durable Object per user (UserDO)](#durable-object-per-user-userdo)
   * [Frontend](#frontend)
@@ -20,6 +20,8 @@ See [rsss.space](https://rsss.space/).
 - [Deploy](#deploy)
 - [Notes](#notes)
   * [Generate a Secret](#generate-a-secret)
+  * [Local Durable Object](#local-durable-object)
+  * [Storage use vs quota](#storage-use-vs-quota)
 
 <!-- tocstop -->
 

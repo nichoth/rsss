@@ -293,6 +293,758 @@
       "priority": 18,
       "passes": true,
       "notes": ""
+    },
+    {
+      "id": "US-019",
+      "title": "SSRF: validate feed URLs before fetching",
+      "description": "As a developer, I need to validate user-supplied feed URLs to prevent SSRF and unbounded fetches.",
+      "acceptanceCriteria": [
+        "Validate `new URL(feedUrl).protocol` is 'http:' or 'https:' before calling fetch; reject with 400 otherwise",
+        "Reject URLs whose hostname resolves to localhost, 127.*, 0.0.0.0, ::1, *.local with 400",
+        "Add `signal: AbortSignal.timeout(15_000)` to all feed fetch calls in `src/server/durable-objects/index.ts`",
+        "Cap response body at 5MB: read via streaming reader, abort and discard if limit exceeded",
+        "Tests cover: valid URL accepted, non-http scheme rejected, localhost rejected, oversized body aborted",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-020",
+      "title": "Multi-tab OPFS coordination via BroadcastChannel",
+      "description": "As a user, I want opening a second tab to degrade gracefully instead of silently hanging or corrupting the primary tab's database.",
+      "acceptanceCriteria": [
+        "On OPFS SAH pool acquisition failure, explicitly detect the exclusive-lock error and surface 'local data is open in another tab' in the UI",
+        "Second tab falls back to remoteAdapter rather than spinning or showing a generic error",
+        "A BroadcastChannel ('rsss-tab') is used so subsequent tabs detect the primary and skip `openLocalDb`",
+        "Closing the primary tab broadcasts a 'released' message so a waiting tab can promote itself to primary",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-021",
+      "title": "Refactor API middleware onto a sub-router",
+      "description": "As a developer, I want entitlement-gated routes on a dedicated sub-router so future routes cannot accidentally bypass auth/entitlement checks.",
+      "acceptanceCriteria": [
+        "Create a Hono sub-app `dataRouter` for all entitlement-gated routes; mount at `/api` via `app.route('/api', dataRouter)`",
+        "`dataRouter` applies `requireAuth` and `requireEntitlement` as top-level middleware so every route inherits both",
+        "Auth and billing routes (`/api/auth/*`, `/api/billing/*`) remain on the main `app` and are NOT on `dataRouter`",
+        "All existing API routes continue to respond correctly after the refactor",
+        "Typecheck passes"
+      ],
+      "priority": 21,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-022",
+      "title": "Fix push-then-pull sync ordering to preserve optimistic writes",
+      "description": "As a user, I want my optimistic local writes to survive a sync cycle without being overwritten by a stale server pull.",
+      "acceptanceCriteria": [
+        "`pushSync` runs before `pullSync` in every sync cycle so the server is up to date before the local DB is overwritten",
+        "`pullSync` skips rows referenced by pending outbox entries, OR 409 conflict resolution re-applies outbox semantics on top of the server row",
+        "Tests cover: optimistic write survives a full sync cycle, 409 conflict resolves to correct final state",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 22,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-023",
+      "title": "Reconcile optimistic feed insert ID with server-assigned ID",
+      "description": "As a user, I want adding a feed to not create duplicate rows after the server returns its canonical ID.",
+      "acceptanceCriteria": [
+        "On 2xx response from the `add_feed` outbox push, parse the server response `{ feed }` to get the canonical server ID",
+        "Delete the optimistic local-ID row and upsert the canonical server row in the same transaction",
+        "No duplicate feed rows appear in the local DB after a successful add + sync cycle",
+        "Tests cover: add feed locally, simulate push 2xx with a different server ID, assert only one row exists with the server ID",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 23,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-024",
+      "title": "Enable SQLite foreign key enforcement with PRAGMA",
+      "description": "As a developer, I need `PRAGMA foreign_keys = ON` executed after every DB open so ON DELETE CASCADE is actually enforced.",
+      "acceptanceCriteria": [
+        "`PRAGMA foreign_keys = ON;` is executed immediately after opening the DB in both `openLocalDb` (client) and the DO's `initDatabase` (server)",
+        "After enabling on the server, `DELETE FROM feeds WHERE id = ?` also removes child items rows via cascade",
+        "Typecheck passes"
+      ],
+      "priority": 24,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-025",
+      "title": "Add outbox attempt cap and dead-letter table",
+      "description": "As a user, I want a persistently failing outbox row to stop retrying after 10 attempts instead of blocking sync forever.",
+      "acceptanceCriteria": [
+        "After 10 failed attempts, move the outbox row to a `dead_letter_outbox` table (same schema as `outbox`) rather than continuing to retry",
+        "The sync status indicator shows a distinct warning when `dead_letter_outbox` has rows",
+        "Schema migration adds `dead_letter_outbox` in both local and server contexts",
+        "Tests cover: row promoted to dead_letter after 10 attempts, sync status reflects dead-letter count",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 25,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-026",
+      "title": "Replace regex feed parser with a streaming XML parser",
+      "description": "As a developer, I need the feed parser to handle real-world RSS/Atom correctly without catastrophic backtracking or namespace confusion.",
+      "acceptanceCriteria": [
+        "Install `fast-xml-parser` (or equivalent) and rewrite `parseRss` and `parseAtom` to use it instead of regex",
+        "Response body is streamed and aborted after 5MB; no `await response.text()` on unbounded input",
+        "`getTagContent` correctly handles namespaced tags such as `dc:creator` and `media:title`",
+        "Existing feed parsing tests continue to pass",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 26,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-027",
+      "title": "Make POST /feeds non-blocking using waitUntil",
+      "description": "As a user, I want adding a feed to return a 201 immediately rather than waiting up to 30 seconds for the initial fetch.",
+      "acceptanceCriteria": [
+        "`POST /feeds` inserts the feed record and returns 201 immediately",
+        "The initial `fetchFeed` call is deferred via `ctx.waitUntil(this.fetchFeed(feed))`",
+        "Items appear on the next sync cycle without the add-feed request having to wait",
+        "Typecheck passes"
+      ],
+      "priority": 27,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-028",
+      "title": "Fix alarm(): bounded concurrency, awaited rescheduling, per-feed error logging",
+      "description": "As a developer, I want alarm() to fetch feeds with bounded concurrency, persist its reschedule, and record per-feed failures.",
+      "acceptanceCriteria": [
+        "`alarm()` uses a concurrency limit of 8 (e.g. p-limit or a manual queue) instead of `Promise.all` over all feeds at once",
+        "`this.ctx.storage.setAlarm(...)` is awaited",
+        "`fetchFeed` records `last_error` and `last_status` into the feeds table row on failure instead of swallowing errors silently",
+        "Typecheck passes"
+      ],
+      "priority": 28,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-029",
+      "title": "Restrict CORS to same origin and add CSRF protection",
+      "description": "As a developer, I want the CORS configuration to match the actual auth model and prevent cross-origin state-changing requests.",
+      "acceptanceCriteria": [
+        "`cors()` is replaced or configured with an explicit `origin` matching the app's production URL rather than `*`",
+        "State-changing routes (POST, PATCH, DELETE) check the `Origin` or `Sec-Fetch-Site` header and reject cross-origin requests with 403, OR session cookies are upgraded to `SameSite=Strict`",
+        "All existing same-origin API calls continue to work",
+        "Typecheck passes"
+      ],
+      "priority": 29,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-030",
+      "title": "Fix COEP iframe compatibility for GitHub sponsor buttons",
+      "description": "As a user, I want sponsor iframes to load correctly under cross-origin isolation without being silently blocked.",
+      "acceptanceCriteria": [
+        "Switch `Cross-Origin-Embedder-Policy` from `require-corp` to `credentialless` in both `src/server/isolation-headers.ts` and `vite.config.js`, OR remove GitHub iframes and replace with plain anchor links",
+        "`crossOriginIsolated` still returns `true` in the browser after the change (OPFS still works)",
+        "Sponsor content loads without being blocked in Chromium and recent Firefox",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 30,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-031",
+      "title": "Narrow verifySubscription return type to a string union",
+      "description": "As a developer, I want the subscription status to be a narrowed union type so future SDK changes surface as type errors rather than silent misclassification.",
+      "acceptanceCriteria": [
+        "`VerifiedSubscription` interface has `status: 'active' | 'scheduled'` rather than `status: string`",
+        "`verifySubscription` performs explicit narrowing: returns `null` for any status not in the known union",
+        "The `as 'active'|'scheduled'` cast in `src/server/index.ts` is removed",
+        "Typecheck passes"
+      ],
+      "priority": 31,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-032",
+      "title": "Standardize SQLite timestamp format across client and server",
+      "description": "As a developer, I want all timestamps to use the same string format so pull-sync comparisons are correct.",
+      "acceptanceCriteria": [
+        "Add a `formatSqliteTs(date: Date): string` helper that produces `'YYYY-MM-DD HH:MM:SS'` (space separator, no milliseconds, no Z)",
+        "`addFeed` in `src/client/db/local-adapter.ts` uses `formatSqliteTs(new Date())` instead of `new Date().toISOString()`",
+        "All other client-side timestamp writes use `datetime('now')` or `formatSqliteTs` consistently; no ISO-format strings remain",
+        "Tests assert timestamps written by `addFeed` sort correctly against server-returned timestamps",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 32,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-033",
+      "title": "Fix email dedupe key epoch and add retry on transient send failure",
+      "description": "As a user, I want billing emails to be sent reliably and not incorrectly suppressed on re-subscriptions within the same week.",
+      "acceptanceCriteria": [
+        "Dedupe key includes a coarse weekly epoch (e.g. `Math.floor(Date.now() / (7*24*60*60*1000))`) so re-subscriptions in a new week always get a fresh key",
+        "On transient Resend failure (5xx or network error), `sendOnce` schedules one retry via `ctx.waitUntil` with a short delay instead of silently dropping the send",
+        "If the retry also fails, the error is logged with enough context to diagnose",
+        "Typecheck passes"
+      ],
+      "priority": 33,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-034",
+      "title": "Resolve is_locally_cached column: fully ship or remove",
+      "description": "As a developer, I want the is_locally_cached column to be either fully implemented with UI and sync wiring, or removed entirely.",
+      "acceptanceCriteria": [
+        "Either: add a UI control to toggle `is_locally_cached`, wire it into pull-sync as a filter for content storage, and document the feature",
+        "Or: remove the `is_locally_cached` column from the schema, its migration, and the PATCH endpoint that toggles it",
+        "No half-finished references to `is_locally_cached` remain after the chosen path",
+        "Typecheck passes"
+      ],
+      "priority": 34,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-035",
+      "title": "Fix getItemByRoute and findItemByRoute to use exact link matching",
+      "description": "As a user, I want article routing to always resolve to the correct item even when multiple feeds share similar URL paths.",
+      "acceptanceCriteria": [
+        "`getItemByRoute` in the DO uses `WHERE items.link = ?` with a short list of normalized forms (trailing slash, https vs http) instead of `LIKE %candidate%`",
+        "`findItemByRoute` in `src/client/state.ts` compares `item.link` with exact or normalized equality rather than `item.link?.includes(itemRoute)`",
+        "Both helpers try normalized forms in order: exact, trailing-slash variant, scheme-swap; no substring matching",
+        "Tests cover: two feeds with overlapping URL paths, assert the correct item is returned",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 35,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-036",
+      "title": "Complete the README Deploy section",
+      "description": "As a developer, I want the README to document all required environment variables and deployment verification steps so a fresh deploy succeeds without guessing.",
+      "acceptanceCriteria": [
+        "README lists all required env vars: `ADMIN_TOKEN`, `SESSION_SECRET`, `OAUTH_CLIENT_ID`, `AUTUMN_SECRET_KEY`, `RESEND_API_KEY`, `RESEND_FROM`",
+        "README includes post-deploy verification steps referencing `/api/health` and `/oauth/client-metadata.json`",
+        "README documents how to rotate `SESSION_SECRET` and the impact on active sessions",
+        "README notes the `compatibility_flags: nodejs_compat` requirement and where to set KV `preview_id` for `wrangler dev`",
+        "`wrangler kv namespace create SESSIONS` (no colon) replaces any deprecated colon-form command throughout the README",
+        "Typecheck passes"
+      ],
+      "priority": 36,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-037",
+      "title": "Cache DO migration state to skip re-introspection on wakeup",
+      "description": "As a developer, I want the DO constructor to skip migration introspection when the schema is already current.",
+      "acceptanceCriteria": [
+        "After running migrations, write `{ migration_v: <N> }` to DO storage",
+        "On constructor, read the stored version; if it matches the current version, skip `PRAGMA table_info` and ALTER TABLE checks",
+        "Incrementing the target migration version triggers a fresh introspection and migration run",
+        "Typecheck passes"
+      ],
+      "priority": 37,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-038",
+      "title": "Remove redundant localStorage user state duplication",
+      "description": "As a developer, I want to eliminate the unused USER_STORAGE_KEY write to localStorage to avoid confusion about what is authoritative.",
+      "acceptanceCriteria": [
+        "Remove all writes to `localStorage` under `USER_STORAGE_KEY` in `src/client/state.ts`",
+        "Remove the `USER_STORAGE_KEY` constant if it has no readers other than the removed writes",
+        "No behavior change for end users",
+        "Typecheck passes"
+      ],
+      "priority": 38,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-039",
+      "title": "Consolidate Feed and Item type definitions to a single source of truth",
+      "description": "As a developer, I want one canonical Feed and Item interface so both client state and DB code import from the same place.",
+      "acceptanceCriteria": [
+        "`src/client/db/types.ts` is the single source of truth for `Feed` and `Item` interfaces",
+        "`src/client/state.ts` removes its own `Feed`/`Item` type definitions and imports from `db/types.ts`",
+        "Any missing fields (e.g. `updated_at`) are reconciled in `db/types.ts`",
+        "No duplicate type definitions remain across the client codebase",
+        "Typecheck passes"
+      ],
+      "priority": 39,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-040",
+      "title": "Fix DEBUG localStorage seeding to not overwrite user customizations",
+      "description": "As a developer, I want the DEBUG namespace to be seeded only once and not overwritten on every page load.",
+      "acceptanceCriteria": [
+        "`src/client/index.ts` only writes the default DEBUG value if `localStorage.getItem('DEBUG')` is null",
+        "In production, the DEBUG key is removed only if it matches the dev default value, not user-customized values",
+        "Typecheck passes"
+      ],
+      "priority": 40,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-041",
+      "title": "Fix sync status UI flicker with a single sync orchestrator",
+      "description": "As a user, I want the sync badge to not briefly flash '0 pending' between the pull and push phases of a sync cycle.",
+      "acceptanceCriteria": [
+        "Extract a `runSync()` function (e.g. in `src/client/db/sync.ts`) that runs `pushSync` then `pullSync` sequentially and calls `setSyncDone` once at the end",
+        "`setSyncDone` is not called between push and pull, only after both complete",
+        "All callers of the sync cycle use `runSync()` instead of calling push/pull separately",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 41,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-042",
+      "title": "Guard State effect against double-fire on auth change",
+      "description": "As a developer, I want the bootstrap/load effect in State() to not run twice when checkAuth emits two rapid signal changes.",
+      "acceptanceCriteria": [
+        "Add a generation counter or in-flight flag in `State()` that prevents the effect body from running concurrently with itself",
+        "If `checkAuth` sets user to null then immediately to a value, the bootstrap runs once for the final value",
+        "Typecheck passes"
+      ],
+      "priority": 42,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-043",
+      "title": "Handle 401 in pull-sync with a typed auth error",
+      "description": "As a user, I want a session expiry detected during pull-sync to show a re-login prompt instead of a generic sync error.",
+      "acceptanceCriteria": [
+        "`pullSync` throws a typed `PullSyncAuthError` on 401 responses, matching the pattern of `PushSyncAuthError`",
+        "The sync orchestrator catches `PullSyncAuthError` and triggers the same re-auth UI flow used for push-sync",
+        "Generic non-2xx errors still result in a 'Sync error' status message",
+        "Typecheck passes"
+      ],
+      "priority": 43,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-044",
+      "title": "Fix getOrCreateCustomer to return and use the customer email",
+      "description": "As a developer, I want getOrCreateCustomer to thread the customer email through so resolveContactEmail is not needed for data already at hand.",
+      "acceptanceCriteria": [
+        "`getOrCreateCustomer` returns `{ customerId:string, email:string }` (or equivalent)",
+        "The caller in `src/server/index.ts` uses the returned `email` instead of making a redundant `resolveContactEmail` call",
+        "Typecheck passes"
+      ],
+      "priority": 44,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-045",
+      "title": "Use URL-safe base64 consistently in session cookie encoding",
+      "description": "As a developer, I want both the payload and signature in the session cookie to use URL-safe base64 so the cookie is safe in all transport contexts.",
+      "acceptanceCriteria": [
+        "`createSessionCookie` encodes `payloadB64` with the same `base64UrlEncode` helper used for the signature, replacing `btoa`",
+        "`verifySessionCookie` decodes `payloadB64` with `base64UrlDecode` to match",
+        "Existing session cookie tests are updated and pass with the new encoding",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 45,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-046",
+      "title": "Add missing test coverage for OAuth, billing, email, and DO handlers",
+      "description": "As a developer, I want critical paths that are currently untested to have at least basic coverage.",
+      "acceptanceCriteria": [
+        "Tests cover `createSessionCookie` / `verifySessionCookie` round-trip and tampered-signature rejection",
+        "Tests cover `verifySubscription` with a mocked Autumn client: active, scheduled, and unknown status",
+        "Tests cover email dedupe with a mocked KV: first send goes through, second within the window is suppressed",
+        "Tests cover the DO's `POST /feeds`, `GET /feeds`, and `POST /feeds/:id/refresh` handlers via an in-process harness",
+        "Tests cover the exact-link `getItemByRoute` logic from US-035",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 46,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-047",
+      "title": "Add GitHub Actions CI configuration",
+      "description": "As a developer, I want tests and typechecks to run automatically on pull requests so failures block merges.",
+      "acceptanceCriteria": [
+        "Add `.github/workflows/ci.yml` that runs `npm test` and `npm run typecheck` on push and pull_request events targeting `main`",
+        "Workflow uses the Node.js version matching the project's engines field or `.nvmrc`",
+        "A failing test or typecheck causes the workflow to exit non-zero",
+        "Typecheck passes"
+      ],
+      "priority": 47,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-048",
+      "title": "Fix online/offline event listener leak in State()",
+      "description": "As a developer, I want the online/offline listeners added in State() to be removable so tests and hot-reload do not accumulate them.",
+      "acceptanceCriteria": [
+        "`State()` returns a `cleanup` function that calls `removeEventListener` for the `online` and `offline` handlers it registered",
+        "`src/client/index.ts` holds a reference to the cleanup function for module teardown",
+        "Typecheck passes"
+      ],
+      "priority": 48,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-049",
+      "title": "Add security attributes to Header component iframes",
+      "description": "As a developer, I want embedded iframes to carry sandbox, loading, and referrerpolicy attributes to limit their capabilities.",
+      "acceptanceCriteria": [
+        "All iframes in `src/client/components/header.ts` have `sandbox='allow-scripts allow-same-origin'` (or stricter)",
+        "All iframes have `loading='lazy'` and `referrerpolicy='no-referrer'`",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 49,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-050",
+      "title": "Honor pushSync errors in the disable/reset local-first flow",
+      "description": "As a user, I want to be warned and given a choice if unsynced changes cannot be uploaded before my local data is deleted.",
+      "acceptanceCriteria": [
+        "`disableLocalFirst` awaits `pushSync()` without swallowing errors; on failure it shows an error and aborts the disable rather than wiping data",
+        "`resetLocalFirst` similarly awaits `pushSync()`; on failure it surfaces the error and aborts unless the user explicitly confirms they accept data loss",
+        "UI text accurately reflects the behavior: e.g. 'sync will run first; if it fails, the reset will be cancelled'",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 50,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-051",
+      "title": "Remove dead code",
+      "description": "As a developer, I want unused exports and commented-out code removed to reduce maintenance surface.",
+      "acceptanceCriteria": [
+        "Remove commented-out `getAttr` in `parseRss` (lines ~730-734 of `src/server/durable-objects/index.ts`)",
+        "Remove `generateSessionToken` if it has no callers outside its module",
+        "Remove unused `_state` parameters from `loadBillingStatus`, `signalCheckoutFailed`, and `openCustomerPortal` in `state.ts`",
+        "Typecheck passes after removals"
+      ],
+      "priority": 51,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-052",
+      "title": "Fix minor type-safety issues in the client",
+      "description": "As a developer, I want small type-unsafe patterns corrected so the codebase compiles cleanly with no unsafe casts.",
+      "acceptanceCriteria": [
+        "`els.namedItem('new-feed-url') as HTMLInputElement` replaces the untyped `els['new-feed-url']` index in `src/client/components/sidebar.ts`",
+        "Typecheck passes"
+      ],
+      "priority": 52,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-053",
+      "title": "Remove internal DO CORS and deduplicate health routes",
+      "description": "As a developer, I want pointless CORS middleware on the internal DO router and duplicate health route registrations removed.",
+      "acceptanceCriteria": [
+        "Remove `cors()` from the Hono app inside the Durable Object (`src/server/durable-objects/index.ts`) since the DO is only reached via service binding, not a browser",
+        "Remove one of the two health check route registrations from `src/server/index.ts` (`/health` or `/api/health`); update any docs referencing the removed path",
+        "Typecheck passes"
+      ],
+      "priority": 53,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-054",
+      "title": "Fix parseInt calls to include explicit radix 10",
+      "description": "As a developer, I want all parseInt calls to explicitly pass radix 10 to satisfy lint rules and make intent clear.",
+      "acceptanceCriteria": [
+        "All `parseInt(...)` calls in `src/server/durable-objects/index.ts` include `, 10` as the second argument",
+        "Typecheck passes"
+      ],
+      "priority": 54,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-055",
+      "title": "Fix README wrangler command syntax and email relative URLs",
+      "description": "As a developer, I want the README to use the current wrangler CLI syntax and email templates to use absolute URLs.",
+      "acceptanceCriteria": [
+        "Replace `wrangler kv:namespace create` with `wrangler kv namespace create` (no colon) in the README",
+        "Replace the relative `/settings` href in `src/server/email.ts` text/HTML with an absolute URL built from `baseUrl`",
+        "Typecheck passes"
+      ],
+      "priority": 55,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-056",
+      "title": "Extract routing helpers from state.ts into a routing.ts module",
+      "description": "As a developer, I want pure routing helpers separated from state management so state.ts is smaller and types are easier to consolidate.",
+      "acceptanceCriteria": [
+        "New file `src/client/routing.ts` exports `routeToItemRoute` and `findItemByRoute`",
+        "`src/client/state.ts` imports these from `routing.ts` and removes its own definitions",
+        "The canonical `Feed`/`Item` types from US-039 are used in `routing.ts`",
+        "All existing route-to-item resolution continues to work correctly",
+        "Typecheck passes"
+      ],
+      "priority": 56,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-057",
+      "title": "Add clarifying comment for async OAuth callback routing",
+      "description": "As a developer, I want a brief comment in routes/index.ts explaining the async control flow after handleOAuthCallback so future readers are not confused.",
+      "acceptanceCriteria": [
+        "A comment at lines ~47-61 in `src/client/routes/index.ts` explains that `handleOAuthCallback` is async, makes a network call, and may change the active route after the initial `LoginPage` render",
+        "Comment is one or two sentences and does not repeat what the code already says",
+        "Typecheck passes"
+      ],
+      "priority": 57,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-058",
+      "title": "Add SQLite worker message bridge",
+      "description": "As a developer, I want a dedicated SQLite worker with a typed promise-based message bridge so browser SQLite work can run off the main thread.",
+      "acceptanceCriteria": [
+        "Add a SQLite worker module under `src/client/db/` that initializes `@sqlite.org/sqlite-wasm` inside the worker",
+        "Add a main-thread client helper that sends typed request messages and resolves or rejects promises from worker responses",
+        "The worker supports at least `open`, `exec`, `query`, and `close` messages needed by the existing local DB code",
+        "Worker errors are propagated to callers with useful messages",
+        "Tests cover successful request/response flow and worker error propagation using a mocked worker",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 58,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-059",
+      "title": "Move local DB open and schema setup into the SQLite worker",
+      "description": "As a developer, I want `openLocalDb` to open the OPFS-backed SQLite database through the worker so OPFS persistence uses the correct browser context.",
+      "acceptanceCriteria": [
+        "`openLocalDb(did)` delegates production database opening to the SQLite worker instead of constructing the sqlite DB directly on the main thread",
+        "The worker opens the per-user OPFS database file and runs `SCHEMA_SQL`, `OUTBOX_SQL`, and `SYNC_META_SQL` idempotently",
+        "Test mode can still use an in-memory database for unit tests without requiring OPFS",
+        "Existing local adapter, pull-sync, push-sync, and bootstrap tests continue to pass",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 59,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-060",
+      "title": "Detect OPFS support from the SQLite worker",
+      "description": "As a user, I want local-first to enable only when the worker can actually open an OPFS-backed SQLite database.",
+      "acceptanceCriteria": [
+        "`isLocalFirstSupported()` consults the SQLite worker or a worker-backed probe before returning true",
+        "The probe checks `navigator.storage.getDirectory` and confirms the selected SQLite VFS is available",
+        "The probe does not rely on main-thread-only `globalThis.FileSystemSyncAccessHandle` checks",
+        "When the worker probe fails, `getAdapter(did)` returns `remoteAdapter` and settings show local storage as unavailable",
+        "Tests cover supported, unsupported, and worker-open-failure cases",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 60,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-061",
+      "title": "Remove sqlite-init from default Vite build inputs",
+      "description": "As a user who does not enable local-first, I do not want SQLite WASM or its worker assets loaded on the initial app path.",
+      "acceptanceCriteria": [
+        "Remove `sqlite-init` as a standalone Vite build input unless a documented worker packaging requirement needs it",
+        "A fresh app load with local-first disabled does not request sqlite-wasm assets in the browser network panel",
+        "After enabling local-first, the SQLite worker and WASM assets are requested lazily",
+        "`npm run build` emits worker and WASM assets without adding SQLite to the initial entry bundle",
+        "Document the chunk-inspection command or steps in a short code comment or docs note",
+        "Typecheck passes"
+      ],
+      "priority": 61,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-062",
+      "title": "Add browser test for OPFS persistence across reload",
+      "description": "As a user, I want data synced to local-first storage to survive reloads and remain readable from SQLite.",
+      "acceptanceCriteria": [
+        "Add a browser test that enables local-first, bootstraps fixture feed/item data, and verifies the data appears in the UI",
+        "The test reloads the page and verifies feeds and items still render from the local SQLite DB",
+        "The test verifies a reload does not trigger a full bootstrap when local data already exists",
+        "The test disables local-first and verifies the local OPFS database is removed or no longer opened",
+        "If the test cannot run reliably in CI, document the reason and provide a manual browser verification script",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 62,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-063",
+      "title": "Refresh UI state after online sync completes",
+      "description": "As a user, I want feeds, counts, item lists, and the open reader item to reflect the latest local database state after coming back online.",
+      "acceptanceCriteria": [
+        "After the online-event sync cycle completes, `State.loadFeeds`, `State.loadItems`, and `State.loadCounts` run against the active adapter",
+        "If a route item is open, the route item is reloaded after sync completes",
+        "Pull and push errors update sync status without clearing existing local data from the UI",
+        "Pending outbox count is refreshed after every push attempt",
+        "Tests cover online-event sync followed by feeds/items/counts reload",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 63,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-064",
+      "title": "Document or implement idempotent client_op_id handling",
+      "description": "As a developer, I want outbox retries to be safe so duplicate network attempts do not create duplicate feeds or conflicting state.",
+      "acceptanceCriteria": [
+        "Every outbox operation sent by `pushSync` includes `client_op_id` in the request body",
+        "Either server mutating endpoints store and deduplicate processed `client_op_id` values, or a docs note explains why current row and URL constraints are sufficient for v1",
+        "Conflict responses for feed, item, and mark-all-read operations return authoritative data in a consistent documented shape",
+        "Client 409 handling upserts the authoritative server data and clears the matching outbox row",
+        "Tests cover duplicate add-feed retry and one item update conflict path",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 64,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-065",
+      "title": "Define and enforce content storage toggle behavior",
+      "description": "As a user, I want the store-content toggle to behave predictably when I turn it on or off.",
+      "acceptanceCriteria": [
+        "Decide whether disabling `storeContent` purges existing local item `content` and `description` values or only affects future pulls",
+        "If disabling purges content, implement the local SQL cleanup when the toggle is turned off",
+        "If disabling affects only future pulls, update settings copy or docs to state that existing stored content remains until reset",
+        "Reader route fetches missing content from the server when online and content is absent locally",
+        "Offline reader state with missing content renders a non-crashing empty or unavailable state",
+        "Tests cover `storeContent` true, false, and toggled-off behavior",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 65,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-066",
+      "title": "Handle local SQLite open, quota, and corruption failures",
+      "description": "As a user, I want a clear recovery path when the local SQLite database cannot be opened or written.",
+      "acceptanceCriteria": [
+        "Local DB open failures are classified into unavailable, locked, quota, corruption, or unknown error categories when possible",
+        "Quota errors show an actionable settings error instead of silently falling back",
+        "Corrupt or incompatible local DB errors expose a reset-local-data path",
+        "Reset closes the SQLite worker DB handle before removing the OPFS database file",
+        "Failed bootstrap reverts the toggle, clears in-memory adapter state, and removes partial local data",
+        "Tests cover failed open, failed bootstrap, and reset after failure",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 66,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-067",
+      "title": "Reconcile local-first PWA and SQLite documentation",
+      "description": "As a developer, I want README and DOCS to match the implemented local-first architecture so future work starts from accurate assumptions.",
+      "acceptanceCriteria": [
+        "Decide whether local-first v1 includes a service worker",
+        "If v1 includes a service worker, add the service worker and registration described in `DOCS/README.md`",
+        "If v1 does not include a service worker, update `DOCS/README.md` and README to remove or qualify service worker claims",
+        "README file tree comments match the implemented `@sqlite.org/sqlite-wasm` worker and OPFS approach",
+        "Docs describe the chosen SQLite VFS, browser support, fallback behavior, and any multi-tab limitation",
+        "Typecheck passes"
+      ],
+      "priority": 67,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-068",
+      "title": "Accessibility and CSS pass for local-first settings and status",
+      "description": "As a user, I want local-first controls and sync status to be accessible, readable, and consistent with the project's CSS rules.",
+      "acceptanceCriteria": [
+        "Settings local-first controls are keyboard accessible and expose useful labels",
+        "Sync status text and tooltip copy clearly communicate synced, syncing, offline, pending, and error states",
+        "CSS for local-first settings and sync status uses only global color variables",
+        "CSS does not use border-radius except for icons or icon-buttons",
+        "Text fits on mobile and desktop without overlapping adjacent controls",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 68,
+      "passes": false,
+      "notes": ""
     }
   ]
 }
