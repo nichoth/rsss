@@ -30,7 +30,6 @@ import {
 } from './billing-status.js'
 const debug = Debug('rsss:state')
 
-const USER_STORAGE_KEY = 'rsss_user'
 const CHECKOUT_EMAIL_KEY = 'rsss_checkout_email'
 export const DEFAULT_PAGE_SIZE = 20
 
@@ -425,17 +424,11 @@ State.checkAuth = async function (
                     handle: data.handle
                 }
                 state.user.value = user
-                localStorage.setItem(
-                    USER_STORAGE_KEY,
-                    JSON.stringify(user)
-                )
             } else {
                 state.user.value = null
-                localStorage.removeItem(USER_STORAGE_KEY)
             }
         } else {
             state.user.value = null
-            localStorage.removeItem(USER_STORAGE_KEY)
         }
     } catch {
         state.user.value = null
@@ -709,7 +702,6 @@ State.logout = async function (
     } catch {
         // Ignore logout errors
     }
-    localStorage.removeItem(USER_STORAGE_KEY)
     batch(() => {
         state.user.value = null
         state.feeds.value = []

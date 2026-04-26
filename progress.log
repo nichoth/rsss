@@ -61,6 +61,9 @@ Thread: https://ampcode.com/threads/unknown
 - **Local content caching scope**: Feed-level local caching is not supported.
   Use the local-first `storeContent` setting for article content storage;
   do not add `is_locally_cached` or per-feed cache toggles.
+- **Client auth state authority**: `state.user` is the authoritative client
+  auth state. Do not persist duplicate user objects under the legacy
+  `rsss_user` localStorage key.
 - **Autumn subscription status narrowing**: `verifySubscription` should
   treat Autumn SDK statuses as untrusted runtime values and narrow them
   through a local type guard before returning app-level billing state.
@@ -797,4 +800,23 @@ Thread: https://ampcode.com/threads/unknown
   - Constructor tests using `new UserDO(...)` should make fake
     `blockConcurrencyWhile` expose a promise and await it, otherwise async
     initialization failures can be hidden.
+---
+
+## 2026-04-26 01:14 PDT - US-038
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Removed duplicate localStorage auth user state.
+  - Removed the legacy `USER_STORAGE_KEY` constant from client state.
+  - Stopped `State.checkAuth` from writing or removing `rsss_user`.
+  - Stopped `State.logout` from removing `rsss_user`.
+  - Added focused browser regression tests for authenticated and
+    unauthenticated `checkAuth` paths.
+- Files changed:
+  - `src/client/state.ts`
+  - `test/state-auth-storage.ts`
+  - `test/index.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Keep auth user data in `state.user`; the legacy `rsss_user`
+    localStorage key has no readers and should not be reintroduced.
 ---
