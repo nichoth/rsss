@@ -53,9 +53,9 @@ export default function _Router (state:AppState):InstanceType<typeof Router> {
             return FeedReader
         }
 
-        // Cloudflare's SPA fallback intercepts this path
-        // before the Worker runs, so we handle it
-        // client-side by POSTing to /api/auth/callback.
+        // handleOAuthCallback is async; once this route initially returns
+        // LoginPage, its network request may finish OAuth and change the
+        // active route.
         State.handleOAuthCallback(state)
         return LoginPage
     })

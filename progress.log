@@ -104,6 +104,9 @@ Thread: https://ampcode.com/threads/unknown
 - **Repository configuration tests**: Focused repository-level assertions can
   live in `.mjs` files under `test/` and be listed in
   `test/run-all-tests.mjs` before browser-bundled tapout tests.
+- **Client route static tests**: Client route source-shape and documentation
+  regressions can live in focused `.mjs` tests under `test/`; wire them into
+  `test/run-all-tests.mjs` so the full suite catches drift.
 - **Client Feed/Item type authority**: `src/client/db/types.ts` owns the
   canonical client `Feed` and `Item` interfaces. `state.ts` imports and
   re-exports those types for existing UI imports instead of redefining them.
@@ -1303,4 +1306,23 @@ Thread: https://ampcode.com/threads/unknown
   - Pure item-route helpers should live in `src/client/routing.ts`; keep
     state management code in `state.ts` and route matching code in the helper
     module.
+---
+
+## 2026-04-26 13:47 PDT - US-057
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Clarified async OAuth callback route behavior.
+  - Added a one-sentence comment explaining that `handleOAuthCallback`
+    performs async network work after the route initially renders
+    `LoginPage`, and can later change the active route.
+  - Added a focused static regression test and included it in the full test
+    runner.
+- Files changed:
+  - `src/client/routes/index.ts`
+  - `test/routes-oauth-callback-static.mjs`
+  - `test/run-all-tests.mjs`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Static route documentation regressions can live in focused `.mjs` tests
+    and should be added to `test/run-all-tests.mjs`.
 ---
