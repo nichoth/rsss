@@ -7,6 +7,7 @@ import type {
     ItemsResponse,
     CountsResponse
 } from './types.js'
+import { formatSqliteTs } from './time.js'
 
 function insertOutbox (
     db:Sqlite3Db,
@@ -90,7 +91,7 @@ export function createLocalAdapter (db:Sqlite3Db):DbAdapter {
         },
 
         async addFeed (url:string):Promise<Feed> {
-            const now = new Date().toISOString()
+            const now = formatSqliteTs(new Date())
             db.exec('BEGIN')
             try {
                 db.exec({
@@ -115,7 +116,7 @@ export function createLocalAdapter (db:Sqlite3Db):DbAdapter {
         },
 
         async deleteFeed (id:number):Promise<void> {
-            const now = new Date().toISOString()
+            const now = formatSqliteTs(new Date())
             db.exec('BEGIN')
             try {
                 db.exec({
@@ -247,7 +248,7 @@ export function createLocalAdapter (db:Sqlite3Db):DbAdapter {
             }
             if (fields.length === 0) return
 
-            const now = new Date().toISOString()
+            const now = formatSqliteTs(new Date())
             fields.push("updated_at = datetime('now')")
             params.push(id)
 
@@ -269,7 +270,7 @@ export function createLocalAdapter (db:Sqlite3Db):DbAdapter {
         },
 
         async markAllRead (feedId?:number):Promise<void> {
-            const now = new Date().toISOString()
+            const now = formatSqliteTs(new Date())
             db.exec('BEGIN')
             try {
                 if (feedId !== undefined) {

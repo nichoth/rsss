@@ -185,6 +185,39 @@ test('addFeed inserts a feed and returns it', async (t) => {
     }
 })
 
+test('addFeed writes sortable SQLite timestamps', async (t) => {
+    const db = await openLocalDb('did:test:addfeed-sqlite-ts')
+    const adapter = createLocalAdapter(db)
+    try {
+        const feed = await adapter.addFeed('https://time.example.com/feed')
+        const rows = getOutbox(db)
+        const sqliteTsPattern = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/
+
+        t.ok(
+            sqliteTsPattern.test(feed.created_at),
+            'created_at uses SQLite timestamp format'
+        )
+        t.ok(
+            sqliteTsPattern.test(feed.updated_at),
+            'updated_at uses SQLite timestamp format'
+        )
+        t.ok(
+            sqliteTsPattern.test(rows[0].client_updated_at),
+            'outbox timestamp uses SQLite timestamp format'
+        )
+        t.ok(
+            '2026-01-01 00:00:00' > '2025-12-31 23:59:59',
+            'server-style timestamps sort lexicographically'
+        )
+        t.ok(
+            '2026-01-01 00:00:00' > '2025-12-31T23:59:59.999Z',
+            'SQLite timestamps sort after older ISO timestamps'
+        )
+    } finally {
+        db.close()
+    }
+})
+
 test('deleteFeed removes feed and its items', async (t) => {
     const db = await openLocalDb('did:test:deletefeed')
     await seedDb(db)

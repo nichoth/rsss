@@ -14,6 +14,30 @@
   - `getOutboxCount` exported from `push-sync.ts` lets the UI show pending count without re-opening the DB.
 ---
 
+## 2026-04-25 23:21 PDT - US-032
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Standardized client-side SQLite timestamp writes.
+  - Added `formatSqliteTs(date)` for `YYYY-MM-DD HH:MM:SS` strings.
+  - Updated local adapter writes to use `formatSqliteTs(new Date())` for
+    outbox `client_updated_at` values.
+  - Updated `addFeed` to write SQLite-format `created_at` and `updated_at`
+    values instead of ISO strings.
+  - Added a focused local-adapter regression test for sortable SQLite
+    timestamps.
+- Files changed:
+  - `src/client/db/time.ts`
+  - `src/client/db/local-adapter.ts`
+  - `test/local-adapter.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - JS-generated timestamps for local SQLite writes should use
+    `formatSqliteTs(new Date())`; SQL-side item updates can keep using
+    `datetime('now')`.
+  - The remaining `toISOString()` use in `item-row.ts` is display metadata,
+    not a SQLite write path.
+---
+
 ## 2026-04-24 - US-016
 - What was implemented: First-time bootstrap flow with progress indicator. When `syncSubscriptions` flips to `true` in Settings, `bootstrapLocalDb(did)` is called: opens the OPFS DB, runs a full `pullSync` (no `since`), and updates `bootstrapInProgress`/`bootstrapFeedsCount`/`bootstrapItemsCount`/`bootstrapError` signals live. `getAdapter()` returns `remoteAdapter` while bootstrap is in progress. On failure: reverts `syncSubscriptions` to false, saves settings, removes the OPFS file. Settings UI shows running counts and error message.
 - Files changed:
@@ -94,6 +118,10 @@
 - **Feed fetch failures**: Server feed rows include `last_error` and
   `last_status`; update both from `fetchFeed` failures so failed refreshes are
   queryable after alarm or manual refresh runs.
+- **Client SQLite timestamps**: Client-side SQLite writes should use
+  `formatSqliteTs(new Date())` for JS-generated timestamps, or
+  `datetime('now')` inside SQL. Do not write ISO strings into SQLite timestamp
+  columns or outbox `client_updated_at`.
 
 ## 2026-04-25 22:33 PDT - US-026
 Thread: https://ampcode.com/threads/unknown
