@@ -20,6 +20,7 @@ import './email.js'
 import './session-cookie.js'
 import './feed-cache-column.js'
 import './do-migrations.js'
+import './header-component.js'
 
 test('all done', () => {
     if (window) {

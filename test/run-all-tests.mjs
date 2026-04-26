@@ -6,6 +6,7 @@ const commands = [
     [
         'esbuild ./test/index.ts --bundle',
         '--alias:cloudflare:workers=./test/cloudflare-workers-stub.ts',
+        '--loader:.css=text',
         '| tapout'
     ].join(' ')
 ]

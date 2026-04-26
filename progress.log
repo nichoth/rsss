@@ -75,6 +75,9 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Component tests with CSS imports**: Browser tests that bundle Preact
+  components importing CSS need `esbuild --loader:.css=text`; otherwise
+  esbuild fails before tapout can run the component assertions.
 - **Client lifecycle cleanup**: `AppState` exposes `cleanup()` for listeners
   and other lifecycle resources created by `State()`. Module entrypoints
   should call it from teardown hooks such as `import.meta.hot.dispose`.
@@ -1109,4 +1112,27 @@ Thread: https://ampcode.com/threads/unknown
     import.meta.hot.dispose.
   - Tests can stub window.addEventListener/removeEventListener to assert the
     same listener object is registered and removed.
+---
+## 2026-04-26 12:07 PDT - US-049
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added security attributes to Header sponsor iframes.
+  - Both desktop and mobile sponsor iframes now include `sandbox`,
+    `loading="lazy"`, and `referrerpolicy="no-referrer"`.
+  - Removed the touched inline iframe radius to follow the project CSS
+    agreement.
+  - Added focused browser coverage that renders `Header` and checks every
+    header iframe.
+- Files changed:
+  - `src/client/components/header.ts`
+  - `test/header-component.ts`
+  - `test/index.ts`
+  - `test/run-all-tests.mjs`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Component tests importing Preact components with CSS imports need
+    `--loader:.css=text` in the esbuild command.
+  - In this repo's mixed DOM and Worker type environment, test DOM setup can
+    avoid `document.body.append(...)` typing issues by appending through a
+    typed `HTMLElement`.
 ---

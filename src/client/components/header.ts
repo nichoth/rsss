@@ -87,7 +87,10 @@ export const Header:FunctionComponent<{
                     title="Sponsor nichoth"
                     height="32"
                     width="114"
-                    style="border: 0; border-radius: 6px;"
+                    sandbox="allow-scripts allow-same-origin"
+                    loading="lazy"
+                    referrerpolicy="no-referrer"
+                    style="border: 0;"
                 ></iframe>
             </div>
 
@@ -135,7 +138,10 @@ export const Header:FunctionComponent<{
                     title="Sponsor nichoth"
                     height="32"
                     width="114"
-                    style="border: 0; border-radius: 6px;"
+                    sandbox="allow-scripts allow-same-origin"
+                    loading="lazy"
+                    referrerpolicy="no-referrer"
+                    style="border: 0;"
                 ></iframe>
             </div>
 
