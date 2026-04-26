@@ -142,6 +142,10 @@ Thread: https://ampcode.com/threads/unknown
   `src/shared/item-route.ts` for article link lookup. It builds exact link
   candidates for trailing-slash and `http`/`https` variants; do not use
   substring matching or SQL `LIKE` for `/post/*` article routes.
+- **DEBUG storage seeding**: Use `configureDebugStorage` from
+  `src/client/debug-storage.ts` for app DEBUG localStorage handling. Dev and
+  staging should seed the default only when missing; production should remove
+  only the app-seeded default value.
 
 ## 2026-04-25 22:33 PDT - US-026
 Thread: https://ampcode.com/threads/unknown
@@ -842,4 +846,30 @@ Thread: https://ampcode.com/threads/unknown
   - UI code may continue importing `Feed` and `Item` from `state.ts`, but
     the definitions must come from `src/client/db/types.ts`.
   - Test fixtures typed as `Item` need both `created_at` and `updated_at`.
+---
+
+## 2026-04-26 01:31 PDT - US-040
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: DEBUG localStorage seeding now preserves user
+  customizations.
+  - Added `configureDebugStorage` with the app default DEBUG namespace.
+  - Wired `src/client/index.ts` through the helper so dev/staging only seed
+    the default when `DEBUG` is missing.
+  - Production cleanup now removes only the app-seeded default value and
+    leaves custom DEBUG namespaces in place.
+  - Added focused browser tests for default seeding, custom preservation,
+    and production cleanup behavior.
+- Files changed:
+  - `src/client/debug-storage.ts`
+  - `src/client/index.ts`
+  - `test/debug-storage.ts`
+  - `test/index.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Keep DEBUG localStorage logic centralized in
+    `src/client/debug-storage.ts`; entrypoints should not write the key
+    directly.
+  - Browser tests that import the full app shell need CSS loader handling,
+    but this behavior is simpler to cover through the pure helper.
 ---
