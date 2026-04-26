@@ -100,6 +100,7 @@ test('State auth effect loads once for the final rapid auth value',
             loadCounts: State.loadCounts
         }
         const loadDids:string[] = []
+        let currentState:AppState|null = null
 
         State.checkAuth = async (state:AppState) => {
             state.user.value = {
@@ -112,8 +113,10 @@ test('State auth effect loads once for the final rapid auth value',
                 handle: 'final.test'
             }
         }
-        State.loadBillingStatus = async (state:AppState) => {
-            loadDids.push(state.user.value?.did ?? 'none')
+        State.loadBillingStatus = async () => {
+            loadDids.push(
+                currentState?.user.value?.did ?? 'none'
+            )
             return null
         }
         State.loadFeeds = async () => {}
@@ -121,7 +124,7 @@ test('State auth effect loads once for the final rapid auth value',
         State.loadCounts = async () => {}
 
         try {
-            State()
+            currentState = State()
             await nextTask()
             await nextTask()
 

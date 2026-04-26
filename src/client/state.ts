@@ -239,7 +239,7 @@ export function State ():AppState {
 
         queueMicrotask(() => {
             if (generation !== authLoadGeneration) return
-            State.loadBillingStatus(state)
+            State.loadBillingStatus()
 
             getAdapter(user.did).then(() => {
                 if (generation !== authLoadGeneration) return
@@ -254,7 +254,7 @@ export function State ():AppState {
                             err instanceof SyncBillingError ||
                             err instanceof PushSyncBillingError
                         ) {
-                            State.loadBillingStatus(state)
+                            State.loadBillingStatus()
                             return
                         }
                         debug('sync cycle error:', err)
@@ -287,7 +287,7 @@ export function State ():AppState {
                     err instanceof SyncBillingError ||
                     err instanceof PushSyncBillingError
                 ) {
-                    State.loadBillingStatus(state)
+                    State.loadBillingStatus()
                     return
                 }
                 debug('sync cycle online error:', err)
@@ -525,7 +525,6 @@ State.devLogin = async function (
  * Called after auth lands and after returning from checkout.
  */
 State.loadBillingStatus = async function (
-    _state:AppState
 ):Promise<BillingStatus|null> {
     try {
         const res = await api.get('billing/status', {
@@ -595,7 +594,7 @@ State.startCheckout = async function (
 
         // Dev-mode: server already entitled the user.
         setCheckoutInProgress(false)
-        await State.loadBillingStatus(state)
+        await State.loadBillingStatus()
         state._setRoute('/')
     } catch (err) {
         batch(() => {
@@ -639,7 +638,7 @@ State.finalizeCheckout = async function (
 
             if (res.ok) {
                 clearCheckoutEmail()
-                await State.loadBillingStatus(state)
+                await State.loadBillingStatus()
                 return { ok: true }
             }
 
@@ -668,7 +667,6 @@ State.finalizeCheckout = async function (
  * a "payment didn't go through" email idempotently.
  */
 State.signalCheckoutFailed = async function (
-    _state:AppState,
     planId?:string
 ):Promise<void> {
     try {
@@ -690,7 +688,6 @@ State.signalCheckoutFailed = async function (
  * Open the Autumn-hosted customer portal in the same tab.
  */
 State.openCustomerPortal = async function (
-    _state:AppState
 ):Promise<void> {
     try {
         const res = await api.post('billing/portal', {

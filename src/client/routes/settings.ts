@@ -38,7 +38,7 @@ export const SettingsRoute:FunctionComponent<{
     useEffect(() => {
         loadLocalFirstSettings()
         if (state.isAuthenticated.value) {
-            State.loadBillingStatus(state)
+            State.loadBillingStatus()
         }
     }, [])
 
@@ -52,7 +52,7 @@ export const SettingsRoute:FunctionComponent<{
 
     function handleManageSubscription (e:Event) {
         e.preventDefault()
-        State.openCustomerPortal(state)
+        State.openCustomerPortal()
     }
 
     function handleUpgrade (e:Event) {

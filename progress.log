@@ -1164,3 +1164,26 @@ Thread: https://ampcode.com/threads/unknown
     avoid `document.body.append(...)` typing issues by appending through a
     typed `HTMLElement`.
 ---
+## 2026-04-26 12:29 PDT - US-051
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Removed dead-code surface from billing State helpers.
+  - Added a repository-level dead-code regression test for the US-051
+    cleanup criteria and wired it into the full test runner.
+  - Removed unused `_state` parameters from `loadBillingStatus`,
+    `signalCheckoutFailed`, and `openCustomerPortal`.
+  - Updated call sites and the auth-state test mock to use the new
+    zero-argument helper signatures.
+- Files changed:
+  - `src/client/state.ts`
+  - `src/client/routes/signup.ts`
+  - `src/client/routes/settings.ts`
+  - `src/client/routes/payment-success.ts`
+  - `test/dead-code.mjs`
+  - `test/run-all-tests.mjs`
+  - `test/state-auth-storage.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Repository-level cleanup invariants can use focused Node assertion tests
+    and run early in `test/run-all-tests.mjs`, before bundled browser tests.
+---

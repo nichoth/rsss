@@ -775,7 +775,7 @@
         "Typecheck passes after removals"
       ],
       "priority": 51,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

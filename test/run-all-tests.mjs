@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process'
 
 const commands = [
     'node test/ci-workflow.mjs',
+    'node test/dead-code.mjs',
     'node test/vite-isolation-headers.mjs',
     [
         'esbuild ./test/index.ts --bundle',
