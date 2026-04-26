@@ -37,6 +37,11 @@ export function didToCustomerId (did:string):string {
     return did.replace(/:/g, '_')
 }
 
+export interface AutumnCustomerContact {
+    customerId:string;
+    email:string|null;
+}
+
 function client (env:BillingEnv):Autumn {
     if (!env.AUTUMN_SECRET_KEY) {
         throw new Error(
@@ -51,12 +56,17 @@ export async function getOrCreateCustomer (
     did:string,
     name?:string,
     email?:string
-):Promise<void> {
-    await client(env).customers.getOrCreate({
-        customerId: didToCustomerId(did),
+):Promise<AutumnCustomerContact> {
+    const customerId = didToCustomerId(did)
+    const customer = await client(env).customers.getOrCreate({
+        customerId,
         name: name ?? null,
         email: email ?? null
     })
+    return {
+        customerId: customer.id ?? customerId,
+        email: customer.email ?? null
+    }
 }
 
 /**
@@ -67,10 +77,8 @@ export async function getCustomerEmail (
     env:BillingEnv,
     did:string
 ):Promise<string|null> {
-    const customer = await client(env).customers.getOrCreate({
-        customerId: didToCustomerId(did)
-    })
-    return customer.email ?? null
+    const customer = await getOrCreateCustomer(env, did)
+    return customer.email
 }
 
 export interface AttachedCheckout {

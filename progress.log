@@ -70,6 +70,9 @@ Thread: https://ampcode.com/threads/unknown
 - **Autumn subscription status narrowing**: `verifySubscription` should
   treat Autumn SDK statuses as untrusted runtime values and narrow them
   through a local type guard before returning app-level billing state.
+- **Autumn customer email source**: Live checkout should stash the email
+  returned by `getOrCreateCustomer`; notification routes read the pending
+  email from KV instead of re-fetching the same Autumn customer record.
 - **Sync status orchestration**: App-level sync cycles should use
   `runSync` from `src/client/db/sync.ts`. It owns `setSyncDone`; pass
   `{ trackStatus: false }` only from orchestrators that will set final
@@ -955,4 +958,30 @@ Thread: https://ampcode.com/threads/unknown
   - Auth expiry during sync should use typed errors, not generic sync errors.
   - State-level sync catch blocks should call `State.handleSyncAuthError`
     before billing or generic sync handling.
+---
+
+## 2026-04-26 06:30 PDT - US-044
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Threaded Autumn customer contact email through the
+  live checkout path.
+  - `getOrCreateCustomer` now returns the Autumn customer id and email.
+  - Live checkout stashes the returned email for later billing
+    notifications.
+  - Billing notification email lookup now reads pending email from KV
+    instead of making a redundant Autumn customer lookup.
+  - Added focused Autumn billing regression coverage for the returned
+    customer contact.
+- Files changed:
+  - `src/server/autumn-billing.ts`
+  - `src/server/index.ts`
+  - `test/autumn-billing.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Tapout browser tests cannot authenticate app routes by setting a
+    `Cookie` header directly; Chromium strips it before Hono sees the
+    request. Prefer pure helper tests or route seams that do not require
+    forbidden headers.
+  - Autumn customer responses are schema-validated by the SDK, so tests
+    stubbing `globalThis.fetch` need to return the full customer shape.
 ---

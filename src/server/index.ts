@@ -17,7 +17,6 @@ import {
     isValidPlanId,
     useLive as billingUseLive,
     getOrCreateCustomer,
-    getCustomerEmail,
     attachCheckout,
     verifySubscription,
     getCustomerPortalUrl,
@@ -88,22 +87,14 @@ async function readPendingEmail (
 
 /**
  * Resolve the user's contact email for billing notifications.
- * Prefer the authoritative value Autumn has on the customer; fall
- * back to the email the user entered on /signup (stashed in KV)
- * when Autumn isn't live or hasn't been told yet.
+ * The checkout path stashes the email returned by Autumn when live
+ * billing creates or updates the customer, so notification paths can
+ * use KV instead of re-fetching the same customer record.
  */
 async function resolveContactEmail (
     env:Env,
     did:string
 ):Promise<string|null> {
-    if (billingUseLive(env)) {
-        try {
-            const fromAutumn = await getCustomerEmail(env, did)
-            if (fromAutumn) return fromAutumn
-        } catch (err) {
-            console.error('getCustomerEmail error:', err)
-        }
-    }
     return readPendingEmail(env, did)
 }
 
@@ -733,12 +724,19 @@ app.post('/api/billing/checkout', requireAuth, async (c) => {
     }
 
     try {
-        await getOrCreateCustomer(
+        const customer = await getOrCreateCustomer(
             c.env,
             session.did,
             session.handle,
             email ?? undefined
         )
+        if (customer.email) {
+            await stashPendingEmail(
+                c.env,
+                session.did,
+                customer.email
+            )
+        }
         const baseUrl = new URL(c.req.url).origin
         const successUrl =
             `${baseUrl}/payment-success?checkout=return`
