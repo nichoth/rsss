@@ -2,19 +2,29 @@
  * Bluesky AT Protocol OAuth implementation for Cloudflare Workers
  */
 
-// DPoP key pair stored for the session (in production, persist this securely)
+// DPoP key pair used during the PAR + token exchange. The pair is
+// discarded once the exchange completes because we never call the
+// AT Protocol on behalf of the user -- OAuth is used purely to
+// establish a verified (did, handle) pair for our own session.
 export interface DPoPKeyPair {
     privateKey: CryptoKey
     publicKey: CryptoKey
     publicJwk: JsonWebKey
 }
 
+/**
+ * Application session derived from a successful Bluesky OAuth flow.
+ *
+ * We deliberately do not retain the access/refresh tokens or DPoP
+ * key pair: this app never calls the user's PDS. Storing tokens we
+ * cannot use would just be a credential leak waiting to happen.
+ * If we ever start making AT Protocol calls on behalf of the user,
+ * the DPoP key pair must be persisted alongside the tokens (see
+ * `restoreDPoPKeyPair`).
+ */
 export interface OAuthSession {
     did: string
     handle: string
-    accessToken: string
-    refreshToken: string
-    expiresAt: number
 }
 
 export interface OAuthState {
@@ -414,7 +424,7 @@ export async function exchangeCode (
     clientId: string,
     redirectUri: string,
     authServer: string
-): Promise<OAuthSession & { dpopKeyPair: DPoPKeyPair }> {
+): Promise<OAuthSession> {
     const metadata = await getAuthServerMetadata(authServer)
 
     // Restore the DPoP key pair from the stored JWKs
@@ -482,17 +492,12 @@ export async function exchangeCode (
     }
 
     const tokens = await response.json() as {
-        access_token: string
-        refresh_token?: string
-        expires_in?: number
         sub: string
-        token_type?: string
     }
 
-    // Verify we got a DPoP-bound token
-    if (tokens.token_type?.toLowerCase() !== 'dpop') {
-        console.warn('Warning: Expected DPoP token type but got:', tokens.token_type)
-    }
+    // The access/refresh tokens and DPoP-bound token type returned
+    // here are intentionally discarded -- see the OAuthSession docs
+    // for why we do not persist them.
 
     // Get handle from DID
     let handle = tokens.sub
@@ -508,96 +513,23 @@ export async function exchangeCode (
 
     return {
         did: tokens.sub,
-        handle,
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token || '',
-        expiresAt: Date.now() + (tokens.expires_in || 3600) * 1000,
-        dpopKeyPair: keyPair // Return key pair for subsequent API calls
+        handle
     }
 }
 
 /**
- * Make an authenticated API request with DPoP
- *
- * When using DPoP-bound access tokens, each request must include a fresh DPoP proof
- * with the 'ath' claim containing a hash of the access token.
- *
- * @param url - The API endpoint URL
- * @param method - HTTP method
- * @param accessToken - The DPoP-bound access token
- * @param keyPair - The DPoP key pair used during token exchange
- * @param options - Additional fetch options (body, additional headers, etc.)
+ * Session storage TTL (matches the cookie maxAge).
  */
-export async function fetchWithDPoP (
-    url: string,
-    method: string,
-    accessToken: string,
-    keyPair: DPoPKeyPair,
-    options: RequestInit = {}
-): Promise<Response> {
-    // Create DPoP proof with 'ath' claim for the access token
-    const dpopProof = await createDPoPProof(
-        keyPair,
-        method,
-        url,
-        accessToken // Include access token hash in the proof
-    )
+export const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60
 
-    const headers = new Headers(options.headers)
-    headers.set('Authorization', `DPoP ${accessToken}`)
-    headers.set('DPoP', dpopProof)
-
-    let response = await fetch(url, {
-        ...options,
-        method,
-        headers
-    })
-
-    // Handle DPoP nonce requirement
-    if (response.status === 401) {
-        const dpopNonce = response.headers.get('DPoP-Nonce')
-        if (dpopNonce) {
-            const dpopProofWithNonce = await createDPoPProof(
-                keyPair,
-                method,
-                url,
-                accessToken,
-                dpopNonce
-            )
-
-            const retryHeaders = new Headers(options.headers)
-            retryHeaders.set('Authorization', `DPoP ${accessToken}`)
-            retryHeaders.set('DPoP', dpopProofWithNonce)
-
-            response = await fetch(url, {
-                ...options,
-                method,
-                headers: retryHeaders
-            })
-        }
-    }
-
-    return response
+interface StoredSession {
+    session: OAuthSession;
+    sessionExpiresAt: number;
+    createdAt: number;
 }
 
-/**
- * Generate a simple session token
- */
-export async function generateSessionToken (): Promise<string> {
-    return generateRandomString(32)
-}
-
-/**
- * Create a signed session cookie value
- */
-export async function createSessionCookie (
-    session: OAuthSession,
-    secret: string
-): Promise<string> {
-    const payload = JSON.stringify(session)
+async function signSid (sid: string, secret: string): Promise<string> {
     const encoder = new TextEncoder()
-
-    // Create HMAC signature
     const key = await crypto.subtle.importKey(
         'raw',
         encoder.encode(secret),
@@ -605,59 +537,128 @@ export async function createSessionCookie (
         false,
         ['sign']
     )
-
     const signature = await crypto.subtle.sign(
         'HMAC',
         key,
-        encoder.encode(payload)
+        encoder.encode(sid)
     )
+    return base64UrlEncode(new Uint8Array(signature))
+}
 
-    const signatureB64 = base64UrlEncode(new Uint8Array(signature))
-    const payloadB64 = btoa(payload)
-
-    return `${payloadB64}.${signatureB64}`
+async function verifySidSignature (
+    sid: string,
+    signatureB64Url: string,
+    secret: string
+): Promise<boolean> {
+    const encoder = new TextEncoder()
+    const key = await crypto.subtle.importKey(
+        'raw',
+        encoder.encode(secret),
+        { name: 'HMAC', hash: 'SHA-256' },
+        false,
+        ['verify']
+    )
+    const signatureStr = signatureB64Url
+        .replace(/-/g, '+')
+        .replace(/_/g, '/')
+    const signatureBytes = Uint8Array.from(
+        atob(signatureStr),
+        c => c.charCodeAt(0)
+    )
+    return crypto.subtle.verify(
+        'HMAC',
+        key,
+        signatureBytes,
+        encoder.encode(sid)
+    )
 }
 
 /**
- * Verify and decode a session cookie
+ * Create a session: store the OAuth session record in KV under a
+ * random session id and return a signed cookie value carrying the
+ * id (no token material).
+ */
+export async function createSessionCookie (
+    session: OAuthSession,
+    secret: string,
+    kv: KVNamespace
+): Promise<string> {
+    const sid = generateRandomString(32)
+    const now = Date.now()
+    const record: StoredSession = {
+        session,
+        sessionExpiresAt: now + SESSION_TTL_SECONDS * 1000,
+        createdAt: now
+    }
+    await kv.put(
+        `session:${sid}`,
+        JSON.stringify(record),
+        { expirationTtl: SESSION_TTL_SECONDS }
+    )
+
+    const signature = await signSid(sid, secret)
+    return `${sid}.${signature}`
+}
+
+/**
+ * Verify a session cookie and load the OAuth session from KV.
+ * Returns null on signature mismatch, missing record, or expiry.
  */
 export async function verifySessionCookie (
     cookie: string,
-    secret: string
+    secret: string,
+    kv: KVNamespace
 ): Promise<OAuthSession | null> {
     try {
-        const [payloadB64, signatureB64] = cookie.split('.')
-        if (!payloadB64 || !signatureB64) return null
+        const [sid, signatureB64] = cookie.split('.')
+        if (!sid || !signatureB64) return null
 
-        const payload = atob(payloadB64)
-        const encoder = new TextEncoder()
-
-        // Verify HMAC signature
-        const key = await crypto.subtle.importKey(
-            'raw',
-            encoder.encode(secret),
-            { name: 'HMAC', hash: 'SHA-256' },
-            false,
-            ['verify']
+        const valid = await verifySidSignature(
+            sid,
+            signatureB64,
+            secret
         )
-
-        // Decode base64url signature
-        const signatureStr = signatureB64
-            .replace(/-/g, '+')
-            .replace(/_/g, '/')
-        const signatureBytes = Uint8Array.from(atob(signatureStr), c => c.charCodeAt(0))
-
-        const valid = await crypto.subtle.verify(
-            'HMAC',
-            key,
-            signatureBytes,
-            encoder.encode(payload)
-        )
-
         if (!valid) return null
 
-        return JSON.parse(payload) as OAuthSession
+        const recordJson = await kv.get(`session:${sid}`)
+        if (!recordJson) return null
+
+        const record = JSON.parse(recordJson) as StoredSession
+        if (
+            typeof record.sessionExpiresAt !== 'number' ||
+            record.sessionExpiresAt < Date.now()
+        ) {
+            await kv.delete(`session:${sid}`)
+            return null
+        }
+
+        return record.session
     } catch {
         return null
+    }
+}
+
+/**
+ * Destroy a session by deleting its KV record. Safe to call with an
+ * invalid or expired cookie -- it best-effort removes the id only if
+ * the signature is valid.
+ */
+export async function destroySessionCookie (
+    cookie: string,
+    secret: string,
+    kv: KVNamespace
+): Promise<void> {
+    try {
+        const [sid, signatureB64] = cookie.split('.')
+        if (!sid || !signatureB64) return
+        const valid = await verifySidSignature(
+            sid,
+            signatureB64,
+            secret
+        )
+        if (!valid) return
+        await kv.delete(`session:${sid}`)
+    } catch {
+        // best-effort
     }
 }

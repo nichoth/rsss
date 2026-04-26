@@ -42,7 +42,10 @@ export async function initSqlite () {
     const opts = _testWasmUrl
         ? { locateFile: () => _testWasmUrl! }
         : {}
-    const sqlite3 = await sqlite3Module.default(opts)
+    const init = sqlite3Module.default as (
+        opts?:{ locateFile?:() => string }
+    ) => ReturnType<typeof sqlite3Module.default>
+    const sqlite3 = await init(opts)
     return sqlite3
 }
 

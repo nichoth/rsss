@@ -1,6 +1,7 @@
 import { test } from '@substrate-system/tapzero'
 // @ts-expect-error -- no type declarations for .wasm imports
 import wasmUrl from '@sqlite.org/sqlite-wasm/sqlite3.wasm'
+import type { SqlValue } from '@sqlite.org/sqlite-wasm'
 import {
     openLocalDb,
     setTestMode
@@ -39,7 +40,7 @@ function queryOne<T> (
         sql,
         bind: bind as Parameters<typeof db.exec>[0]['bind'],
         rowMode: 'object',
-        resultRows: rows as unknown[]
+        resultRows: rows as Record<string, SqlValue>[]
     })
     return rows[0]
 }
@@ -54,7 +55,7 @@ function queryAll<T> (
         sql,
         bind: bind as Parameters<typeof db.exec>[0]['bind'],
         rowMode: 'object',
-        resultRows: rows as unknown[]
+        resultRows: rows as Record<string, SqlValue>[]
     })
     return rows
 }

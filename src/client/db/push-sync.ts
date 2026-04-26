@@ -1,3 +1,4 @@
+import type { SqlValue } from '@sqlite.org/sqlite-wasm'
 import type { Sqlite3Db } from './sqlite-init.js'
 import {
     setSyncSyncing,
@@ -36,7 +37,7 @@ export function getOutboxCount (db:Sqlite3Db):number {
     db.exec({
         sql: 'SELECT COUNT(*) AS n FROM outbox',
         rowMode: 'object',
-        resultRows: rows as unknown[]
+        resultRows: rows as Record<string, SqlValue>[]
     })
     return rows[0]?.n ?? 0
 }
@@ -46,7 +47,7 @@ function getOutboxRows (db:Sqlite3Db):OutboxRow[] {
     db.exec({
         sql: 'SELECT * FROM outbox ORDER BY id ASC',
         rowMode: 'object',
-        resultRows: rows as unknown[]
+        resultRows: rows as unknown as Record<string, SqlValue>[]
     })
     return rows
 }
