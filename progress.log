@@ -1231,3 +1231,22 @@ Thread: https://ampcode.com/threads/unknown
   - README deploy verification already documents `/api/health`; no docs
     referenced the removed root `/health` route.
 ---
+
+## 2026-04-26 12:56 PDT - US-054
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Made Durable Object integer parsing explicit.
+  - Added radix `10` to every `parseInt` call in
+    `src/server/durable-objects/index.ts`.
+  - Added a focused static regression test that uses the TypeScript AST to
+    reject Durable Object `parseInt` calls without a second argument.
+  - Wired the regression test into the full test runner.
+- Files changed:
+  - `src/server/durable-objects/index.ts`
+  - `test/durable-object-parseint-static.mjs`
+  - `test/run-all-tests.mjs`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Static source-shape tests can use the TypeScript compiler API when simple
+    regexes would be brittle around nested call expressions.
+---

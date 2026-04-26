@@ -271,7 +271,7 @@ export class UserDO extends DurableObject<Env> {
 
         // Get a specific feed
         app.get('/feeds/:id', (c) => {
-            const id = parseInt(c.req.param('id'))
+            const id = parseInt(c.req.param('id'), 10)
             const feed = this.sql.exec('SELECT * FROM feeds WHERE id = ?', id).one()
 
             if (!feed) {
@@ -283,7 +283,7 @@ export class UserDO extends DurableObject<Env> {
 
         // Delete a feed
         app.delete('/feeds/:id', async (c) => {
-            const id = parseInt(c.req.param('id'))
+            const id = parseInt(c.req.param('id'), 10)
             const body:{ client_updated_at?:string } = await c.req.json<{
                 client_updated_at?:string
             }>().catch(() => ({}))
@@ -308,7 +308,7 @@ export class UserDO extends DurableObject<Env> {
 
         // Refresh a specific feed
         app.post('/feeds/:id/refresh', async (c) => {
-            const id = parseInt(c.req.param('id'))
+            const id = parseInt(c.req.param('id'), 10)
             const feed = this.sql.exec('SELECT * FROM feeds WHERE id = ?', id).one() as unknown as Feed | null
 
             if (!feed) {
@@ -342,8 +342,8 @@ export class UserDO extends DurableObject<Env> {
             const feedId = c.req.query('feed_id')
             const isRead = c.req.query('is_read')
             const isStarred = c.req.query('is_starred')
-            const limit = parseInt(c.req.query('limit') || '50')
-            const offset = parseInt(c.req.query('offset') || '0')
+            const limit = parseInt(c.req.query('limit') || '50', 10)
+            const offset = parseInt(c.req.query('offset') || '0', 10)
 
             let query = 'SELECT items.*, feeds.title as feed_title ' +
                 'FROM items JOIN feeds ON items.feed_id = feeds.id WHERE 1=1'
@@ -351,7 +351,7 @@ export class UserDO extends DurableObject<Env> {
 
             if (feedId) {
                 query += ' AND feed_id = ?'
-                params.push(parseInt(feedId))
+                params.push(parseInt(feedId, 10))
             }
 
             if (isRead !== undefined) {
@@ -375,7 +375,7 @@ export class UserDO extends DurableObject<Env> {
 
             if (feedId) {
                 countQuery += ' AND feed_id = ?'
-                countParams.push(parseInt(feedId))
+                countParams.push(parseInt(feedId, 10))
             }
             if (isRead !== undefined) {
                 countQuery += ' AND is_read = ?'
@@ -450,7 +450,7 @@ export class UserDO extends DurableObject<Env> {
 
         // Mark item as read/unread
         app.patch('/items/:id', async (c) => {
-            const id = parseInt(c.req.param('id'))
+            const id = parseInt(c.req.param('id'), 10)
             const body = await c.req.json<{
                 is_read?:boolean
                 is_starred?:boolean

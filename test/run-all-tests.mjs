@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process'
 const commands = [
     'node test/ci-workflow.mjs',
     'node test/dead-code.mjs',
+    'node test/durable-object-parseint-static.mjs',
     'node test/sidebar-static.mjs',
     'node test/server-routing-static.mjs',
     'node test/vite-isolation-headers.mjs',
