@@ -75,6 +75,10 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Local-first delete/reset preflight**: Disable/reset flows should call
+  `pushSync` before removing OPFS data, then verify `getOutboxCount(db)`.
+  `pushSync` records retryable failures without throwing, so pending rows
+  after a drain must be treated as a `LocalFirstSyncFailureError`.
 - **Component tests with CSS imports**: Browser tests that bundle Preact
   components importing CSS need `esbuild --loader:.css=text`; otherwise
   esbuild fails before tapout can run the component assertions.
@@ -191,6 +195,30 @@ Thread: https://ampcode.com/threads/unknown
   `src/client/debug-storage.ts` for app DEBUG localStorage handling. Dev and
   staging should seed the default only when missing; production should remove
   only the app-seeded default value.
+
+## 2026-04-26 12:19 PDT - US-050
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Honored push-sync failures before deleting
+  local-first data.
+  - `disableLocalFirst` now awaits the pre-delete push and aborts if
+    `pushSync` throws or leaves pending outbox rows behind.
+  - `resetLocalFirst` now aborts on the same failure unless the caller passes
+    an explicit data-loss override after user confirmation.
+  - Settings copy and dialogs now state that pending changes sync first and
+    that reset requires explicit confirmation before discarding failed writes.
+- Files changed:
+  - `src/client/db/index.ts`
+  - `src/client/routes/settings.ts`
+  - `test/bootstrap.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `pushSync` does not throw for retryable HTTP failures; it records
+    attempts and preserves outbox rows. Callers that need a fully drained
+    outbox must check `getOutboxCount(db)` after `pushSync`.
+  - Local-first destructive flows should preserve adapter/DB caches until
+    after the pre-delete sync guard has succeeded.
+---
 
 ## 2026-04-25 22:33 PDT - US-026
 Thread: https://ampcode.com/threads/unknown

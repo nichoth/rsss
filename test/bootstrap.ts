@@ -15,8 +15,49 @@ import {
     syncSubscriptions,
     storeContent
 } from '../src/client/local-first-settings.js'
+import {
+    disableLocalFirst,
+    resetLocalFirst,
+    getAdapter,
+    getLocalDb,
+    _resetAdapterCache,
+    _resetSupportedCache
+} from '../src/client/db/index.js'
+import {
+    resetTabCoordinationForTests
+} from '../src/client/db/tab-coordination.js'
+import type { Sqlite3Db } from '../src/client/db/sqlite-init.js'
 
 setTestMode(true, wasmUrl as string)
+
+function setupSupportedLocalFirst ():void {
+    _resetSupportedCache()
+    _resetAdapterCache()
+    resetTabCoordinationForTests()
+    syncSubscriptions.value = true
+    Object.defineProperty(navigator, 'storage', {
+        value: {
+            getDirectory: async () => ({
+                getDirectoryHandle: async () => ({
+                    removeEntry: async () => undefined
+                })
+            })
+        },
+        configurable: true
+    })
+    Object.defineProperty(globalThis, 'crossOriginIsolated', {
+        value: true,
+        configurable: true
+    })
+    Object.defineProperty(globalThis, 'FileSystemSyncAccessHandle', {
+        value: function FileSystemSyncAccessHandle () {},
+        configurable: true
+    })
+    Object.defineProperty(navigator, 'onLine', {
+        value: true,
+        configurable: true
+    })
+}
 
 function makeFetch (body:unknown, status = 200):typeof fetch {
     return async (_url:RequestInfo|URL) => ({
@@ -74,6 +115,43 @@ const syncPayload = {
     syncedAt: '2024-01-01T00:00:00Z',
     latestUpdatedAt: '2024-01-01T00:00:00Z',
     isFullSync: true
+}
+
+function failingPushFetch ():typeof fetch {
+    return async (_url:RequestInfo|URL, init?:RequestInit) => {
+        if (init?.method) {
+            return {
+                ok: false,
+                status: 500,
+                json: async () => ({ error: 'temporary failure' })
+            } as Response
+        }
+
+        return {
+            ok: true,
+            status: 200,
+            json: async () => syncPayload
+        } as Response
+    }
+}
+
+function seedOutbox (db:Sqlite3Db):void {
+    db.exec({
+        sql: `INSERT INTO outbox
+            (op, target_id, payload, client_op_id, client_updated_at)
+            VALUES ('update_item', 10, ?, 'op-disable-reset',
+                '2026-01-03 00:00:00')`,
+        bind: [JSON.stringify({ id: 10, is_read: true })]
+    })
+}
+
+async function catchError (fn:() => Promise<void>):Promise<unknown> {
+    try {
+        await fn()
+        return null
+    } catch (err) {
+        return err
+    }
 }
 
 test('bootstrapLocalDb: happy path sets signals and db', async (t) => {
@@ -155,3 +233,86 @@ test('getAdapter returns remoteAdapter while bootstrap in progress', async (t) =
     bootstrapInProgress.value = false
     _resetAdapterCache()
 })
+
+test('disableLocalFirst: aborts when pending writes cannot sync',
+    async (t) => {
+        clearBootstrappedDb()
+        setupSupportedLocalFirst()
+
+        await getAdapter('did:test:disable-sync-failure')
+        const db = getLocalDb('did:test:disable-sync-failure')
+        t.ok(db, 'local db is cached')
+        if (!db) return
+
+        seedOutbox(db)
+
+        const err = await catchError(async () => {
+            await disableLocalFirst(
+                'did:test:disable-sync-failure',
+                failingPushFetch()
+            )
+        })
+        t.ok(err instanceof Error, 'disable rejects on failed push')
+        t.ok(
+            err instanceof Error &&
+            /Unable to upload pending local changes/.test(err.message),
+            'error explains pending local changes were not uploaded'
+        )
+        t.equal(syncSubscriptions.value, true,
+            'local-first remains enabled after failed push')
+        t.equal(getLocalDb('did:test:disable-sync-failure'), db,
+            'local db cache remains available')
+
+        db.close()
+        clearBootstrappedDb()
+        _resetAdapterCache()
+    }
+)
+
+test('resetLocalFirst: requires explicit data-loss confirmation after failure',
+    async (t) => {
+        clearBootstrappedDb()
+        setupSupportedLocalFirst()
+
+        await getAdapter('did:test:reset-sync-failure')
+        const db = getLocalDb('did:test:reset-sync-failure')
+        t.ok(db, 'local db is cached')
+        if (!db) return
+
+        seedOutbox(db)
+
+        const err = await catchError(async () => {
+            await resetLocalFirst(
+                'did:test:reset-sync-failure',
+                failingPushFetch()
+            )
+        })
+        t.ok(err instanceof Error, 'reset rejects on failed push')
+        t.ok(
+            err instanceof Error &&
+            /Unable to upload pending local changes/.test(err.message),
+            'error explains pending local changes were not uploaded'
+        )
+        t.equal(getLocalDb('did:test:reset-sync-failure'), db,
+            'reset abort keeps the cached db')
+
+        await resetLocalFirst(
+            'did:test:reset-sync-failure',
+            failingPushFetch(),
+            { allowDataLossOnSyncFailure: true }
+        )
+
+        const bootstrapped = getBootstrappedDb()
+        t.ok(bootstrapped, 'reset proceeds after explicit confirmation')
+        if (bootstrapped) {
+            const rows = bootstrapped.selectObjects(
+                'SELECT * FROM feeds'
+            ) as { id:number }[]
+            t.equal(rows.length, 1, 'reset re-bootstraps local data')
+            bootstrapped.close()
+        }
+
+        clearBootstrappedDb()
+        _resetAdapterCache()
+    }
+)

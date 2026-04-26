@@ -25,7 +25,7 @@ import {
     clearBootstrappedDb,
     bootstrapLocalDb
 } from './bootstrap.js'
-import { pushSync } from './push-sync.js'
+import { pushSync, getOutboxCount } from './push-sync.js'
 import type { DbAdapter } from './types.js'
 import type { Sqlite3Db } from './sqlite-init.js'
 
@@ -73,6 +73,24 @@ export function _resetSupportedCache ():void {
 let _cachedAdapter:DbAdapter|null = null
 let _cachedAdapterDid:string|null = null
 let _cachedDb:Sqlite3Db|null = null
+
+export class LocalFirstSyncFailureError extends Error {
+    pending:number
+
+    constructor (pending:number, cause?:unknown) {
+        const detail = cause instanceof Error ? `: ${cause.message}` : ''
+        super(
+            'Unable to upload pending local changes before deleting ' +
+            `local data${detail}`
+        )
+        this.name = 'LocalFirstSyncFailureError'
+        this.pending = pending
+    }
+}
+
+interface ResetLocalFirstOptions {
+    allowDataLossOnSyncFailure?:boolean
+}
 
 /**
  * Returns `localAdapter` when the user has opted in AND the browser
@@ -139,9 +157,27 @@ export function _resetAdapterCache ():void {
     _cachedDb = null
 }
 
+async function pushPendingWritesBeforeRemoval (
+    db:Sqlite3Db|null,
+    fetchFn:typeof fetch
+):Promise<void> {
+    if (!db || !navigator.onLine) return
+
+    try {
+        await pushSync(db, fetchFn as Parameters<typeof pushSync>[1])
+    } catch (err) {
+        throw new LocalFirstSyncFailureError(getOutboxCount(db), err)
+    }
+
+    const pending = getOutboxCount(db)
+    if (pending > 0) {
+        throw new LocalFirstSyncFailureError(pending)
+    }
+}
+
 /**
  * Disable local-first for `did`:
- * 1. Best-effort pushSync drain (skipped if offline).
+ * 1. Drain pending writes with pushSync (skipped if offline).
  * 2. Removes the OPFS file.
  * 3. Clears in-memory adapter/DB caches.
  * 4. Flips syncSubscriptions to false and persists.
@@ -151,13 +187,7 @@ export async function disableLocalFirst (
     fetchFn:typeof fetch = fetch
 ):Promise<void> {
     const db = getBootstrappedDb() ?? _cachedDb
-    if (db && navigator.onLine) {
-        try {
-            await pushSync(db, fetchFn as Parameters<typeof pushSync>[1])
-        } catch (_) {
-            // best-effort — ignore errors
-        }
-    }
+    await pushPendingWritesBeforeRemoval(db, fetchFn)
     clearBootstrappedDb()
     _resetAdapterCache()
     markLocalTabReleased()
@@ -170,19 +200,19 @@ export async function disableLocalFirst (
 
 /**
  * Reset local data for `did`: wipe the OPFS file and immediately
- * re-bootstrap without changing the toggle.
+ * re-bootstrap without changing the toggle. A failed pre-reset push
+ * aborts unless the caller explicitly accepts local data loss.
  */
 export async function resetLocalFirst (
     did:string,
-    fetchFn:typeof fetch = fetch
+    fetchFn:typeof fetch = fetch,
+    options:ResetLocalFirstOptions = {}
 ):Promise<void> {
     const db = getBootstrappedDb() ?? _cachedDb
-    if (db && navigator.onLine) {
-        try {
-            await pushSync(db, fetchFn as Parameters<typeof pushSync>[1])
-        } catch (_) {
-            // best-effort
-        }
+    try {
+        await pushPendingWritesBeforeRemoval(db, fetchFn)
+    } catch (err) {
+        if (!options.allowDataLossOnSyncFailure) throw err
     }
     clearBootstrappedDb()
     _resetAdapterCache()

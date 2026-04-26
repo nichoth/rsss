@@ -23,7 +23,8 @@ import {
     getBootstrappedDb,
     getLocalDb,
     getOutboxCount,
-    localTabLockError
+    localTabLockError,
+    LocalFirstSyncFailureError
 } from '../db/index.js'
 import '@substrate-system/check-box'
 import './settings.css'
@@ -85,7 +86,10 @@ export const SettingsRoute:FunctionComponent<{
                 lines.push(
                     `  - ${pending} pending offline change` +
                     (pending === 1 ? '' : 's') +
-                    ' (not yet synced to server)'
+                    ' (will sync before deletion)'
+                )
+                lines.push(
+                    'If sync fails, local storage will stay enabled.'
                 )
             }
             lines.push('\nContinue?')
@@ -103,7 +107,17 @@ export const SettingsRoute:FunctionComponent<{
                     'synced and will be discarded. Proceeding anyway.'
                 )
             }
-            await disableLocalFirst(did)
+            try {
+                await disableLocalFirst(did)
+            } catch (err) {
+                const msg = err instanceof Error ?
+                    err.message :
+                    'Unable to disable local storage'
+                alert(msg)
+                setSyncSubscriptions(true)
+                saveLocalFirstSettings()
+                ;(ev.target as HTMLInputElement).checked = true
+            }
         }
     }
 
@@ -121,10 +135,38 @@ export const SettingsRoute:FunctionComponent<{
                 (pending === 1 ? '' : 's') +
                 ' will be synced before wiping.'
             )
+            lines.push(
+                'If sync fails, reset will be cancelled unless you ' +
+                'confirm discarding pending changes.'
+            )
         }
         lines.push('Continue?')
         if (!confirm(lines.join('\n'))) return
-        await resetLocalFirst(did)
+        try {
+            await resetLocalFirst(did)
+        } catch (err) {
+            if (!(err instanceof LocalFirstSyncFailureError)) {
+                alert(err instanceof Error ? err.message : 'Reset failed')
+                return
+            }
+
+            const confirmed = confirm([
+                err.message,
+                '',
+                'Reset anyway and discard pending local changes?'
+            ].join('\n'))
+            if (!confirmed) return
+
+            try {
+                await resetLocalFirst(did, fetch, {
+                    allowDataLossOnSyncFailure: true
+                })
+            } catch (resetErr) {
+                alert(resetErr instanceof Error ?
+                    resetErr.message :
+                    'Reset failed')
+            }
+        }
     }
 
     function handleContentChange (ev:Event) {
@@ -225,7 +267,8 @@ export const SettingsRoute:FunctionComponent<{
                         Reset local data
                     </button>
                     <p class="reset-desc">
-                        Wipe all local data and re-download from server.
+                        Sync pending changes, then wipe local data and
+                        re-download from server.
                     </p>
                 </div>
             `}
