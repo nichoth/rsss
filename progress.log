@@ -75,6 +75,10 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Local-first PWA docs**: v1 ships a web app manifest but no service
+  worker. Keep service worker claims out of README/DOCS until an actual
+  worker and registration exist; `test/local-first-docs.mjs` owns the static
+  regression assertions.
 - **Local DB failure surface**: `openLocalDb` classifies failures with
   `classifyLocalDbError`; adapter selection stores user-facing recovery state
   in `localDbError`. Quota/corruption should return `remoteAdapter` with a
@@ -258,6 +262,7 @@ Thread: https://ampcode.com/threads/unknown
   `sendPaymentFailed` accept a Worker retry context; pass `c.executionCtx`
   from request handlers so transient Resend failures retry through
   `waitUntil`.
+
 - **Article route matching**: Use `itemRouteCandidates` from
   `src/shared/item-route.ts` for article link lookup. It builds exact link
   candidates for trailing-slash and `http`/`https` variants; do not use
@@ -1646,4 +1651,31 @@ Thread: https://ampcode.com/threads/unknown
     removing OPFS data.
   - Tapout browser tests use a fixed port, so focused browser suites must
     be run serially.
+---
+
+## 2026-04-26 15:36 PDT - US-067
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Reconciled local-first PWA and SQLite docs with the
+  implemented architecture.
+  - Documented that v1 uses the manifest for installability but does not ship
+    or register a service worker.
+  - Updated SQLite docs to describe the `@sqlite.org/sqlite-wasm` worker,
+    `OPFS-SAH-pool` VFS, browser support requirements, remote fallback, and
+    single tab limitation.
+  - Updated README file tree comments for the implemented SQLite worker.
+  - Added a static documentation regression test and wired it into the full
+    test runner.
+- Files changed:
+  - `README.md`
+  - `DOCS/README.md`
+  - `test/local-first-docs.mjs`
+  - `test/run-all-tests.mjs`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Local-first v1 has no service worker. Treat installability and local
+    SQLite storage as separate PWA concerns until a real app-shell cache is
+    implemented.
+  - Static docs regressions can live in Node `.mjs` tests and be listed in
+    `test/run-all-tests.mjs`.
 ---

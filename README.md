@@ -34,12 +34,13 @@ See [rsss.space](https://rsss.space/).
 npm start
 ```
 
-## Architecture                                                                  
+## Architecture
 
 ### Local First
 
 Local-first reads use a `SQLite` database (`@sqlite.org/sqlite-wasm`)
-persisted to `OPFS` via `FileSystemSyncAccessHandle`.
+persisted to `OPFS` through SQLite's `OPFS-SAH-pool` VFS in a
+cross-origin-isolated worker.
 
 * `loadFeeds()`, `loadItems()`, `loadCounts()` read from the local
   SQLite DB through `localAdapter`.
@@ -48,6 +49,10 @@ persisted to `OPFS` via `FileSystemSyncAccessHandle`.
   setting plus a cross-origin-isolated context with OPFS support.
   When either is missing, `getAdapter()` falls back to `remoteAdapter`,
   which calls the user's Durable Object directly.
+* v1 is a single tab local-first mode. If another tab owns the OPFS
+  SQLite handle, the second tab falls back to `remoteAdapter`.
+* RSSS ships a web app manifest for installability, but v1 does not
+  register a service worker or cache the app shell offline.
 
 ### Sync (remote <-> local)
 
@@ -109,7 +114,8 @@ src/
     ├── state.ts                    # State management & API client
     ├── style.css                   # All styles
     ├── db/                         # Local-first SQLite (OPFS) layer
-    │   ├── sqlite-init.ts          # wa-sqlite + OPFS open/remove
+    │   ├── sqlite-init.ts          # sqlite-wasm OPFS open/remove
+    │   ├── sqlite-worker.ts        # OPFS-SAH-pool SQLite worker
     │   ├── local-adapter.ts        # Reads/writes against local DB
     │   ├── remote-adapter.ts       # Fallback: calls the DO directly
     │   ├── bootstrap.ts            # First-run seed of local DB
@@ -202,7 +208,9 @@ openssl rand -base64 32
 ### Local Durable Object
 
 ```sh
-sqlite3 /Users/nick/code/rsss/.wrangler/state/v3/do/rsss-UserDO/5ccaac5db5efdc5e2ac84cd63b9141cf9dcf247c7a410cc13ce1f9d1ebbc1410.sqlite
+sqlite3 \
+  /Users/nick/code/rsss/.wrangler/state/v3/do/rsss-UserDO/\
+5ccaac5db5efdc5e2ac84cd63b9141cf9dcf247c7a410cc13ce1f9d1ebbc1410.sqlite
 ```
 
 ### Storage use vs quota

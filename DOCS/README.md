@@ -1,5 +1,34 @@
 # docs
 
+## SQLite
+
+- [About SQLite](./sqlite-about.md)
+- [SQLite Cookbook](./sqlite-cookbook.md)
+- [SQLite, misc](./sqlite-misc.md)
+- [SQLite Persistence](./sqlite-persistence.md)
+- [WASM + SQLite](./sqlite-wasm.md)
+
+The browser app uses `@sqlite.org/sqlite-wasm` in a dedicated module worker.
+The worker opens the local database with SQLite's `OPFS-SAH-pool` VFS under
+the `rsss-db` OPFS directory. The main thread talks to it through
+`SQLiteWorkerClient`, so production local-first code must use async helpers
+such as `execDb`, `queryDb`, and `queryOneDb` instead of direct `db.exec`.
+
+Local-first mode is opt-in. It requires:
+
+- the `syncSubscriptions` setting
+- a cross-origin-isolated page
+- OPFS support exposed to the SQLite worker
+- no other RSSS tab already owning the local database
+
+When any requirement is missing, `getAdapter()` falls back to `remoteAdapter`
+and continues to use the user's Durable Object. v1 local-first should be
+treated as a single tab feature because OPFS-SAH access handles are exclusive;
+a second tab reads from the remote adapter instead of contending for the
+local SQLite handle.
+
+---
+
 ## PWA
 
 ### PWA Manifest (`_public/manifest.json`)
@@ -7,38 +36,40 @@
 * App name, icons, theme color
 * Standalone display mode for installability
 
-### Service Worker (_public/sw.js)
+### Service Worker
 
-* Caches static assets for offline use
-* Network-first strategy for pages
-* Cache-first for static assets (JS, CSS, images)
-* Skips caching API requests
+Local-first v1 does not ship or register a service worker. The app is
+installable through the manifest and can read/write subscribed data locally
+after bootstrap, but the app shell itself is still loaded from the network.
 
-### Updated HTML (index.html)
+### HTML (`index.html`)
 
 * PWA meta tags (theme-color, apple-mobile-web-app-*)
 * Manifest link
-* Service worker registration script
 
 ### How It Works
 
-1. Online: Uses remote API adapter (existing behavior)
-2. Offline sync: Click "Pull from Server" in sidebar to sync data to local SQLite
-3. Installable: Users can install as PWA from browser menu
-4. Offline capable: Service worker caches the app shell
+1. Default: uses `remoteAdapter`, which calls the Durable Object.
+2. Opt-in: enabling local-first opens OPFS SQLite and bootstraps from
+   `/api/sync`.
+3. Sync: online cycles push the local outbox, then pull remote changes.
+4. Fallback: unsupported browsers, failed OPFS probes, and second tabs use
+   `remoteAdapter`.
+5. Installable: users can install RSSS from browser UI via the manifest.
 
 >
 > !NOTE
 > The use of SQLite in the browser.
 >
 
-SQLite needs to work in a browser/PWA environment. Should use Web Assembly.
+SQLite needs to work in a browser/PWA environment and should use Web
+Assembly.
 
 * see [sqlite-wasm.md](./sqlite-wasm.md)
 * see [sqlite-cookbook.md](./sqlite-cookbook.md)
 
 
-### Test
+## Test
 
 ```sh
 npm run build

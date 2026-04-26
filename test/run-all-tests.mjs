@@ -8,6 +8,7 @@ const commands = [
     'node test/sidebar-static.mjs',
     'node test/server-routing-static.mjs',
     'node test/local-first-opfs-persistence-static.mjs',
+    'node test/local-first-docs.mjs',
     'node test/vite-build-inputs.mjs',
     'node test/vite-isolation-headers.mjs',
     [
