@@ -1,6 +1,7 @@
 import { test } from '@substrate-system/tapzero'
 // @ts-expect-error -- no type declarations for .wasm imports
 import wasmUrl from '@sqlite.org/sqlite-wasm/sqlite3.wasm'
+import type { SqlValue } from '@sqlite.org/sqlite-wasm'
 import {
     openLocalDb,
     setTestMode
@@ -264,7 +265,7 @@ function getOutbox (db:Sqlite3Db):OutboxRow[] {
     db.exec({
         sql: 'SELECT * FROM outbox ORDER BY id ASC',
         rowMode: 'object',
-        resultRows: rows as unknown[]
+        resultRows: rows as Record<string, SqlValue>[]
     })
     return rows
 }

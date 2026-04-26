@@ -2,19 +2,29 @@
  * Bluesky AT Protocol OAuth implementation for Cloudflare Workers
  */
 
-// DPoP key pair stored for the session (in production, persist this securely)
+// DPoP key pair used during the PAR + token exchange. The pair is
+// discarded once the exchange completes because we never call the
+// AT Protocol on behalf of the user -- OAuth is used purely to
+// establish a verified (did, handle) pair for our own session.
 export interface DPoPKeyPair {
     privateKey: CryptoKey
     publicKey: CryptoKey
     publicJwk: JsonWebKey
 }
 
+/**
+ * Application session derived from a successful Bluesky OAuth flow.
+ *
+ * We deliberately do not retain the access/refresh tokens or DPoP
+ * key pair: this app never calls the user's PDS. Storing tokens we
+ * cannot use would just be a credential leak waiting to happen.
+ * If we ever start making AT Protocol calls on behalf of the user,
+ * the DPoP key pair must be persisted alongside the tokens (see
+ * `restoreDPoPKeyPair`).
+ */
 export interface OAuthSession {
     did: string
     handle: string
-    accessToken: string
-    refreshToken: string
-    expiresAt: number
 }
 
 export interface OAuthState {
@@ -414,7 +424,7 @@ export async function exchangeCode (
     clientId: string,
     redirectUri: string,
     authServer: string
-): Promise<OAuthSession & { dpopKeyPair: DPoPKeyPair }> {
+): Promise<OAuthSession> {
     const metadata = await getAuthServerMetadata(authServer)
 
     // Restore the DPoP key pair from the stored JWKs
@@ -482,17 +492,12 @@ export async function exchangeCode (
     }
 
     const tokens = await response.json() as {
-        access_token: string
-        refresh_token?: string
-        expires_in?: number
         sub: string
-        token_type?: string
     }
 
-    // Verify we got a DPoP-bound token
-    if (tokens.token_type?.toLowerCase() !== 'dpop') {
-        console.warn('Warning: Expected DPoP token type but got:', tokens.token_type)
-    }
+    // The access/refresh tokens and DPoP-bound token type returned
+    // here are intentionally discarded -- see the OAuthSession docs
+    // for why we do not persist them.
 
     // Get handle from DID
     let handle = tokens.sub
@@ -508,76 +513,8 @@ export async function exchangeCode (
 
     return {
         did: tokens.sub,
-        handle,
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token || '',
-        expiresAt: Date.now() + (tokens.expires_in || 3600) * 1000,
-        dpopKeyPair: keyPair // Return key pair for subsequent API calls
+        handle
     }
-}
-
-/**
- * Make an authenticated API request with DPoP
- *
- * When using DPoP-bound access tokens, each request must include a fresh DPoP proof
- * with the 'ath' claim containing a hash of the access token.
- *
- * @param url - The API endpoint URL
- * @param method - HTTP method
- * @param accessToken - The DPoP-bound access token
- * @param keyPair - The DPoP key pair used during token exchange
- * @param options - Additional fetch options (body, additional headers, etc.)
- */
-export async function fetchWithDPoP (
-    url: string,
-    method: string,
-    accessToken: string,
-    keyPair: DPoPKeyPair,
-    options: RequestInit = {}
-): Promise<Response> {
-    // Create DPoP proof with 'ath' claim for the access token
-    const dpopProof = await createDPoPProof(
-        keyPair,
-        method,
-        url,
-        accessToken // Include access token hash in the proof
-    )
-
-    const headers = new Headers(options.headers)
-    headers.set('Authorization', `DPoP ${accessToken}`)
-    headers.set('DPoP', dpopProof)
-
-    let response = await fetch(url, {
-        ...options,
-        method,
-        headers
-    })
-
-    // Handle DPoP nonce requirement
-    if (response.status === 401) {
-        const dpopNonce = response.headers.get('DPoP-Nonce')
-        if (dpopNonce) {
-            const dpopProofWithNonce = await createDPoPProof(
-                keyPair,
-                method,
-                url,
-                accessToken,
-                dpopNonce
-            )
-
-            const retryHeaders = new Headers(options.headers)
-            retryHeaders.set('Authorization', `DPoP ${accessToken}`)
-            retryHeaders.set('DPoP', dpopProofWithNonce)
-
-            response = await fetch(url, {
-                ...options,
-                method,
-                headers: retryHeaders
-            })
-        }
-    }
-
-    return response
 }
 
 /**

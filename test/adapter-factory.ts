@@ -19,7 +19,6 @@ test('isLocalFirstSupported returns false when navigator.storage missing',
     (t) => {
         setup()
         const origStorage = navigator.storage
-        // @ts-expect-error intentional stub
         Object.defineProperty(navigator, 'storage', {
             value: undefined, configurable: true
         })
@@ -53,7 +52,6 @@ test('getAdapter returns remoteAdapter when opted in but support missing',
         syncSubscriptions.value = true
         // Force support check to false by clearing cache and stubbing storage
         const origStorage = navigator.storage
-        // @ts-expect-error intentional stub
         Object.defineProperty(navigator, 'storage', {
             value: undefined, configurable: true
         })

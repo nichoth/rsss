@@ -1,3 +1,4 @@
+import type { SqlValue } from '@sqlite.org/sqlite-wasm'
 import type { Sqlite3Db } from './sqlite-init.js'
 import { storeContent } from '../local-first-settings.js'
 import {
@@ -27,7 +28,7 @@ function getLastPullAt (db:Sqlite3Db):string|null {
     db.exec({
         sql: 'SELECT last_pull_at FROM sync_meta WHERE id = 1',
         rowMode: 'object',
-        resultRows: rows as unknown[]
+        resultRows: rows as Record<string, SqlValue>[]
     })
     return rows[0]?.last_pull_at ?? null
 }

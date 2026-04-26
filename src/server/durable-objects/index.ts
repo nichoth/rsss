@@ -269,7 +269,7 @@ export class UserDO extends DurableObject<Env> {
         // Delete a feed
         app.delete('/feeds/:id', async (c) => {
             const id = parseInt(c.req.param('id'))
-            const body = await c.req.json<{
+            const body:{ client_updated_at?:string } = await c.req.json<{
                 client_updated_at?:string
             }>().catch(() => ({}))
 
@@ -472,7 +472,10 @@ export class UserDO extends DurableObject<Env> {
 
         // Mark all items as read
         app.post('/items/mark-all-read', async (c) => {
-            const body = await c.req.json<{
+            const body:{
+                feed_id?:number
+                client_updated_at?:string
+            } = await c.req.json<{
                 feed_id?:number
                 client_updated_at?:string
             }>().catch(() => ({ feed_id: undefined }))

@@ -1,3 +1,4 @@
+import type { SqlValue } from '@sqlite.org/sqlite-wasm'
 import type { Sqlite3Db } from './sqlite-init.js'
 import type {
     DbAdapter,
@@ -65,7 +66,7 @@ function query<T> (
         sql,
         bind: bind && bind.length ? bind : undefined,
         rowMode: 'object',
-        resultRows: rows as unknown[]
+        resultRows: rows as Record<string, SqlValue>[]
     })
     return rows
 }

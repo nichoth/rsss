@@ -536,10 +536,7 @@ app.post('/api/auth/dev-login', async (c) => {
 
     const session:OAuthSession = {
         did: body.did || 'did:plc:test123',
-        handle: body.handle || 'test.bsky.social',
-        accessToken: 'dev-token',
-        refreshToken: 'dev-refresh',
-        expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000
+        handle: body.handle || 'test.bsky.social'
     }
 
     const secret = (
