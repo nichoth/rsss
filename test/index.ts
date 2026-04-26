@@ -15,6 +15,7 @@ import './api-router.js'
 import './alarm.js'
 import './autumn-billing.js'
 import './email.js'
+import './session-cookie.js'
 import './feed-cache-column.js'
 import './do-migrations.js'
 

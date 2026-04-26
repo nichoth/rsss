@@ -73,6 +73,10 @@ Thread: https://ampcode.com/threads/unknown
 - **Autumn customer email source**: Live checkout should stash the email
   returned by `getOrCreateCustomer`; notification routes read the pending
   email from KV instead of re-fetching the same Autumn customer record.
+- **Session cookie format**: Session cookies use
+  `<payloadB64>.<signatureB64>`, where `payloadB64` is URL-safe base64 JSON
+  containing only `{ sid }`. Sign and verify the encoded payload segment
+  with the HMAC helper; load session data from KV via `session:${sid}`.
 - **Sync status orchestration**: App-level sync cycles should use
   `runSync` from `src/client/db/sync.ts`. It owns `setSyncDone`; pass
   `{ trackStatus: false }` only from orchestrators that will set final
@@ -984,4 +988,27 @@ Thread: https://ampcode.com/threads/unknown
     forbidden headers.
   - Autumn customer responses are schema-validated by the SDK, so tests
     stubbing `globalThis.fetch` need to return the full customer shape.
+---
+
+## 2026-04-26 07:23 PDT - US-045
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Switched session cookies to a URL-safe base64
+  payload format.
+  - `createSessionCookie` now returns `<payloadB64>.<signatureB64>`, with
+    `payloadB64` decoding to JSON containing only the KV session id.
+  - `verifySessionCookie` and `destroySessionCookie` decode the payload with
+    the shared base64url helper and verify the HMAC over the encoded payload.
+  - Added focused coverage for payload shape, URL-safe characters,
+    round-trip verification, and tampered-signature rejection.
+- Files changed:
+  - `src/server/auth/oauth.ts`
+  - `test/session-cookie.ts`
+  - `test/index.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Session cookies should expose only a signed `{ sid }` payload; OAuth
+    session data stays in KV under `session:${sid}`.
+  - Focused session cookie tests can use a tiny in-memory KV object and run
+    with `npx esbuild ./test/session-cookie.ts --bundle | npx tapout`.
 ---
