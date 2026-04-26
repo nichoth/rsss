@@ -81,6 +81,12 @@
 - **Dead-letter outbox status**: `pushSync` owns promotion from `outbox`
   to `dead_letter_outbox` and updates `syncDeadLetters`; status UI reads that
   signal instead of querying SQLite directly.
+- **Durable Object alarm refreshes**: Keep alarm feed polling bounded through
+  `refreshFeeds` with `FEED_REFRESH_CONCURRENCY` instead of unbounded
+  `Promise.all`; always await `ctx.storage.setAlarm` when rescheduling.
+- **Feed fetch failures**: Server feed rows include `last_error` and
+  `last_status`; update both from `fetchFeed` failures so failed refreshes are
+  queryable after alarm or manual refresh runs.
 
 ---
 
@@ -543,4 +549,31 @@ Thread: https://ampcode.com/threads/unknown
     rowid can collide after SQLite reuses rowids in an emptied `outbox`.
   - Tapout browser tests use a fixed port; run focused browser test scripts
     serially instead of in parallel.
+---
+
+## 2026-04-25 22:58 PDT - US-028
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Fixed Durable Object alarm refresh behavior.
+  - Added an 8-worker bounded refresh queue for `alarm()` feed polling.
+  - Awaited `ctx.storage.setAlarm(...)` when rescheduling the next alarm.
+  - Added shared `feeds.last_error` and `feeds.last_status` columns plus a
+    Durable Object migration for existing databases.
+  - `fetchFeed` now records failure message/status on the feed row.
+  - Added focused browser tests for alarm concurrency, awaited rescheduling,
+    and failure metadata writes.
+- Files changed:
+  - `src/server/durable-objects/index.ts`
+  - `src/shared/schema.ts`
+  - `test/alarm.ts`
+  - `test/index.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Alarm refresh work should use `refreshFeeds` so the Durable Object does
+    not fan out unbounded feed fetches.
+  - Focused tapout tests that intentionally hit logged failure paths should
+    silence expected `console.error` calls, because browser console errors can
+    make tapout exit nonzero even when TAP assertions pass.
+  - Feed failure state is stored on the server `feeds` row as `last_error` and
+    `last_status`; keep the shared schema and server migrations in sync.
 ---

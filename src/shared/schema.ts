@@ -15,6 +15,8 @@ export const TABLES_SQL = `
         description TEXT,
         site_url TEXT,
         last_fetched TEXT,
+        last_error TEXT,
+        last_status INTEGER,
         is_locally_cached INTEGER DEFAULT 1,
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now'))

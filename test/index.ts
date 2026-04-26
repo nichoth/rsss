@@ -8,6 +8,7 @@ import './feed-fetch-security.js'
 import './feed-parser.js'
 import './feed-create.js'
 import './api-router.js'
+import './alarm.js'
 
 test('all done', () => {
     if (window) {

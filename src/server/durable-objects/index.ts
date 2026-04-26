@@ -9,8 +9,8 @@ import {
     TRIGGERS_SQL,
     DEAD_LETTER_OUTBOX_SQL
 } from '../../shared/schema.js'
-import type { FeedFetchError } from '../feed-fetch.js'
 import {
+    FeedFetchError,
     fetchFeedText,
     validateFeedUrl
 } from '../feed-fetch.js'
@@ -28,6 +28,8 @@ interface Feed {
     description:string|null
     site_url:string|null
     last_fetched:string|null
+    last_error:string|null
+    last_status:number|null
     created_at:string
     updated_at:string
     is_locally_cached:number
@@ -46,6 +48,7 @@ const FEED_XML_PARSER = new XMLParser({
     textNodeName: '#text',
     trimValues: true
 })
+const FEED_REFRESH_CONCURRENCY = 8
 
 /**
  * Store feeds and items for a single user.
@@ -88,6 +91,7 @@ export class UserDO extends DurableObject<Env> {
         // Must run after table creation but before updated_at indexes.
         this.migrateAddUpdatedAt()
         this.migrateAddIsLocallyCached()
+        this.migrateAddFeedFailureColumns()
 
         // 3. Create indexes and triggers (shared schema) - idempotent
         this.sql.exec(INDEXES_SQL)
@@ -134,6 +138,23 @@ export class UserDO extends DurableObject<Env> {
         )
         if (!hasColumn) {
             this.sql.exec('ALTER TABLE feeds ADD COLUMN is_locally_cached INTEGER DEFAULT 1')
+        }
+    }
+
+    private migrateAddFeedFailureColumns () {
+        const columns = this.sql.exec('PRAGMA table_info(feeds)').toArray()
+        const hasLastError = columns.some((col: unknown) =>
+            (col as { name:string }).name === 'last_error'
+        )
+        const hasLastStatus = columns.some((col: unknown) =>
+            (col as { name:string }).name === 'last_status'
+        )
+
+        if (!hasLastError) {
+            this.sql.exec('ALTER TABLE feeds ADD COLUMN last_error TEXT')
+        }
+        if (!hasLastStatus) {
+            this.sql.exec('ALTER TABLE feeds ADD COLUMN last_status INTEGER')
         }
     }
 
@@ -669,7 +690,9 @@ export class UserDO extends DurableObject<Env> {
                         title = COALESCE(?, title),
                         description = COALESCE(?, description),
                         site_url = COALESCE(?, site_url),
-                        last_fetched = datetime('now')
+                        last_fetched = datetime('now'),
+                        last_error = NULL,
+                        last_status = NULL
                     WHERE id = ?`,
                     parsedFeed.title,
                     parsedFeed.description,
@@ -703,6 +726,15 @@ export class UserDO extends DurableObject<Env> {
             }
         } catch (err) {
             console.error(`Error fetching feed ${feed.url}:`, err)
+            this.sql.exec(
+                `UPDATE feeds SET
+                    last_error = ?,
+                    last_status = ?
+                WHERE id = ?`,
+                err instanceof Error ? err.message : String(err),
+                err instanceof FeedFetchError ? err.status : 500,
+                feed.id
+            )
         }
     }
 
@@ -900,11 +932,26 @@ export class UserDO extends DurableObject<Env> {
      * Alarm handler for periodic feed refresh
      */
     async alarm (): Promise<void> {
-        const feeds = this.sql.exec('SELECT * FROM feeds').toArray() as unknown as Feed[]
+        const feeds = this.sql.exec('SELECT * FROM feeds')
+            .toArray() as unknown as Feed[]
 
-        await Promise.all(feeds.map(feed => this.fetchFeed(feed)))
+        await this.refreshFeeds(feeds)
 
         // Schedule next alarm in 10 minutes
-        this.ctx.storage.setAlarm(Date.now() + 10 * 60 * 1000)
+        await this.ctx.storage.setAlarm(Date.now() + 10 * 60 * 1000)
+    }
+
+    private async refreshFeeds (feeds:Feed[]):Promise<void> {
+        let nextFeedIndex = 0
+        const workerCount = Math.min(FEED_REFRESH_CONCURRENCY, feeds.length)
+        const workers = Array.from({ length: workerCount }, async () => {
+            while (nextFeedIndex < feeds.length) {
+                const feed = feeds[nextFeedIndex]
+                nextFeedIndex++
+                if (feed) await this.fetchFeed(feed)
+            }
+        })
+
+        await Promise.all(workers)
     }
 }
