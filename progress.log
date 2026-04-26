@@ -77,6 +77,11 @@ Thread: https://ampcode.com/threads/unknown
   `<payloadB64>.<signatureB64>`, where `payloadB64` is URL-safe base64 JSON
   containing only `{ sid }`. Sign and verify the encoded payload segment
   with the HMAC helper; load session data from KV via `session:${sid}`.
+- **Isolation headers for iframe compatibility**: Use
+  `Cross-Origin-Embedder-Policy: credentialless` with
+  `Cross-Origin-Opener-Policy: same-origin` in both Vite dev headers and
+  `src/server/isolation-headers.ts`. This preserves cross-origin isolation
+  while allowing third-party iframe embeds that are blocked by `require-corp`.
 - **Sync status orchestration**: App-level sync cycles should use
   `runSync` from `src/client/db/sync.ts`. It owns `setSyncDone`; pass
   `{ trackStatus: false }` only from orchestrators that will set final
@@ -689,6 +694,33 @@ Thread: https://ampcode.com/threads/unknown
     branches.
   - Keep public Worker CORS/CSRF controls in `src/server/index.ts`; internal
     Durable Object CORS cleanup is covered by a later PRD story.
+---
+
+## 2026-04-25 23:09 PDT - US-030
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Switched cross-origin embedder policy to
+  `credentialless` for iframe compatibility while keeping COOP enabled.
+  - Updated Worker isolation headers in `src/server/isolation-headers.ts`.
+  - Updated Vite dev server headers in `vite.config.js`.
+  - Added focused regression coverage for server and Vite header values.
+  - Wired the server header regression into the full browser test bundle.
+- Files changed:
+  - `src/server/isolation-headers.ts`
+  - `vite.config.js`
+  - `test/server-headers.ts`
+  - `test/vite-isolation-headers.mjs`
+  - `test/run-all-tests.mjs`
+  - `test/run-header-tests.mjs`
+  - `test/index.ts`
+  - `package.json`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Use COEP `credentialless`, not `require-corp`, for this app's isolation
+    headers because the header still supports cross-origin isolation and is
+    compatible with third-party sponsor iframes.
+  - Vite config header values can be tested directly from Node by importing
+    `vite.config.js` and calling the exported config factory.
 ---
 
 ## 2026-04-25 23:26 PDT - US-033
