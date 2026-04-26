@@ -34,6 +34,9 @@
 
 ## Codebase Patterns
 
+- **Autumn subscription status narrowing**: `verifySubscription` should
+  treat Autumn SDK statuses as untrusted runtime values and narrow them
+  through a local type guard before returning app-level billing state.
 - **Durable Object route tests**: Route behavior can be tested without a real
   DO instance by using `Object.create(UserDO.prototype)`, assigning a focused
   fake `sql` object and `ctx.waitUntil`, then calling the private
@@ -251,6 +254,25 @@ Thread: https://ampcode.com/threads/unknown
   - `npm run test:feed` runs the focused SSRF and body-cap tests.
   - Lint currently covers the whole repo, so unrelated lint regressions can
     block a required story verification step.
+---
+
+## 2026-04-25 23:17 PDT - US-031
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Narrowed `VerifiedSubscription.status` to the
+  known `'active' | 'scheduled'` union.
+  - Added an explicit local type guard for Autumn SDK subscription statuses.
+  - Removed redundant billing status casts in `src/server/index.ts`.
+  - Added a focused test for the narrowed subscription status contract.
+- Files changed:
+  - `src/server/autumn-billing.ts`
+  - `src/server/index.ts`
+  - `test/autumn-billing.ts`
+  - `test/index.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Autumn SDK status values may include opaque unknown statuses; narrow
+    them at the billing boundary instead of casting in callers.
 ---
 
 ## 2026-04-24 - US-001

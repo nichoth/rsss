@@ -172,9 +172,7 @@ async function resolveBilling (
     const verified = await verifySubscription(env, did, planId)
     const fresh:CachedBilling = {
         planId,
-        status: verified ?
-            (verified.status as 'active'|'scheduled') :
-            'none',
+        status: verified ? verified.status : 'none',
         refreshedAt: Date.now()
     }
     await writeCachedBilling(env, did, fresh)
@@ -815,7 +813,7 @@ app.post(
             }
             const billing:CachedBilling = {
                 planId: verified.planId,
-                status: verified.status as 'active'|'scheduled',
+                status: verified.status,
                 refreshedAt: Date.now()
             }
             await writeCachedBilling(

@@ -9,6 +9,7 @@ import './feed-parser.js'
 import './feed-create.js'
 import './api-router.js'
 import './alarm.js'
+import './autumn-billing.js'
 
 test('all done', () => {
     if (window) {

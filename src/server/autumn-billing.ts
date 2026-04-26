@@ -93,7 +93,13 @@ export async function attachCheckout (
 
 export interface VerifiedSubscription {
     planId:string;
-    status:string;
+    status:'active'|'scheduled';
+}
+
+function isVerifiedSubscriptionStatus (
+    status:unknown
+):status is VerifiedSubscription['status'] {
+    return status === 'active' || status === 'scheduled'
 }
 
 /**
@@ -115,10 +121,8 @@ export async function verifySubscription (
         if (s.planId !== planId) continue
         if (s.addOn) continue
         if (s.canceledAt) continue
-        if (s.status !== 'active' && s.status !== 'scheduled') {
-            continue
-        }
-        return { planId: s.planId, status: String(s.status) }
+        if (!isVerifiedSubscriptionStatus(s.status)) continue
+        return { planId: s.planId, status: s.status }
     }
     return null
 }
