@@ -42,8 +42,16 @@ export async function runSync (
             throw err
         }
         if (trackStatus) {
+            const pending = await getOutboxCount(db).catch(
+                () => undefined
+            )
+            const deadLetters = await getDeadLetterOutboxCount(db).catch(
+                () => undefined
+            )
             setSyncError(
-                err instanceof Error ? err.message : String(err)
+                err instanceof Error ? err.message : String(err),
+                pending,
+                deadLetters
             )
         }
         throw err

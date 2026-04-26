@@ -36,10 +36,16 @@ export function setSyncDone (
     })
 }
 
-export function setSyncError (msg:string):void {
+export function setSyncError (
+    msg:string,
+    pending = syncPending.value,
+    deadLetters = syncDeadLetters.value
+):void {
     batch(() => {
         syncStatus.value = 'error'
         syncError.value = msg
+        syncPending.value = pending
+        syncDeadLetters.value = deadLetters
     })
 }
 

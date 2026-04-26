@@ -1,7 +1,24 @@
 import { signal } from '@preact/signals'
 import { test } from '@substrate-system/tapzero'
+// @ts-expect-error -- no type declarations for .wasm imports
+import wasmUrl from '@sqlite.org/sqlite-wasm/sqlite3.wasm'
+import {
+    getAdapter,
+    _resetAdapterCache,
+    _resetSupportedCache
+} from '../src/client/db/index.js'
 import * as pullSyncModule from '../src/client/db/pull-sync.js'
 import { PushSyncAuthError } from '../src/client/db/push-sync.js'
+import {
+    setSQLiteWorkerClientFactoryForTests,
+    setTestMode
+} from '../src/client/db/sqlite-init.js'
+import type { SQLiteWorkerClient } from
+    '../src/client/db/sqlite-worker-client.js'
+import {
+    resetTabCoordinationForTests
+} from '../src/client/db/tab-coordination.js'
+import { syncSubscriptions } from '../src/client/local-first-settings.js'
 import { State, type AppState } from '../src/client/state.js'
 
 type ErrorCtor = new () => Error
@@ -9,8 +26,55 @@ type StateWithSyncAuth = typeof State & {
     handleSyncAuthError?:(state:AppState, err:unknown) => boolean
 }
 
+setTestMode(true, wasmUrl as string)
+
 function nextTask ():Promise<void> {
     return new Promise(resolve => setTimeout(resolve, 0))
+}
+
+function emptySyncFetch ():typeof fetch {
+    return async () => new Response(JSON.stringify({
+        feeds: [],
+        items: [],
+        syncedAt: '2026-01-04 00:00:00',
+        latestUpdatedAt: '2026-01-04 00:00:00',
+        isFullSync: false
+    }))
+}
+
+function setupLocalFirstForStateTest ():void {
+    _resetSupportedCache()
+    _resetAdapterCache()
+    resetTabCoordinationForTests()
+    syncSubscriptions.value = true
+    setSQLiteWorkerClientFactoryForTests(() => ({
+        open: async () => undefined,
+        exec: async () => undefined,
+        query: async () => [],
+        close: async () => undefined,
+        probe: async () => undefined,
+        dispose: () => undefined
+    } as unknown as SQLiteWorkerClient))
+    Object.defineProperty(navigator, 'storage', {
+        value: {
+            getDirectory: async () => ({})
+        },
+        configurable: true
+    })
+    Object.defineProperty(globalThis, 'crossOriginIsolated', {
+        value: true,
+        configurable: true
+    })
+    Object.defineProperty(navigator, 'onLine', {
+        value: true,
+        configurable: true
+    })
+}
+
+async function settleOnlineHandler ():Promise<void> {
+    await nextTask()
+    await nextTask()
+    await nextTask()
 }
 
 function authState ():AppState {
@@ -186,6 +250,77 @@ test('State cleanup removes online and offline listeners', async t => {
         window.removeEventListener = originals.removeEventListener
     }
 })
+
+test('online sync refreshes lists, counts, and the route item',
+    async t => {
+        const originals = {
+            checkAuth: State.checkAuth,
+            loadBillingStatus: State.loadBillingStatus,
+            loadFeeds: State.loadFeeds,
+            loadItems: State.loadItems,
+            loadCounts: State.loadCounts,
+            loadItemByRoute: State.loadItemByRoute,
+            fetch: globalThis.fetch
+        }
+        const did = 'did:plc:online-refresh'
+        const calls:string[] = []
+
+        setupLocalFirstForStateTest()
+        await getAdapter(did)
+        globalThis.fetch = emptySyncFetch()
+
+        State.checkAuth = async () => {}
+        State.loadBillingStatus = async () => null
+        State.loadFeeds = async () => {
+            calls.push('feeds')
+        }
+        State.loadItems = async () => {
+            calls.push('items')
+        }
+        State.loadCounts = async () => {
+            calls.push('counts')
+        }
+        State.loadItemByRoute = async () => {
+            calls.push('route-item')
+            return null
+        }
+
+        try {
+            const state = State()
+            state.user.value = {
+                did,
+                handle: 'online.test'
+            }
+            await settleOnlineHandler()
+            state.route.value = '/post/example'
+            await settleOnlineHandler()
+            calls.length = 0
+
+            window.dispatchEvent(new Event('online'))
+            await settleOnlineHandler()
+
+            t.deepEqual(
+                calls,
+                ['feeds', 'items', 'counts', 'route-item'],
+                'online sync reloads visible data after the cycle'
+            )
+
+            state.cleanup()
+        } finally {
+            State.checkAuth = originals.checkAuth
+            State.loadBillingStatus = originals.loadBillingStatus
+            State.loadFeeds = originals.loadFeeds
+            State.loadItems = originals.loadItems
+            State.loadCounts = originals.loadCounts
+            State.loadItemByRoute = originals.loadItemByRoute
+            globalThis.fetch = originals.fetch
+            setSQLiteWorkerClientFactoryForTests(null)
+            _resetAdapterCache()
+            _resetSupportedCache()
+            syncSubscriptions.value = false
+            resetTabCoordinationForTests()
+        }
+    })
 
 test('checkAuth does not remove legacy user localStorage entry',
     async t => {

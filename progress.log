@@ -75,6 +75,12 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Post-sync UI refresh**: State-level sync completion should call
+  `State.refreshAfterSync(state)`. It reloads feeds, items, counts, and the
+  currently open `/post/*` route item after a successful sync cycle.
+- **Sync error counts**: `runSync` should refresh outbox and dead-letter
+  counts before setting sync error state, so a successful push attempt is
+  reflected even when a later pull step fails.
 - **Lazy SQLite Vite packaging**: Keep the client build input to
   `index.html`. The SQLite worker and WASM assets are emitted from
   `new Worker(new URL('./sqlite-worker.ts', import.meta.url))` and the
@@ -263,6 +269,32 @@ Thread: https://ampcode.com/threads/unknown
     outbox must check `getOutboxCount(db)` after `pushSync`.
   - Local-first destructive flows should preserve adapter/DB caches until
     after the pre-delete sync guard has succeeded.
+---
+
+## 2026-04-26 14:59 PDT - US-063
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Refreshed visible UI state after successful online
+  local-first sync cycles.
+  - Added `State.refreshAfterSync(state)` to reload feeds, items, counts,
+    and the currently open `/post/*` route item.
+  - Wired the online-event sync path to refresh only after `runSync`
+    succeeds, leaving existing UI data intact on sync errors.
+  - Updated sync error handling so pending outbox and dead-letter counts are
+    refreshed when push runs but a later pull step fails.
+- Files changed:
+  - `src/client/state.ts`
+  - `src/client/db/sync.ts`
+  - `src/client/db/sync-status.ts`
+  - `test/state-auth-storage.ts`
+  - `test/sync-cycle.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Use `State.refreshAfterSync(state)` for post-sync UI refreshes instead
+    of repeating `loadFeeds` / `loadItems` / `loadCounts` chains.
+  - Focused browser tests that import `state.ts` and open a test SQLite DB
+    need `--loader:.wasm=dataurl`; do not stub `globalThis.fetch` until
+    after sqlite-wasm has loaded.
 ---
 
 ## 2026-04-25 22:33 PDT - US-026

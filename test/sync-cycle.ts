@@ -177,3 +177,74 @@ test('runSync marks sync done once after push and pull finish',
         }
     }
 )
+
+test('runSync refreshes pending count after push when pull fails',
+    async (t) => {
+        const db = await openLocalDb('did:test:sync-cycle-pull-error')
+
+        isLocalFirstActive.value = true
+        syncStatus.value = 'idle'
+        syncedAt.value = null
+        syncPending.value = 0
+        syncDeadLetters.value = 0
+        syncError.value = null
+
+        try {
+            db.exec({
+                sql: `INSERT INTO feeds
+                    (id, url, title, created_at, updated_at)
+                    VALUES (1, 'https://example.com/feed', 'Feed',
+                        '2026-01-01 00:00:00',
+                        '2026-01-01 00:00:00')`
+            })
+            db.exec({
+                sql: `INSERT INTO items
+                    (id, feed_id, guid, title, link, is_read, is_starred,
+                     created_at, updated_at)
+                    VALUES (10, 1, 'guid-10', 'Item',
+                        'https://example.com/item-10', 1, 0,
+                        '2026-01-01 00:00:00',
+                        '2026-01-03 00:00:00')`
+            })
+            db.exec({
+                sql: `INSERT INTO outbox
+                    (op, target_id, payload, client_op_id,
+                     client_updated_at)
+                    VALUES ('update_item', 10, ?, 'op-pending-error',
+                        '2026-01-03 00:00:00')`,
+                bind: [JSON.stringify({ id: 10, is_read: true })]
+            })
+
+            try {
+                await runSync(db, async (_url, init) => {
+                    if (init?.method) {
+                        return {
+                            ok: false,
+                            status: 500,
+                            json: async () => ({})
+                        } as Response
+                    }
+
+                    return {
+                        ok: false,
+                        status: 500,
+                        json: async () => ({})
+                    } as Response
+                })
+                t.fail('runSync rejects when pull fails')
+            } catch (err) {
+                t.ok(err instanceof Error, 'pull failure rejects')
+            }
+
+            t.equal(syncStatus.value, 'error', 'sync status is error')
+            t.equal(
+                syncPending.value,
+                1,
+                'pending count reflects the failed push attempt'
+            )
+        } finally {
+            isLocalFirstActive.value = false
+            db.close()
+        }
+    }
+)

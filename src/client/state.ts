@@ -271,15 +271,11 @@ export function State ():AppState {
                         debug('sync cycle error:', err)
                     }).then(() => {
                         if (generation !== authLoadGeneration) return
-                        State.loadFeeds(state)
-                        State.loadItems(state)
-                        State.loadCounts(state)
+                        State.refreshAfterSync(state)
                     })
                 } else {
                     isLocalFirstActive.value = false
-                    State.loadFeeds(state)
-                    State.loadItems(state)
-                    State.loadCounts(state)
+                    State.refreshAfterSync(state)
                 }
             })
         })
@@ -290,7 +286,9 @@ export function State ():AppState {
         const did = state.user.value?.did
         const db = getLocalDb(did)
         if (db) {
-            runSync(db).catch((err) => {
+            runSync(db).then(() => {
+                State.refreshAfterSync(state)
+            }).catch((err) => {
                 if (State.handleSyncAuthError(state, err)) {
                     return
                 }
@@ -351,6 +349,31 @@ State.handleSyncAuthError = function (
     })
     state._setRoute('/login')
     return true
+}
+
+State.refreshAfterSync = async function (
+    state:AppState
+):Promise<void> {
+    const route = state.route.value
+
+    await State.loadFeeds(state)
+    await State.loadItems(state)
+    await State.loadCounts(state)
+
+    if (!isItemRoute(route)) return
+
+    state.routeItemLoading.value = true
+    const item = await State.loadItemByRoute(state, route)
+
+    if (state.route.value !== route) {
+        state.routeItemLoading.value = false
+        return
+    }
+
+    batch(() => {
+        state.routeItem.value = item
+        state.routeItemLoading.value = false
+    })
 }
 
 /**
