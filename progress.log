@@ -58,6 +58,9 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Client Feed/Item type authority**: `src/client/db/types.ts` owns the
+  canonical client `Feed` and `Item` interfaces. `state.ts` imports and
+  re-exports those types for existing UI imports instead of redefining them.
 - **Local content caching scope**: Feed-level local caching is not supported.
   Use the local-first `storeContent` setting for article content storage;
   do not add `is_locally_cached` or per-feed cache toggles.
@@ -819,4 +822,24 @@ Thread: https://ampcode.com/threads/unknown
 - **Learnings for future iterations:**
   - Keep auth user data in `state.user`; the legacy `rsss_user`
     localStorage key has no readers and should not be reintroduced.
+---
+
+## 2026-04-26 01:21 PDT - US-039
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Consolidated client `Feed` and `Item` types.
+  - `state.ts` now imports and re-exports the canonical DB types instead of
+    declaring narrower local interfaces.
+  - Added a compile-time regression test that asserts state exports match
+    `src/client/db/types.ts` exactly.
+  - Updated the state-route item fixture to include canonical `updated_at`.
+- Files changed:
+  - `src/client/state.ts`
+  - `test/client-types.ts`
+  - `test/state-route.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - UI code may continue importing `Feed` and `Item` from `state.ts`, but
+    the definitions must come from `src/client/db/types.ts`.
+  - Test fixtures typed as `Item` need both `created_at` and `updated_at`.
 ---

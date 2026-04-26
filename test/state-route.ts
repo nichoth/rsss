@@ -23,7 +23,8 @@ function item (
         pub_date: null,
         is_read: 0,
         is_starred: 0,
-        created_at: '2024-01-01 00:00:00'
+        created_at: '2024-01-01 00:00:00',
+        updated_at: '2024-01-01 00:00:00'
     }
 }
 
