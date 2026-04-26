@@ -70,6 +70,10 @@ Thread: https://ampcode.com/threads/unknown
 - **Autumn subscription status narrowing**: `verifySubscription` should
   treat Autumn SDK statuses as untrusted runtime values and narrow them
   through a local type guard before returning app-level billing state.
+- **Sync status orchestration**: App-level sync cycles should use
+  `runSync` from `src/client/db/sync.ts`. It owns `setSyncDone`; pass
+  `{ trackStatus: false }` only from orchestrators that will set final
+  sync status themselves.
 - **Durable Object route tests**: Route behavior can be tested without a real
   DO instance by using `Object.create(UserDO.prototype)`, assigning a focused
   fake `sql` object and `ctx.waitUntil`, then calling the private
@@ -872,4 +876,31 @@ Thread: https://ampcode.com/threads/unknown
     directly.
   - Browser tests that import the full app shell need CSS loader handling,
     but this behavior is simpler to cover through the pure helper.
+---
+
+## 2026-04-26 01:36 PDT - US-041
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Single sync orchestrator for sync status updates.
+  - Added `runSync` to run push before pull and call `setSyncDone` only
+    after both phases finish.
+  - Updated `State()` startup and online sync paths to use `runSync`.
+  - Added status suppression options for push/pull phases when an
+    orchestrator owns the final sync status.
+  - Added a focused browser regression test proving pending count and
+    `syncedAt` do not update between push and pull.
+- Files changed:
+  - `src/client/db/sync.ts`
+  - `src/client/db/sync-cycle.ts`
+  - `src/client/db/push-sync.ts`
+  - `src/client/db/pull-sync.ts`
+  - `src/client/state.ts`
+  - `test/sync-cycle.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - App-level sync cycles should use `runSync` from
+    `src/client/db/sync.ts`; do not chain `pushSync` and `pullSync`
+    directly from UI/state callers.
+  - `pushSync` and `pullSync` still manage standalone status by default.
+    Use `{ trackStatus: false }` only inside a higher-level orchestrator.
 ---

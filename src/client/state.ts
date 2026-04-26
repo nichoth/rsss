@@ -20,7 +20,7 @@ import {
     getOutboxCount,
     PushSyncBillingError
 } from './db/push-sync.js'
-import { runSyncCycle } from './db/sync-cycle.js'
+import { runSync } from './db/sync.js'
 import {
     isLocalFirstActive,
     updateOnlineStatus,
@@ -232,7 +232,7 @@ export function State ():AppState {
             const db = getLocalDb(did)
             if (db) {
                 isLocalFirstActive.value = true
-                runSyncCycle(db).catch((err) => {
+                runSync(db).catch((err) => {
                     if (
                         err instanceof SyncBillingError ||
                         err instanceof PushSyncBillingError
@@ -260,7 +260,7 @@ export function State ():AppState {
         const did = state.user.value?.did
         const db = getLocalDb(did)
         if (db) {
-            runSyncCycle(db).catch((err) => {
+            runSync(db).catch((err) => {
                 if (
                     err instanceof SyncBillingError ||
                     err instanceof PushSyncBillingError

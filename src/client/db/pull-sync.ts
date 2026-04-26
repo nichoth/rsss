@@ -186,6 +186,7 @@ function shouldSkipItem (
 export interface PullSyncOptions {
     onFeedUpserted?:(count:number) => void
     onItemUpserted?:(count:number) => void
+    trackStatus?:boolean
 }
 
 /**
@@ -198,7 +199,7 @@ export async function pullSync (
     fetchFn:typeof fetch = fetch,
     opts:PullSyncOptions = {}
 ):Promise<void> {
-    const trackStatus = isLocalFirstActive.value
+    const trackStatus = opts.trackStatus ?? isLocalFirstActive.value
     if (trackStatus) setSyncSyncing()
 
     const lastPullAt = getLastPullAt(db)

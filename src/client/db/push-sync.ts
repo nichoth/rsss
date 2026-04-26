@@ -227,6 +227,10 @@ type FetchLike = (
     init?:RequestInit
 ) => Promise<{ ok:boolean; status:number; json:() => Promise<unknown> }>
 
+export interface PushSyncOptions {
+    trackStatus?:boolean
+}
+
 function buildRequest (
     row:OutboxRow
 ):{
@@ -284,9 +288,10 @@ function buildRequest (
  */
 export async function pushSync (
     db:Sqlite3Db,
-    fetchFn:FetchLike = fetch as unknown as FetchLike
+    fetchFn:FetchLike = fetch as unknown as FetchLike,
+    opts:PushSyncOptions = {}
 ):Promise<void> {
-    const trackStatus = isLocalFirstActive.value
+    const trackStatus = opts.trackStatus ?? isLocalFirstActive.value
     const rows = getOutboxRows(db)
     if (trackStatus && rows.length > 0) setSyncSyncing()
 
