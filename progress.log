@@ -75,6 +75,13 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Billing email app links**: Route handlers should pass request-origin
+  `baseUrl` into subscription billing emails. Email templates should derive
+  in-app links with `new URL(path, baseUrl)` so text and HTML never emit
+  relative URLs.
+- **README deploy command tests**: `test/readme-deploy.mjs` owns static
+  deploy-doc assertions, including current Wrangler KV namespace syntax.
+  Keep README deployment command regressions in that Node test.
 - **Server route static tests**: Repository-level route-shape assertions can
   live in `test/server-routing-static.mjs` and should be listed in
   `test/run-all-tests.mjs` so route cleanup regressions are covered without
@@ -1249,4 +1256,25 @@ Thread: https://ampcode.com/threads/unknown
 - **Learnings for future iterations:**
   - Static source-shape tests can use the TypeScript compiler API when simple
     regexes would be brittle around nested call expressions.
+---
+
+## 2026-04-26 13:38 PDT - US-055
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Fixed subscription email Settings URLs.
+  - Added focused email coverage proving subscription emails include an
+    absolute Settings URL in text and HTML and do not emit `href="/settings"`.
+  - Added `baseUrl` to subscription email parameters and threaded request
+    origin through billing call sites.
+  - Verified the existing README deploy test for current Wrangler KV syntax.
+- Files changed:
+  - `src/server/email.ts`
+  - `src/server/index.ts`
+  - `test/email.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Subscription billing emails should receive request-origin `baseUrl`
+    from route handlers and derive absolute in-app links with `new URL()`.
+  - `test/readme-deploy.mjs` already guards README Wrangler KV namespace
+    syntax, so README deploy command regressions do not need browser tests.
 ---

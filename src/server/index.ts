@@ -694,6 +694,7 @@ app.post('/api/billing/checkout', requireAuth, async (c) => {
 
         if (email) {
             try {
+                const baseUrl = new URL(c.req.url).origin
                 await sendSubscriptionStarted(
                     c.env,
                     c.env.SESSIONS,
@@ -701,6 +702,7 @@ app.post('/api/billing/checkout', requireAuth, async (c) => {
                         to: email,
                         did: session.did,
                         planId,
+                        baseUrl,
                         handle: session.handle
                     }
                 )
@@ -824,6 +826,7 @@ app.post(
                     session.did
                 )
                 if (to) {
+                    const baseUrl = new URL(c.req.url).origin
                     await sendSubscriptionStarted(
                         c.env,
                         c.env.SESSIONS,
@@ -831,6 +834,7 @@ app.post(
                             to,
                             did: session.did,
                             planId: verified.planId,
+                            baseUrl,
                             handle: session.handle
                         },
                         c.executionCtx

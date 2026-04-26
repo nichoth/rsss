@@ -188,6 +188,7 @@ export interface SubscriptionStartedParams {
     to:string;
     did:string;
     planId:string;
+    baseUrl:string;
     handle?:string|null;
 }
 
@@ -200,6 +201,7 @@ export async function sendSubscriptionStarted (
     const greeting = params.handle ?
         `Hi @${params.handle},` :
         'Hi,'
+    const settingsUrl = new URL('/settings', params.baseUrl).toString()
     const text = [
         greeting,
         '',
@@ -207,7 +209,8 @@ export async function sendSubscriptionStarted (
         'Your feeds, read state, and starred items will sync',
         'across all your devices.',
         '',
-        'You can manage your subscription any time from Settings.',
+        'You can manage your subscription any time from Settings:',
+        settingsUrl,
         '',
         'Thanks for subscribing,',
         'RSSS'
@@ -221,7 +224,8 @@ export async function sendSubscriptionStarted (
         ' state, and starred items will sync across all your',
         ' devices.</p>',
         '<p>You can manage your subscription any time from',
-        ' <a href="/settings">Settings</a>.</p>',
+        ' <a href="', escapeHtmlAttr(settingsUrl),
+        '">Settings</a>.</p>',
         '<p>Thanks for subscribing,<br>RSSS</p>'
     ].join('')
 

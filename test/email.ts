@@ -75,7 +75,8 @@ test('billing email dedupe suppresses a second live send', async t => {
             {
                 to: 'reader@example.com',
                 did: 'did:plc:reader',
-                planId: 'sync'
+                planId: 'sync',
+                baseUrl: 'https://rsss.space'
             }
         )
         const second = await sendSubscriptionStarted(
@@ -84,7 +85,8 @@ test('billing email dedupe suppresses a second live send', async t => {
             {
                 to: 'reader@example.com',
                 did: 'did:plc:reader',
-                planId: 'sync'
+                planId: 'sync',
+                baseUrl: 'https://rsss.space'
             }
         )
 
@@ -95,6 +97,52 @@ test('billing email dedupe suppresses a second live send', async t => {
         globalThis.fetch = originalFetch
     }
 })
+
+test('subscription email settings links use absolute base URL',
+    async t => {
+        const originalFetch = globalThis.fetch
+        let requestBody:unknown = null
+
+        globalThis.fetch = (async (_input, init) => {
+            requestBody = JSON.parse(String(init?.body))
+            return new Response(JSON.stringify({ id: 'email_settings' }), {
+                status: 200
+            })
+        }) as typeof fetch
+
+        try {
+            await sendSubscriptionStarted(
+                { RESEND_API_KEY: 're_test' },
+                new MemoryKv(),
+                {
+                    to: 'reader@example.com',
+                    did: 'did:plc:reader',
+                    planId: 'sync',
+                    baseUrl: 'https://rsss.space'
+                }
+            )
+
+            const payload = requestBody as {
+                text:string;
+                html:string;
+            }
+            t.ok(
+                payload.text.includes('https://rsss.space/settings'),
+                'text contains absolute Settings URL'
+            )
+            t.ok(
+                payload.html.includes('href="https://rsss.space/settings"'),
+                'html link uses absolute Settings URL'
+            )
+            t.equal(
+                payload.html.includes('href="/settings"'),
+                false,
+                'html does not use relative Settings URL'
+            )
+        } finally {
+            globalThis.fetch = originalFetch
+        }
+    })
 
 test('subscription email retries once after transient Resend failure',
     async t => {
@@ -123,7 +171,8 @@ test('subscription email retries once after transient Resend failure',
                 {
                     to: 'reader@example.com',
                     did: 'did:plc:reader',
-                    planId: 'sync'
+                    planId: 'sync',
+                    baseUrl: 'https://rsss.space'
                 }
             )
 
@@ -162,7 +211,8 @@ test('subscription email schedules transient retry with waitUntil',
                 {
                     to: 'reader@example.com',
                     did: 'did:plc:reader',
-                    planId: 'sync'
+                    planId: 'sync',
+                    baseUrl: 'https://rsss.space'
                 },
                 {
                     waitUntil (promise) {
