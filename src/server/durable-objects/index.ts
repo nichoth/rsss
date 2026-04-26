@@ -9,6 +9,7 @@ import {
     TRIGGERS_SQL,
     DEAD_LETTER_OUTBOX_SQL
 } from '../../shared/schema.js'
+import { itemRouteCandidates } from '../../shared/item-route.js'
 import {
     FeedFetchError,
     fetchFeedText,
@@ -393,7 +394,7 @@ export class UserDO extends DurableObject<Env> {
                 )
             }
 
-            const routeCandidates = this.itemRouteCandidates(route)
+            const routeCandidates = itemRouteCandidates(route)
             if (routeCandidates.length === 0) {
                 return c.json(
                     { error: 'Route is required' },
@@ -402,11 +403,8 @@ export class UserDO extends DurableObject<Env> {
             }
 
             const routeQuery = routeCandidates
-                .map(() => "items.link LIKE ? ESCAPE '\\'")
+                .map(() => 'items.link = ?')
                 .join(' OR ')
-            const params = routeCandidates.map((candidate) => {
-                return `%${this.escapeLikePattern(candidate)}%`
-            })
 
             const item = this.sql.exec(
                 `SELECT items.*, feeds.title as feed_title
@@ -416,7 +414,7 @@ export class UserDO extends DurableObject<Env> {
                  AND (${routeQuery})
                  ORDER BY pub_date DESC, created_at DESC
                  LIMIT 1`,
-                ...params
+                ...routeCandidates
             ).one()
 
             if (!item) {
@@ -595,33 +593,6 @@ export class UserDO extends DurableObject<Env> {
         })
 
         return app
-    }
-
-    private itemRouteCandidates (route:string):string[] {
-        const normalizedRoute = route
-            .trim()
-            .replace(/^\/post\//, '')
-            .replace(/^\/+/, '')
-
-        if (!normalizedRoute) return []
-
-        const candidates = new Set<string>()
-        candidates.add(normalizedRoute)
-
-        try {
-            candidates.add(decodeURIComponent(normalizedRoute))
-        } catch {
-            // Ignore malformed URI sequences
-        }
-
-        return Array.from(candidates)
-    }
-
-    private escapeLikePattern (value:string):string {
-        return value
-            .replace(/\\/g, '\\\\')
-            .replace(/%/g, '\\%')
-            .replace(/_/g, '\\_')
     }
 
     /**

@@ -20,6 +20,7 @@ import {
     updateOnlineStatus,
     setSyncOffline
 } from './db/sync-status.js'
+import { linkMatchesItemRoute } from '../shared/item-route.js'
 import {
     type BillingStatus,
     setBillingStatus,
@@ -1072,7 +1073,7 @@ export const findItemByRoute = function (
             return item
         }
 
-        if (item.link?.includes(itemRoute)) {
+        if (linkMatchesItemRoute(item.link, itemRoute)) {
             return item
         }
     }

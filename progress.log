@@ -129,6 +129,10 @@ Thread: https://ampcode.com/threads/unknown
   `sendPaymentFailed` accept a Worker retry context; pass `c.executionCtx`
   from request handlers so transient Resend failures retry through
   `waitUntil`.
+- **Article route matching**: Use `itemRouteCandidates` from
+  `src/shared/item-route.ts` for article link lookup. It builds exact link
+  candidates for trailing-slash and `http`/`https` variants; do not use
+  substring matching or SQL `LIKE` for `/post/*` article routes.
 
 ## 2026-04-25 22:33 PDT - US-026
 Thread: https://ampcode.com/threads/unknown
@@ -712,4 +716,33 @@ Thread: https://ampcode.com/threads/unknown
   - When removing DO route behavior, add a focused route test by constructing
     `Object.create(UserDO.prototype)` and calling the private router through
     a typed test shim.
+---
+
+## 2026-04-25 23:40 PDT - US-035
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Exact article route matching.
+  - Added shared `itemRouteCandidates` / `linkMatchesItemRoute` helpers.
+  - Updated Durable Object `GET /items/by-route` and local SQLite
+    `getItemByRoute` to query exact `items.link = ?` candidates instead of
+    `LIKE` wildcards.
+  - Updated `findItemByRoute` to compare exact normalized links instead of
+    using `includes`.
+  - Added overlapping-path regressions for the DO route, local adapter, and
+    client state route helper.
+- Files changed:
+  - `src/shared/item-route.ts`
+  - `src/server/durable-objects/index.ts`
+  - `src/client/db/local-adapter.ts`
+  - `src/client/state.ts`
+  - `test/item-route.ts`
+  - `test/state-route.ts`
+  - `test/local-adapter.ts`
+  - `test/db-adapter.ts`
+  - `test/index.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Article routes intentionally omit the URL scheme; convert them to exact
+    candidate links before comparing with stored item links.
+  - Tapout browser tests must run serially because port 8123 is fixed.
 ---

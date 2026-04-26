@@ -129,14 +129,50 @@ test('getItems respects limit and offset', async (t) => {
     }
 })
 
-test('getItemByRoute finds item by link substring', async (t) => {
+test('getItemByRoute finds item by route', async (t) => {
     const db = await openLocalDb('did:test:getitem-route')
     await seedDb(db)
     const adapter = createLocalAdapter(db)
     try {
-        const item = await adapter.getItemByRoute('item-one')
+        const item = await adapter.getItemByRoute(
+            'example.com/posts/item-one'
+        )
         t.ok(item !== null, 'item found')
         t.equal(item!.title, 'Item One', 'correct item returned')
+    } finally {
+        db.close()
+    }
+})
+
+test('getItemByRoute returns exact match for overlapping paths', async (t) => {
+    const db = await openLocalDb('did:test:getitem-overlap')
+    db.exec(`
+        INSERT INTO feeds (url, title, created_at, updated_at)
+        VALUES
+            ('https://example.com/feed', 'Feed',
+             '2024-01-01 00:00:00', '2024-01-01 00:00:00');
+
+        INSERT INTO items
+            (feed_id, guid, title, link, is_read, is_starred,
+             created_at, updated_at, pub_date)
+        VALUES
+            (1, 'exact', 'Exact Item',
+             'https://example.com/posts/item', 0, 0,
+             '2024-01-01 00:00:00', '2024-01-01 00:00:00',
+             '2024-01-01 00:00:00'),
+            (1, 'overlap', 'Overlap Item',
+             'https://example.com/posts/item-extra', 0, 0,
+             '2024-01-02 00:00:00', '2024-01-02 00:00:00',
+             '2024-01-02 00:00:00');
+    `)
+    const adapter = createLocalAdapter(db)
+
+    try {
+        const item = await adapter.getItemByRoute(
+            'example.com/posts/item'
+        )
+
+        t.equal(item?.title, 'Exact Item', 'returns exact path match')
     } finally {
         db.close()
     }

@@ -8,6 +8,7 @@ import type {
     CountsResponse
 } from './types.js'
 import { formatSqliteTs } from './time.js'
+import { itemRouteCandidates } from '../../shared/item-route.js'
 
 function insertOutbox (
     db:Sqlite3Db,
@@ -28,33 +29,6 @@ function insertOutbox (
             clientUpdatedAt
         ]
     })
-}
-
-function escapeLike (value:string):string {
-    return value
-        .replace(/\\/g, '\\\\')
-        .replace(/%/g, '\\%')
-        .replace(/_/g, '\\_')
-}
-
-function routeCandidates (route:string):string[] {
-    const normalized = route
-        .trim()
-        .replace(/^\/post\//, '')
-        .replace(/^\/+/, '')
-
-    if (!normalized) return []
-
-    const candidates = new Set<string>()
-    candidates.add(normalized)
-
-    try {
-        candidates.add(decodeURIComponent(normalized))
-    } catch {
-        // Ignore malformed URI sequences
-    }
-
-    return Array.from(candidates)
 }
 
 function query<T> (
@@ -185,15 +159,12 @@ export function createLocalAdapter (db:Sqlite3Db):DbAdapter {
         },
 
         async getItemByRoute (itemRoute:string):Promise<Item|null> {
-            const candidates = routeCandidates(itemRoute)
+            const candidates = itemRouteCandidates(itemRoute)
             if (candidates.length === 0) return null
 
             const routeQuery = candidates
-                .map(() => "items.link LIKE ? ESCAPE '\\'")
+                .map(() => 'items.link = ?')
                 .join(' OR ')
-            const likeParams = candidates.map(
-                c => `%${escapeLike(c)}%`
-            )
 
             const item = queryOne<Item>(
                 db,
@@ -204,7 +175,7 @@ export function createLocalAdapter (db:Sqlite3Db):DbAdapter {
                  AND (${routeQuery})
                  ORDER BY pub_date DESC, created_at DESC
                  LIMIT 1`,
-                likeParams
+                candidates
             )
 
             return item ?? null
