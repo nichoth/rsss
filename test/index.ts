@@ -10,6 +10,7 @@ import './feed-create.js'
 import './api-router.js'
 import './alarm.js'
 import './autumn-billing.js'
+import './email.js'
 
 test('all done', () => {
     if (window) {

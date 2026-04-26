@@ -24,6 +24,8 @@ export interface EmailEnv {
 
 const DEFAULT_FROM = 'RSSS <noreply@rsss.space>'
 const EMAIL_DEDUPE_TTL_SECONDS = 60 * 60 * 24 * 7  // 7 days
+const EMAIL_DEDUPE_EPOCH_MS = EMAIL_DEDUPE_TTL_SECONDS * 1000
+const EMAIL_RETRY_DELAY_MS = 500
 
 export type BillingEmailEvent =
     | 'subscription_started'
@@ -50,7 +52,8 @@ function dedupeKey (
     planId:string,
     event:BillingEmailEvent
 ):string {
-    return `email_sent:${did}:${planId}:${event}`
+    const epoch = Math.floor(Date.now() / EMAIL_DEDUPE_EPOCH_MS)
+    return `email_sent:${did}:${planId}:${event}:${epoch}`
 }
 
 export interface BillingEmailKv {
@@ -60,6 +63,46 @@ export interface BillingEmailKv {
         value:string,
         options?:{ expirationTtl?:number }
     ):Promise<void>;
+}
+
+export interface BillingEmailRetryContext {
+    waitUntil (promise:Promise<unknown>):void;
+}
+
+function delay (ms:number):Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function isTransientSendError (err:unknown):boolean {
+    if (!(err instanceof Error)) return false
+    return err.message.includes('statusCode":5')
+        || err.message.includes('statusCode":null')
+        || err.message.includes('temporarily')
+        || err.message.includes('Unable to fetch data')
+}
+
+async function sendPayload (
+    env:EmailEnv,
+    payload:{
+        to:string;
+        subject:string;
+        text:string;
+        html:string;
+    }
+) {
+    const result = await client(env).emails.send({
+        from: fromAddress(env),
+        to: payload.to,
+        subject: payload.subject,
+        text: payload.text,
+        html: payload.html
+    })
+
+    if (result.error) {
+        throw new Error(
+            'Resend send failed: ' + JSON.stringify(result.error)
+        )
+    }
 }
 
 /**
@@ -78,7 +121,8 @@ async function sendOnce (
         subject:string;
         text:string;
         html:string;
-    }
+    },
+    retryContext?:BillingEmailRetryContext
 ):Promise<{ sent:boolean; deduped:boolean }> {
     const key = dedupeKey(did, planId, event)
     const existing = await kv.get(key)
@@ -101,19 +145,36 @@ async function sendOnce (
         return { sent: true, deduped: false }
     }
 
-    const result = await client(env).emails.send({
-        from: fromAddress(env),
-        to: payload.to,
-        subject: payload.subject,
-        text: payload.text,
-        html: payload.html
-    })
+    try {
+        await sendPayload(env, payload)
+    } catch (err) {
+        if (!isTransientSendError(err)) throw err
 
-    if (result.error) {
-        // Don't write the dedupe marker on failure -- caller may retry.
-        throw new Error(
-            `Resend send failed: ${result.error.message}`
-        )
+        const retry = delay(EMAIL_RETRY_DELAY_MS)
+            .then(() => sendPayload(env, payload))
+            .then(() => kv.put(key, '1', {
+                expirationTtl: EMAIL_DEDUPE_TTL_SECONDS
+            }))
+            .catch(retryErr => {
+                console.error('Resend retry failed:', {
+                    did,
+                    planId,
+                    event,
+                    to: payload.to,
+                    error: retryErr
+                })
+            })
+
+        if (retryContext) {
+            retryContext.waitUntil(retry)
+            return { sent: false, deduped: false }
+        }
+
+        await retry
+        if (await kv.get(key)) {
+            return { sent: true, deduped: false }
+        }
+        throw err
     }
 
     await kv.put(key, '1', {
@@ -133,7 +194,8 @@ export interface SubscriptionStartedParams {
 export async function sendSubscriptionStarted (
     env:EmailEnv,
     kv:BillingEmailKv,
-    params:SubscriptionStartedParams
+    params:SubscriptionStartedParams,
+    retryContext?:BillingEmailRetryContext
 ):Promise<{ sent:boolean; deduped:boolean }> {
     const greeting = params.handle ?
         `Hi @${params.handle},` :
@@ -174,7 +236,8 @@ export async function sendSubscriptionStarted (
             subject: "You're subscribed to RSSS Sync",
             text,
             html
-        }
+        },
+        retryContext
     )
 }
 
@@ -189,7 +252,8 @@ export interface PaymentFailedParams {
 export async function sendPaymentFailed (
     env:EmailEnv,
     kv:BillingEmailKv,
-    params:PaymentFailedParams
+    params:PaymentFailedParams,
+    retryContext?:BillingEmailRetryContext
 ):Promise<{ sent:boolean; deduped:boolean }> {
     const greeting = params.handle ?
         `Hi @${params.handle},` :
@@ -237,7 +301,8 @@ export async function sendPaymentFailed (
             subject: 'Your RSSS payment did not go through',
             text,
             html
-        }
+        },
+        retryContext
     )
 }
 

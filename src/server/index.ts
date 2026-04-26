@@ -838,7 +838,8 @@ app.post(
                             did: session.did,
                             planId: verified.planId,
                             handle: session.handle
-                        }
+                        },
+                        c.executionCtx
                     )
                 }
             } catch (err) {
@@ -924,7 +925,8 @@ app.post(
                     planId,
                     handle: session.handle,
                     signupUrl: `${baseUrl}/signup`
-                }
+                },
+                c.executionCtx
             )
             return c.json({
                 emailed: result.sent,

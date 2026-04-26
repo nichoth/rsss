@@ -122,6 +122,10 @@ Thread: https://ampcode.com/threads/unknown
   `formatSqliteTs(new Date())` for JS-generated timestamps, or
   `datetime('now')` inside SQL. Do not write ISO strings into SQLite timestamp
   columns or outbox `client_updated_at`.
+- **Billing email retries**: `sendSubscriptionStarted` and
+  `sendPaymentFailed` accept a Worker retry context; pass `c.executionCtx`
+  from request handlers so transient Resend failures retry through
+  `waitUntil`.
 
 ## 2026-04-25 22:33 PDT - US-026
 Thread: https://ampcode.com/threads/unknown
@@ -651,4 +655,30 @@ Thread: https://ampcode.com/threads/unknown
     branches.
   - Keep public Worker CORS/CSRF controls in `src/server/index.ts`; internal
     Durable Object CORS cleanup is covered by a later PRD story.
+---
+
+## 2026-04-25 23:26 PDT - US-033
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Fixed billing email dedupe and transient retry.
+  - Added a weekly epoch to billing email dedupe keys so a new week can send
+    a fresh subscription/payment email for the same DID, plan, and event.
+  - Added one retry for transient Resend failures with enough contextual
+    logging when the retry also fails.
+  - Threaded `c.executionCtx` into billing email sends so request handlers can
+    schedule retry work through Worker `waitUntil`.
+  - Added focused email tests for weekly dedupe, immediate retry, and
+    `waitUntil` retry scheduling.
+- Files changed:
+  - `src/server/email.ts`
+  - `src/server/index.ts`
+  - `test/email.ts`
+  - `test/index.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Billing email functions accept an optional Worker retry context; pass
+    `c.executionCtx` from Hono route handlers when retry work should outlive
+    the response.
+  - Browser-bundled email tests can stub `globalThis.fetch` to exercise
+    Resend behavior without touching the network.
 ---
