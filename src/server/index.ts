@@ -909,17 +909,25 @@ const requireEntitlement = async (
     await next()
 }
 
+export const dataRouter = new Hono<{
+    Bindings:Env;
+    Variables:Variables
+}>()
+
+dataRouter.use('*', requireAuth)
+dataRouter.use('*', requireEntitlement)
+
 /**
  * Proxy requests to user's Durable Object.
- * All /api/* routes go to the user's DO.
+ * All data routes under /api go to the user's DO.
  */
-app.all('/api/*', requireAuth, requireEntitlement, async (c) => {
+dataRouter.all('*', async (c) => {
     const session = c.get('session')!
     const stub = getUserDO(c.env, session.did)
 
     // Build the request URL for the DO
     const url = new URL(c.req.url)
-    const doPath = url.pathname.replace('/api', '')
+    const doPath = url.pathname
     const doUrl = new URL(doPath || '/', 'http://do')
     doUrl.search = url.search
 
@@ -943,6 +951,8 @@ app.all('/api/*', requireAuth, requireEntitlement, async (c) => {
 
     return response
 })
+
+app.route('/api', dataRouter)
 
 /**
  * Admin: list all tracked users.

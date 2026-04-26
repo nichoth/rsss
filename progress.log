@@ -45,7 +45,46 @@
   `src/client/db/tab-coordination.ts` with BroadcastChannel `rsss-tab`.
   Check this coordinator before opening SQLite so second tabs fall back to
   `remoteAdapter` instead of contending for the exclusive OPFS lock.
+- **API routing boundary**: Entitlement-gated data routes are mounted through
+  exported `dataRouter` in `src/server/index.ts`. Auth and billing routes stay
+  on the main `app`; new user data endpoints should inherit
+  `dataRouter.use('*', requireAuth)` and
+  `dataRouter.use('*', requireEntitlement)`.
+- **Dynamic Hono status codes**: When returning dynamic numeric statuses from
+  server helper errors through `c.json`, narrow them at the response boundary
+  with Hono's `ContentfulStatusCode` type so typecheck remains strict.
 
+---
+
+## 2026-04-25 22:00 PDT - US-021
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Refactored entitlement-gated API proxying onto an
+  exported Hono `dataRouter` mounted at `/api`.
+  - `dataRouter` now applies `requireAuth` and `requireEntitlement` as
+    top-level middleware before proxying data routes to the user's Durable
+    Object.
+  - Auth, billing, health, admin, OAuth, and static routes remain on the main
+    `app`.
+  - Added a focused browser test proving unauthenticated data-router requests
+    are rejected before they can reach the Durable Object proxy.
+- Files changed:
+  - `src/server/index.ts`
+  - `src/server/durable-objects/index.ts`
+  - `test/api-router.ts`
+  - `test/cloudflare-workers-stub.ts`
+  - `test/index.ts`
+  - `package.json`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Use `dataRouter` for entitlement-gated user data routes; keep auth and
+    billing routes on `app` so they are not subscription-gated.
+  - Tests that import `src/server/index.ts` need an esbuild alias for
+    `cloudflare:workers`; `test/cloudflare-workers-stub.ts` provides the
+    minimal Durable Object stub for browser-bundled tapout tests.
+  - `FeedFetchError.status` is a runtime number; cast it to Hono's
+    `ContentfulStatusCode` at the `c.json` boundary when returning dynamic
+    feed-fetch errors.
 ---
 
 ## 2026-04-25 21:49 PDT - US-019

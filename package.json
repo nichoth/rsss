@@ -6,7 +6,7 @@
   "scripts": {
     "lint": "eslint \"./**/*.{ts,js}\"",
     "build-tests": "esbuild test/index.ts --bundle --format=cjs --keep-names > test/test-bundle.js",
-    "test": "esbuild ./test/index.ts --bundle | tapout",
+    "test": "esbuild ./test/index.ts --bundle --alias:cloudflare:workers=./test/cloudflare-workers-stub.ts | tapout",
     "test:sync": "esbuild ./test/sync.ts --bundle | tapout",
     "test:db": "esbuild ./test/db-adapter.ts --bundle | tapout",
     "test:lww": "esbuild ./test/server-lww.ts --bundle | tapout",
@@ -19,6 +19,7 @@
     "test:bootstrap": "esbuild ./test/bootstrap.ts --bundle --loader:.wasm=dataurl | tapout",
     "test:feed": "esbuild test/feed-fetch-security.ts --bundle | tapout",
     "test:tab-coordination": "esbuild test/tab-coordination.ts --bundle | tapout",
+    "test:api-router": "esbuild test/api-router.ts --bundle --alias:cloudflare:workers=./test/cloudflare-workers-stub.ts | tapout",
     "build": "mkdir -p ./public && rm -rf ./public/* && npx vite build $([ \"$NODE_ENV\" != \"production\" ] && echo \"--mode staging\")",
     "start": "vite",
     "toc": "markdown-toc --maxdepth 3 -i README.md",

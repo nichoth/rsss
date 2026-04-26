@@ -1,6 +1,7 @@
 import { DurableObject } from 'cloudflare:workers'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { TABLES_SQL, INDEXES_SQL, TRIGGERS_SQL } from '../../shared/schema.js'
 import type { FeedFetchError } from '../feed-fetch.js'
 import {
@@ -150,7 +151,10 @@ export class UserDO extends DurableObject<Env> {
                 body.url = await validateFeedUrl(body.url)
             } catch (_err) {
                 const err = _err as FeedFetchError
-                return c.json({ error: err.message }, err.status)
+                return c.json(
+                    { error: err.message },
+                    err.status as ContentfulStatusCode
+                )
             }
 
             try {
@@ -317,7 +321,10 @@ export class UserDO extends DurableObject<Env> {
                 await this.fetchFeed(feed)
             } catch (_err) {
                 const err = _err as FeedFetchError
-                return c.json({ error: err.message }, err.status)
+                return c.json(
+                    { error: err.message },
+                    err.status as ContentfulStatusCode
+                )
             }
             return c.json({ success: true })
         })
