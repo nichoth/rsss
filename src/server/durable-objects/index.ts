@@ -2,6 +2,11 @@ import { DurableObject } from 'cloudflare:workers'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { TABLES_SQL, INDEXES_SQL, TRIGGERS_SQL } from '../../shared/schema.js'
+import type { FeedFetchError } from '../feed-fetch.js'
+import {
+    fetchFeedText,
+    validateFeedUrl
+} from '../feed-fetch.js'
 
 export interface Env {
     USER:DurableObjectNamespace<UserDO>
@@ -139,6 +144,13 @@ export class UserDO extends DurableObject<Env> {
                     { error: 'URL is required' },
                     400
                 )
+            }
+
+            try {
+                body.url = await validateFeedUrl(body.url)
+            } catch (_err) {
+                const err = _err as FeedFetchError
+                return c.json({ error: err.message }, err.status)
             }
 
             try {
@@ -300,7 +312,13 @@ export class UserDO extends DurableObject<Env> {
                 return c.json({ error: 'Feed not found' }, 404)
             }
 
-            await this.fetchFeed(feed)
+            try {
+                await validateFeedUrl(feed.url)
+                await this.fetchFeed(feed)
+            } catch (_err) {
+                const err = _err as FeedFetchError
+                return c.json({ error: err.message }, err.status)
+            }
             return c.json({ success: true })
         })
 
@@ -622,20 +640,7 @@ export class UserDO extends DurableObject<Env> {
             feed.url
         )
         try {
-            const response = await fetch(feed.url, {
-                headers: {
-                    'User-Agent': 'RSSS/1.0 RSS Reader'
-                }
-            })
-
-            if (!response.ok) {
-                console.error(
-                    `[DO] Feed fetch failed ${feed.url}: ${response.status}`
-                )
-                return
-            }
-
-            const text = await response.text()
+            const text = await fetchFeedText(feed.url)
             console.log(
                 '[DO] Feed response length:',
                 text.length

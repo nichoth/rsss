@@ -618,7 +618,7 @@ State.finalizeCheckout = async function (
                 500 * 2 ** (attempt - 1),
                 4000
             )
-            await new Promise(r => setTimeout(r, delayMs))
+            await new Promise(resolve => setTimeout(resolve, delayMs))
         }
 
         try {

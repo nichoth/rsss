@@ -4,6 +4,7 @@ import { test } from '@substrate-system/tapzero'
 import './sync.js'
 import './db-adapter.js'
 import './server-lww.js'
+import './feed-fetch-security.js'
 
 test('all done', () => {
     if (window) {

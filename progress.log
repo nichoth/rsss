@@ -38,7 +38,36 @@
 - **Test command**: `npm run test:db` runs `test/db-adapter.ts` via esbuild + tapout in a browser (Chromium). All DB adapter interface tests live there.
 - **Import paths**: TypeScript source uses `.js` extensions in imports (e.g. `../../shared/schema.js`) for ESM compatibility with esbuild.
 - **sqlite-wasm in tapout tests**: tapout's HTTP server only serves the test bundle. To use sqlite-wasm in tests, use `--loader:.wasm=dataurl` with esbuild (inlines WASM as base64), import the wasm as `import wasmUrl from '@sqlite.org/sqlite-wasm/sqlite3.wasm'`, and pass `{ locateFile: () => wasmUrl }` to `sqlite3Module.default()`. Use `setTestMode(true, wasmUrl)` before tests to enable in-memory mode.
+- **Server feed fetch security**: Feed fetches should go through
+  `src/server/feed-fetch.ts` so URL validation, fetch timeout, and the
+  5MB response cap stay centralized.
 
+---
+
+## 2026-04-25 21:49 PDT - US-019
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added SSRF validation and bounded feed fetching.
+  - `validateFeedUrl` rejects non-http(s), localhost, loopback, 0.0.0.0,
+    IPv6 loopback, and `.local` hostnames before network fetches.
+  - `fetchFeedText` adds a 15 second timeout and reads response bodies
+    through a streaming reader capped at 5MB.
+  - Durable Object feed creation and explicit refresh reject invalid feed
+    URLs with 400 before fetching.
+- Files changed:
+  - `src/server/feed-fetch.ts`
+  - `src/server/durable-objects/index.ts`
+  - `test/feed-fetch-security.ts`
+  - `test/index.ts`
+  - `package.json`
+  - `src/client/state.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Server-side feed fetch security is centralized in
+    `src/server/feed-fetch.ts`; new feed refresh paths should use it.
+  - `npm run test:feed` runs the focused SSRF and body-cap tests.
+  - Lint currently covers the whole repo, so unrelated lint regressions can
+    block a required story verification step.
 ---
 
 ## 2026-04-24 - US-001
