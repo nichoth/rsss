@@ -103,3 +103,13 @@ export async function queryOneDb<T> (
     const rows = await queryDb<T>(db, sql, bind)
     return rows[0]
 }
+
+export async function closeDb (db:Sqlite3Db|null|undefined):Promise<void> {
+    if (!db) return
+
+    const close = (db as unknown as { close?:() => void|Promise<void> })
+        .close
+    if (typeof close !== 'function') return
+
+    await close.call(db)
+}

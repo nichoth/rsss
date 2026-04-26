@@ -1,7 +1,10 @@
 import { test } from '@substrate-system/tapzero'
 // @ts-expect-error -- no type declarations for .wasm imports
 import wasmUrl from '@sqlite.org/sqlite-wasm/sqlite3.wasm'
-import { setTestMode } from '../src/client/db/sqlite-init.js'
+import {
+    setSQLiteWorkerClientFactoryForTests,
+    setTestMode
+} from '../src/client/db/sqlite-init.js'
 import {
     bootstrapLocalDb,
     bootstrapInProgress,
@@ -27,6 +30,8 @@ import {
     resetTabCoordinationForTests
 } from '../src/client/db/tab-coordination.js'
 import type { Sqlite3Db } from '../src/client/db/sqlite-init.js'
+import type { SQLiteWorkerClient } from
+    '../src/client/db/sqlite-worker-client.js'
 
 setTestMode(true, wasmUrl as string)
 
@@ -35,6 +40,10 @@ function setupSupportedLocalFirst ():void {
     _resetAdapterCache()
     resetTabCoordinationForTests()
     syncSubscriptions.value = true
+    setSQLiteWorkerClientFactoryForTests(() => ({
+        probe: async () => {},
+        dispose: () => {}
+    } as unknown as SQLiteWorkerClient))
     Object.defineProperty(navigator, 'storage', {
         value: {
             getDirectory: async () => ({
@@ -186,22 +195,25 @@ test('bootstrapLocalDb: happy path sets signals and db', async (t) => {
     clearBootstrappedDb()
 })
 
-test('bootstrapLocalDb: bootstrap is idempotent (re-run adds no dupes)', async (t) => {
-    clearBootstrappedDb()
-    const fetchFn = makeFetch(syncPayload)
-    syncSubscriptions.value = true
+test('bootstrapLocalDb: bootstrap is idempotent (re-run adds no dupes)',
+    async (t) => {
+        clearBootstrappedDb()
+        const fetchFn = makeFetch(syncPayload)
+        syncSubscriptions.value = true
 
-    await bootstrapLocalDb('did:test:bootstrap2', fetchFn)
-    const db = getBootstrappedDb()
+        await bootstrapLocalDb('did:test:bootstrap2', fetchFn)
+        const db = getBootstrappedDb()
 
-    // Run again on same in-memory DB via a second call won't reuse the same
-    // db in test mode (new :memory: each time) but confirms no crash.
-    t.equal(bootstrapInProgress.value, false, 'inProgress false after second run')
-    t.equal(bootstrapError.value, null, 'no error on second run')
+        // Run again on same in-memory DB via a second call won't reuse the same
+        // db in test mode (new :memory: each time) but confirms no crash.
+        t.equal(bootstrapInProgress.value, false,
+            'inProgress false after second run')
+        t.equal(bootstrapError.value, null, 'no error on second run')
 
-    if (db) db.close()
-    clearBootstrappedDb()
-})
+        if (db) db.close()
+        clearBootstrappedDb()
+    }
+)
 
 test('bootstrapLocalDb: server error reverts syncSubscriptions', async (t) => {
     clearBootstrappedDb()
@@ -218,21 +230,149 @@ test('bootstrapLocalDb: server error reverts syncSubscriptions', async (t) => {
     t.equal(getBootstrappedDb(), null, 'no db after failure')
 })
 
-test('getAdapter returns remoteAdapter while bootstrap in progress', async (t) => {
-    const { getAdapter, _resetAdapterCache, remoteAdapter } =
-        await import('../src/client/db/index.js')
-    _resetAdapterCache()
-    clearBootstrappedDb()
-    syncSubscriptions.value = true
-    bootstrapInProgress.value = true
+test('bootstrapLocalDb: failed bootstrap clears state and partial data',
+    async (t) => {
+        clearBootstrappedDb()
+        syncSubscriptions.value = true
+        bootstrapError.value = null
+        const removed:string[] = []
 
-    const adapter = await getAdapter('did:test:bootstrap4')
-    t.equal(adapter, remoteAdapter,
-        'returns remoteAdapter when bootstrap in progress')
+        Object.defineProperty(navigator, 'storage', {
+            value: {
+                getDirectory: async () => ({
+                    getDirectoryHandle: async () => ({
+                        removeEntry: async (name:string) => {
+                            removed.push(name)
+                        }
+                    })
+                })
+            },
+            configurable: true
+        })
 
-    bootstrapInProgress.value = false
-    _resetAdapterCache()
-})
+        await bootstrapLocalDb('did:test:bootstrap-old', makeFetch(syncPayload))
+        const oldDb = getBootstrappedDb()
+        t.ok(oldDb, 'precondition: old bootstrapped db exists')
+        _resetSupportedCache()
+        setSQLiteWorkerClientFactoryForTests(() => ({
+            probe: async () => {},
+            dispose: () => {}
+        } as unknown as SQLiteWorkerClient))
+        Object.defineProperty(globalThis, 'crossOriginIsolated', {
+            value: true,
+            configurable: true
+        })
+        await getAdapter('did:test:bootstrap-old')
+        t.equal(getLocalDb('did:test:bootstrap-old'), oldDb,
+            'precondition: adapter cache points at old db')
+
+        syncSubscriptions.value = true
+        await bootstrapLocalDb(
+            'did:test:bootstrap-fails',
+            makeFetch({ error: 'internal' }, 500)
+        )
+
+        t.equal(getBootstrappedDb(), null, 'clears bootstrapped db on failure')
+        t.equal(syncSubscriptions.value, false,
+            'syncSubscriptions reverted to false')
+        syncSubscriptions.value = true
+        await getAdapter('did:test:bootstrap-old')
+        t.ok(getLocalDb('did:test:bootstrap-old') !== oldDb,
+            'clears cached adapter db on failure')
+        t.ok(
+            removed.some((name) => name === 'rsss-did_test_bootstrap_fails.db'),
+            'removes the failed partial local db file'
+        )
+
+        oldDb?.close()
+        clearBootstrappedDb()
+    }
+)
+
+test('resetLocalFirst closes worker db before removing OPFS data',
+    async (t) => {
+        clearBootstrappedDb()
+        _resetSupportedCache()
+        _resetAdapterCache()
+        resetTabCoordinationForTests()
+        syncSubscriptions.value = true
+        const events:string[] = []
+
+        Object.defineProperty(navigator, 'storage', {
+            value: {
+                getDirectory: async () => ({
+                    getDirectoryHandle: async () => ({
+                        removeEntry: async () => {
+                            events.push('remove')
+                        }
+                    })
+                })
+            },
+            configurable: true
+        })
+        Object.defineProperty(globalThis, 'crossOriginIsolated', {
+            value: true,
+            configurable: true
+        })
+        Object.defineProperty(navigator, 'onLine', {
+            value: true,
+            configurable: true
+        })
+
+        setTestMode(false)
+        setSQLiteWorkerClientFactoryForTests(() => ({
+            probe: async () => {},
+            open: async () => {
+                events.push('open')
+            },
+            exec: async () => {},
+            query: async () => [],
+            close: async () => {
+                events.push('close')
+            },
+            dispose: () => {}
+        } as unknown as SQLiteWorkerClient))
+
+        try {
+            await getAdapter('did:test:reset-close')
+            await resetLocalFirst(
+                'did:test:reset-close',
+                makeFetch(syncPayload)
+            )
+
+            const closeIndex = events.indexOf('close')
+            const removeIndex = events.indexOf('remove')
+            t.ok(closeIndex >= 0, 'closes the worker db')
+            t.ok(removeIndex >= 0, 'removes the OPFS data')
+            t.ok(closeIndex < removeIndex,
+                'closes worker db before removing OPFS data')
+        } finally {
+            setSQLiteWorkerClientFactoryForTests(null)
+            setTestMode(true, wasmUrl as string)
+            clearBootstrappedDb()
+            _resetAdapterCache()
+            resetTabCoordinationForTests()
+        }
+    }
+)
+
+test('getAdapter returns remoteAdapter while bootstrap in progress',
+    async (t) => {
+        const { getAdapter, _resetAdapterCache, remoteAdapter } =
+            await import('../src/client/db/index.js')
+        _resetAdapterCache()
+        clearBootstrappedDb()
+        syncSubscriptions.value = true
+        bootstrapInProgress.value = true
+
+        const adapter = await getAdapter('did:test:bootstrap4')
+        t.equal(adapter, remoteAdapter,
+            'returns remoteAdapter when bootstrap in progress')
+
+        bootstrapInProgress.value = false
+        _resetAdapterCache()
+    }
+)
 
 test('disableLocalFirst: aborts when pending writes cannot sync',
     async (t) => {

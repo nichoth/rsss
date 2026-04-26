@@ -8,10 +8,13 @@ import { remoteAdapter } from './remote-adapter.js'
 import { createLocalAdapter } from './local-adapter.js'
 import {
     openLocalDb,
+    classifyLocalDbError,
+    LocalDbOpenError,
     OPFSUnavailableError,
     removeOpfsDb,
     probeOpfsSupport
 } from './sqlite-init.js'
+import { closeDb } from './local-db.js'
 import {
     isLocalTabBlocked,
     LOCAL_TAB_LOCK_ERROR,
@@ -24,14 +27,23 @@ import {
     bootstrapInProgress,
     getBootstrappedDb,
     clearBootstrappedDb,
+    addBootstrapFailureCleanup,
     bootstrapLocalDb
 } from './bootstrap.js'
 import { pushSync, getOutboxCount } from './push-sync.js'
 import type { DbAdapter, Item } from './types.js'
-import type { Sqlite3Db } from './sqlite-init.js'
+import type {
+    LocalDbErrorCategory,
+    Sqlite3Db
+} from './sqlite-init.js'
 
 export { remoteAdapter } from './remote-adapter.js'
-export { initSqlite, OPFSUnavailableError } from './sqlite-init.js'
+export {
+    initSqlite,
+    classifyLocalDbError,
+    LocalDbOpenError,
+    OPFSUnavailableError
+} from './sqlite-init.js'
 export {
     getLocalTabLockError,
     localTabLockError,
@@ -52,6 +64,14 @@ export { getOutboxCount } from './push-sync.js'
 export { purgeStoredContent } from './content-storage.js'
 
 export const localFirstSupported = signal(false)
+
+export interface LocalDbErrorState {
+    category:LocalDbErrorCategory
+    message:string
+    canReset:boolean
+}
+
+export const localDbError = signal<LocalDbErrorState|null>(null)
 
 let _supportedCache:boolean|null = null
 let _supportedPromise:Promise<boolean>|null = null
@@ -80,6 +100,43 @@ export function _resetSupportedCache ():void {
 let _cachedAdapter:DbAdapter|null = null
 let _cachedAdapterDid:string|null = null
 let _cachedDb:Sqlite3Db|null = null
+
+function localDbErrorMessage (
+    category:LocalDbErrorCategory,
+    err:unknown
+):string {
+    if (category === 'quota') {
+        return (
+            'Local storage is full. Free up space or reset local data, ' +
+            'then try again.'
+        )
+    }
+    if (category === 'corruption') {
+        return (
+            'Local storage could not be read. Reset local data to rebuild ' +
+            'the on-device database.'
+        )
+    }
+    if (category === 'locked') return LOCAL_TAB_LOCK_ERROR
+    if (category === 'unavailable') {
+        return 'Local storage is not supported in this browser.'
+    }
+
+    const detail = err instanceof Error ? `: ${err.message}` : ''
+    return `Local storage could not be opened${detail}`
+}
+
+function reportLocalDbError (err:unknown):LocalDbErrorCategory {
+    const category = classifyLocalDbError(err)
+    localDbError.value = {
+        category,
+        message: err instanceof LocalDbOpenError ?
+            err.message :
+            localDbErrorMessage(category, err),
+        canReset: category === 'corruption' || category === 'unknown'
+    }
+    return category
+}
 
 export class LocalFirstSyncFailureError extends Error {
     pending:number
@@ -126,16 +183,20 @@ export async function getAdapter (did?:string):Promise<DbAdapter> {
             _cachedDb = db
             _cachedAdapter = createLocalAdapter(db)
             _cachedAdapterDid = did
+            localDbError.value = null
             markLocalTabPrimary()
             return _cachedAdapter
         } catch (err) {
-            if (err instanceof OPFSUnavailableError) {
-                if (err.message === LOCAL_TAB_LOCK_ERROR) {
-                    setLocalTabBlocked()
-                }
+            const category = reportLocalDbError(err)
+            if (
+                err instanceof OPFSUnavailableError ||
+                category === 'unavailable' ||
+                category === 'locked'
+            ) {
+                if (category === 'locked') setLocalTabBlocked()
                 return remoteAdapter
             }
-            throw err
+            return remoteAdapter
         }
     }
     return remoteAdapter
@@ -167,7 +228,13 @@ export function _resetAdapterCache ():void {
     _cachedAdapter = null
     _cachedAdapterDid = null
     _cachedDb = null
+    localDbError.value = null
 }
+
+addBootstrapFailureCleanup(() => {
+    _resetAdapterCache()
+    markLocalTabReleased()
+})
 
 async function pushPendingWritesBeforeRemoval (
     db:Sqlite3Db|null,
@@ -200,6 +267,7 @@ export async function disableLocalFirst (
 ):Promise<void> {
     const db = getBootstrappedDb() ?? _cachedDb
     await pushPendingWritesBeforeRemoval(db, fetchFn)
+    await closeDb(db)
     clearBootstrappedDb()
     _resetAdapterCache()
     markLocalTabReleased()
@@ -226,6 +294,7 @@ export async function resetLocalFirst (
     } catch (err) {
         if (!options.allowDataLossOnSyncFailure) throw err
     }
+    await closeDb(db)
     clearBootstrappedDb()
     _resetAdapterCache()
     markLocalTabReleased()

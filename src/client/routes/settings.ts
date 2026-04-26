@@ -25,6 +25,7 @@ import {
     getLocalDb,
     getOutboxCount,
     localTabLockError,
+    localDbError,
     LocalFirstSyncFailureError,
     purgeStoredContent
 } from '../db/index.js'
@@ -48,6 +49,7 @@ export const SettingsRoute:FunctionComponent<{
     const supported = localFirstSupported.value
     const inProgress = bootstrapInProgress.value
     const bError = bootstrapError.value
+    const dbError = localDbError.value
     const tabLockError = localTabLockError.value
     const billing = useComputed(() => billingStatus.value)
     const isEntitled = Boolean(billing.value?.entitled)
@@ -281,7 +283,13 @@ export const SettingsRoute:FunctionComponent<{
                     Setup failed: ${bError}
                 </p>
             `}
-            ${syncSubscriptions.value && !inProgress && html`
+            ${dbError && html`
+                <p class="bootstrap-error">
+                    ${dbError.message}
+                </p>
+            `}
+            ${syncSubscriptions.value && !inProgress &&
+                (!dbError || dbError.canReset) && html`
                 <div class="reset-local-data">
                     <button
                         class="btn-reset"

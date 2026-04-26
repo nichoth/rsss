@@ -13,6 +13,7 @@ import {
     setLocalTabBlocked,
     startTabCoordination
 } from './tab-coordination.js'
+import { closeDb } from './local-db.js'
 import type { Sqlite3Db } from './sqlite-init.js'
 
 export const bootstrapInProgress:Signal<boolean> = signal(false)
@@ -22,6 +23,7 @@ export const bootstrapError:Signal<string|null> = signal(null)
 
 /** The open DB after a successful bootstrap (cleared on disable). */
 let _bootstrappedDb:Sqlite3Db|null = null
+const bootstrapFailureCleanups = new Set<() => void>()
 
 export function getBootstrappedDb ():Sqlite3Db|null {
     return _bootstrappedDb
@@ -29,6 +31,21 @@ export function getBootstrappedDb ():Sqlite3Db|null {
 
 export function clearBootstrappedDb ():void {
     _bootstrappedDb = null
+}
+
+export function addBootstrapFailureCleanup (
+    fn:() => void
+):() => void {
+    bootstrapFailureCleanups.add(fn)
+    return () => {
+        bootstrapFailureCleanups.delete(fn)
+    }
+}
+
+function runBootstrapFailureCleanups ():void {
+    for (const cleanup of bootstrapFailureCleanups) {
+        cleanup()
+    }
 }
 
 /**
@@ -41,6 +58,7 @@ export async function bootstrapLocalDb (
     did:string,
     fetchFn:typeof fetch = fetch
 ):Promise<void> {
+    let openedDb:Sqlite3Db|null = null
     batch(() => {
         bootstrapInProgress.value = true
         bootstrapFeedsCount.value = 0
@@ -56,6 +74,7 @@ export async function bootstrapLocalDb (
             ))
         }
         const db = await openLocalDb(did)
+        openedDb = db
 
         await pullSync(db, fetchFn, {
             onFeedUpserted: (count) => {
@@ -67,6 +86,7 @@ export async function bootstrapLocalDb (
         })
 
         _bootstrappedDb = db
+        openedDb = null
         markLocalTabPrimary()
         bootstrapInProgress.value = false
     } catch (err) {
@@ -78,6 +98,9 @@ export async function bootstrapLocalDb (
             bootstrapError.value = msg
             bootstrapInProgress.value = false
         })
+        _bootstrappedDb = null
+        await closeDb(openedDb)
+        runBootstrapFailureCleanups()
         setSyncSubscriptions(false)
         saveLocalFirstSettings()
         await removeOpfsDb(did)

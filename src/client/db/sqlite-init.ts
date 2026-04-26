@@ -17,6 +17,27 @@ export class OPFSUnavailableError extends Error {
     }
 }
 
+export type LocalDbErrorCategory =
+    'unavailable' |
+    'locked' |
+    'quota' |
+    'corruption' |
+    'unknown'
+
+export class LocalDbOpenError extends Error {
+    category:LocalDbErrorCategory
+
+    constructor (
+        category:LocalDbErrorCategory,
+        message:string,
+        cause?:unknown
+    ) {
+        super(message, { cause })
+        this.name = 'LocalDbOpenError'
+        this.category = category
+    }
+}
+
 let _testMode = false
 let _testWasmUrl:string|undefined
 let _workerClientFactory:(() => SQLiteWorkerClient) = createSQLiteWorkerClient
@@ -72,6 +93,37 @@ export async function probeOpfsSupport ():Promise<boolean> {
     }
 }
 
+export function classifyLocalDbError (
+    err:unknown
+):LocalDbErrorCategory {
+    if (err instanceof LocalDbOpenError) return err.category
+    if (err instanceof OPFSUnavailableError) return 'unavailable'
+
+    const record = err as { name?:unknown; message?:unknown }
+    const name = typeof record?.name === 'string' ? record.name : ''
+    const message = err instanceof Error ? err.message : String(err)
+    const text = `${name} ${message}`.toLowerCase()
+
+    if (isExclusiveLockError(err)) return 'locked'
+    if (
+        name === 'QuotaExceededError' ||
+        /quota|disk full|no space|not enough storage/.test(text)
+    ) {
+        return 'quota'
+    }
+    if (
+        /corrupt|malformed|not a database/.test(text) ||
+        /unsupported file format|incompatible/.test(text)
+    ) {
+        return 'corruption'
+    }
+    if (/opfs|storage directory|filesystem/.test(text)) {
+        return 'unavailable'
+    }
+
+    return 'unknown'
+}
+
 /**
  * Open (or create) a SQLite database for `did`.
  *
@@ -95,15 +147,19 @@ export async function openLocalDb (did:string):Promise<Sqlite3Db> {
         throw new OPFSUnavailableError()
     }
 
+    const client = _workerClientFactory()
     try {
-        const client = _workerClientFactory()
         await client.open({ did, directory: 'rsss-db' })
         return new WorkerBackedLocalDb(client) as unknown as Sqlite3Db
     } catch (err) {
-        if (isExclusiveLockError(err)) {
-            throw new OPFSUnavailableError(LOCAL_TAB_LOCK_ERROR)
-        }
-        throw err
+        client.dispose()
+        const category = isExclusiveLockError(err) ?
+            'locked' :
+            classifyLocalDbError(err)
+        const message = category === 'locked' ?
+            LOCAL_TAB_LOCK_ERROR :
+            localDbOpenMessage(category, err)
+        throw new LocalDbOpenError(category, message, err)
     }
 }
 
@@ -115,6 +171,31 @@ function isExclusiveLockError (err:unknown):boolean {
         /already.*open/i.test(msg) ||
         /no available.*access handle/i.test(msg)
     )
+}
+
+function localDbOpenMessage (
+    category:LocalDbErrorCategory,
+    err:unknown
+):string {
+    if (category === 'quota') {
+        return (
+            'Local storage is full. Free up space or reset local data, ' +
+            'then try again.'
+        )
+    }
+    if (category === 'corruption') {
+        return (
+            'Local storage could not be read. Reset local data to rebuild ' +
+            'the on-device database.'
+        )
+    }
+    if (category === 'unavailable') {
+        return 'Local storage is not available in this browser.'
+    }
+    if (category === 'locked') return LOCAL_TAB_LOCK_ERROR
+
+    const detail = err instanceof Error ? `: ${err.message}` : ''
+    return `Local storage could not be opened${detail}`
 }
 
 export function getOpfsFilename (did:string):string {

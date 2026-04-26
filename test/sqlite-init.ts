@@ -6,7 +6,8 @@ import {
     openLocalDb,
     setTestMode,
     setSQLiteWorkerClientFactoryForTests,
-    OPFSUnavailableError
+    OPFSUnavailableError,
+    classifyLocalDbError
 } from '../src/client/db/sqlite-init.js'
 import type {
     SQLiteWorkerClient
@@ -140,4 +141,41 @@ test('OPFSUnavailableError is a typed Error subclass', (t) => {
     const err = new OPFSUnavailableError()
     t.ok(err instanceof Error, 'is an Error')
     t.equal(err.name, 'OPFSUnavailableError', 'has correct name')
+})
+
+test('classifyLocalDbError maps common browser and SQLite failures', (t) => {
+    const quota = new DOMException(
+        'The quota has been exceeded.',
+        'QuotaExceededError'
+    )
+    const corrupt = new Error('database disk image is malformed')
+    const locked = new Error('database is locked')
+    const unavailable = new OPFSUnavailableError()
+    const unknown = new Error('something else')
+
+    t.equal(
+        classifyLocalDbError(quota),
+        'quota',
+        'classifies quota errors'
+    )
+    t.equal(
+        classifyLocalDbError(corrupt),
+        'corruption',
+        'classifies corrupt database errors'
+    )
+    t.equal(
+        classifyLocalDbError(locked),
+        'locked',
+        'classifies lock errors'
+    )
+    t.equal(
+        classifyLocalDbError(unavailable),
+        'unavailable',
+        'classifies unsupported OPFS errors'
+    )
+    t.equal(
+        classifyLocalDbError(unknown),
+        'unknown',
+        'falls back to unknown'
+    )
 })

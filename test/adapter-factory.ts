@@ -4,6 +4,7 @@ import {
     isLocalFirstSupported,
     getAdapter,
     getBootstrappedDb,
+    localDbError,
     _resetSupportedCache,
     _resetAdapterCache
 } from '../src/client/db/index.js'
@@ -13,7 +14,8 @@ import {
     setLocalTabBlocked
 } from '../src/client/db/tab-coordination.js'
 import {
-    setSQLiteWorkerClientFactoryForTests
+    setSQLiteWorkerClientFactoryForTests,
+    setTestMode
 } from '../src/client/db/sqlite-init.js'
 import type {
     SQLiteWorkerClient
@@ -21,6 +23,7 @@ import type {
 
 function setup () {
     syncSubscriptions.value = false
+    localDbError.value = null
     _resetSupportedCache()
     _resetAdapterCache()
     resetTabCoordinationForTests()
@@ -208,6 +211,87 @@ test('getAdapter returns remoteAdapter when another tab owns OPFS',
 
         t.equal(adapter, remoteAdapter,
             'falls back to remoteAdapter when tab lock is blocked')
+    }
+)
+
+test('getAdapter reports quota open failures instead of silent fallback',
+    async (t) => {
+        setup()
+        syncSubscriptions.value = true
+        Object.defineProperty(navigator, 'storage', {
+            value: { getDirectory: async () => ({}) },
+            configurable: true
+        })
+        Object.defineProperty(globalThis, 'crossOriginIsolated', {
+            value: true,
+            configurable: true
+        })
+        setTestMode(false)
+        setSQLiteWorkerClientFactoryForTests(() => ({
+            probe: async () => {},
+            open: async () => {
+                throw new DOMException(
+                    'The quota has been exceeded.',
+                    'QuotaExceededError'
+                )
+            },
+            dispose: () => {}
+        } as unknown as SQLiteWorkerClient))
+
+        try {
+            const adapter = await getAdapter('did:plc:quota')
+
+            t.equal(adapter, remoteAdapter,
+                'keeps the app usable through the remote adapter')
+            t.equal(localDbError.value?.category, 'quota',
+                'records the quota category for Settings')
+            t.ok(
+                /free up space/i.test(localDbError.value?.message ?? ''),
+                'message tells the user how to recover'
+            )
+            t.equal(localDbError.value?.canReset, false,
+                'quota errors do not suggest reset as the primary fix')
+        } finally {
+            setTestMode(true)
+            setSQLiteWorkerClientFactoryForTests(null)
+        }
+    }
+)
+
+test('getAdapter reports corrupt open failures as resettable',
+    async (t) => {
+        setup()
+        syncSubscriptions.value = true
+        Object.defineProperty(navigator, 'storage', {
+            value: { getDirectory: async () => ({}) },
+            configurable: true
+        })
+        Object.defineProperty(globalThis, 'crossOriginIsolated', {
+            value: true,
+            configurable: true
+        })
+        setTestMode(false)
+        setSQLiteWorkerClientFactoryForTests(() => ({
+            probe: async () => {},
+            open: async () => {
+                throw new Error('database disk image is malformed')
+            },
+            dispose: () => {}
+        } as unknown as SQLiteWorkerClient))
+
+        try {
+            const adapter = await getAdapter('did:plc:corrupt')
+
+            t.equal(adapter, remoteAdapter,
+                'keeps the app usable through the remote adapter')
+            t.equal(localDbError.value?.category, 'corruption',
+                'records the corruption category for Settings')
+            t.equal(localDbError.value?.canReset, true,
+                'corrupt databases expose reset recovery')
+        } finally {
+            setTestMode(true)
+            setSQLiteWorkerClientFactoryForTests(null)
+        }
     }
 )
 

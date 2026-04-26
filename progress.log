@@ -75,6 +75,16 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Local DB failure surface**: `openLocalDb` classifies failures with
+  `classifyLocalDbError`; adapter selection stores user-facing recovery state
+  in `localDbError`. Quota/corruption should return `remoteAdapter` with a
+  visible Settings error instead of silently falling back.
+- **OPFS removal ordering**: Disable/reset/bootstrap-failure cleanup should
+  close the active local SQLite handle with `closeDb(db)` before calling
+  `removeOpfsDb(did)`.
+- **Bootstrap failure cleanup hook**: Cross-module in-memory cleanup for
+  bootstrap failures is registered through `addBootstrapFailureCleanup`.
+  Use it instead of importing `db/index.ts` from `bootstrap.ts`.
 - **Content storage opt-out**: Turning `storeContent` off purges local
   `items.content` and `items.description` through `purgeStoredContent(db)`.
   Keep future toggle-off flows wired to that helper so old article bodies do
@@ -1605,4 +1615,35 @@ Thread: https://ampcode.com/threads/unknown
     `content` and `description`; local read/starred state may be ahead of the
     server because of pending outbox writes.
   - Tapout browser tests must be run serially because they share port 8123.
+---
+## 2026-04-26 15:32 PDT - US-066
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added recovery handling for local SQLite failures.
+  - Classified local DB open errors as unavailable, locked, quota,
+    corruption, or unknown.
+  - Surfaced quota/corruption failures through Settings via `localDbError`,
+    with corruption exposing the reset-local-data path.
+  - Closed worker-backed SQLite handles before OPFS removal in disable/reset
+    flows and bootstrap failure cleanup.
+  - Failed bootstrap now reverts the toggle, clears cached local adapter
+    state, and removes partial local data.
+- Files changed:
+  - `src/client/db/sqlite-init.ts`
+  - `src/client/db/index.ts`
+  - `src/client/db/bootstrap.ts`
+  - `src/client/db/local-db.ts`
+  - `src/client/routes/settings.ts`
+  - `src/client/routes/settings.css`
+  - `test/sqlite-init.ts`
+  - `test/adapter-factory.ts`
+  - `test/bootstrap.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Use `classifyLocalDbError` and `localDbError` for local SQLite recovery
+    UI instead of adding one-off catch blocks around OPFS opens.
+  - Always close the active local DB handle with `closeDb(db)` before
+    removing OPFS data.
+  - Tapout browser tests use a fixed port, so focused browser suites must
+    be run serially.
 ---
