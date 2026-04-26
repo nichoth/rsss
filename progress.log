@@ -746,3 +746,25 @@ Thread: https://ampcode.com/threads/unknown
     candidate links before comparing with stored item links.
   - Tapout browser tests must run serially because port 8123 is fixed.
 ---
+
+## 2026-04-26 01:00 PDT - US-036
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Completed the README Deploy section.
+  - Replaced deprecated `wrangler kv:namespace create SESSIONS` with
+    `wrangler kv namespace create SESSIONS`.
+  - Documented required deploy environment variables, KV `preview_id`,
+    `compatibility_flags: nodejs_compat`, post-deploy health checks, and
+    `SESSION_SECRET` rotation impact.
+  - Added a focused README deploy contract test.
+- Files changed:
+  - `README.md`
+  - `test/readme-deploy.mjs`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Deploy documentation requirements can be protected with
+    `node test/readme-deploy.mjs` before changing prose.
+  - Current Wrangler KV namespace docs should use
+    `wrangler kv namespace create SESSIONS`, not the deprecated
+    colon-form command.
+---

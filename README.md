@@ -126,18 +126,60 @@ development mode.
 ## Deploy
 
 1. Create a KV namespace for sessions:
+
 ```sh
-wrangler kv:namespace create SESSIONS
+wrangler kv namespace create SESSIONS
 ```
-2. Update wrangler.jsonc with the KV ID
-3. Set secrets:
+
+2. Add the returned namespace `id` to `wrangler.jsonc`.
+
+   For local `wrangler dev`, also set the namespace `preview_id`. The
+   Worker requires `compatibility_flags` to include `nodejs_compat`.
+
+3. Configure the required environment variables:
+
+| Name | Purpose |
+| --- | --- |
+| `ADMIN_TOKEN` | Bearer token for admin-only routes. |
+| `SESSION_SECRET` | Secret used to encrypt session cookies. |
+| `OAUTH_CLIENT_ID` | Bluesky OAuth client id. |
+| `AUTUMN_SECRET_KEY` | Autumn billing API key. |
+| `RESEND_API_KEY` | Resend API key for transactional email. |
+| `RESEND_FROM` | Verified sender address for email. |
+
 ```sh
+wrangler secret put ADMIN_TOKEN
 wrangler secret put SESSION_SECRET
+wrangler secret put OAUTH_CLIENT_ID
+wrangler secret put AUTUMN_SECRET_KEY
+wrangler secret put RESEND_API_KEY
+wrangler secret put RESEND_FROM
 ```
+
 4. Deploy:
+
 ```sh
 wrangler deploy
 ```
+
+5. Verify the deployment:
+
+```sh
+curl https://<your-domain>/api/health
+curl https://<your-domain>/oauth/client-metadata.json
+```
+
+### Rotate `SESSION_SECRET`
+
+Generate a replacement secret, then run:
+
+```sh
+wrangler secret put SESSION_SECRET
+wrangler deploy
+```
+
+Rotating `SESSION_SECRET` invalidates active sessions because existing
+session cookies can no longer be decrypted. Users need to sign in again.
 
 ---
 
