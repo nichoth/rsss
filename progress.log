@@ -75,6 +75,15 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Outbox retry idempotency**: `pushSync` sends `client_op_id` on every
+  outbox request. The server does not store processed ops in v1; add-feed
+  retries reconcile by unique feed URL, delete-feed retries with a missing
+  row return success, and item/mark-all-read writes are idempotent value
+  assignments.
+- **Push conflict response contract**: Server 409 responses are wrapped as
+  `{ feed }`, `{ item }`, or `{ items }`. Client 409 handling should extract
+  those authoritative rows, upsert them locally, then clear the matching
+  outbox row.
 - **Post-sync UI refresh**: State-level sync completion should call
   `State.refreshAfterSync(state)`. It reloads feeds, items, counts, and the
   currently open `/post/*` route item after a successful sync cycle.
@@ -1529,4 +1538,31 @@ Thread: https://ampcode.com/threads/unknown
     worker-backed local DB path without requiring real OPFS in tapout.
   - Add `--loader:.wasm=dataurl` to the aggregate browser bundle whenever
     `test/index.ts` imports sqlite-wasm-backed tests.
+---
+
+## 2026-04-26 15:10 PDT - US-064
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Documented and hardened `client_op_id` retry
+  idempotency for push-sync.
+  - `pushSync` now reconciles wrapped `{ feed }`, `{ item }`, and
+    `{ items }` conflict bodies before clearing the matching outbox row.
+  - Scoped `mark_all_read` pushes now send `feed_id`, matching the server
+    endpoint contract.
+  - Durable Object feed creation treats duplicate add-feed retries carrying
+    `client_op_id` as successful by returning the authoritative existing
+    feed, and delete-feed retries with missing rows return success.
+  - README documents the v1 idempotency strategy and 409 response shapes.
+- Files changed:
+  - `src/client/db/push-sync.ts`
+  - `src/server/durable-objects/index.ts`
+  - `test/push-sync.ts`
+  - `test/do-handlers.ts`
+  - `README.md`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - 409 reconciliation should consume wrapped server rows, not only raw
+    rows, because DO handlers return `{ feed }`, `{ item }`, or `{ items }`.
+  - Browser tapout tests use a fixed port, so focused tapout commands must
+    run serially.
 ---

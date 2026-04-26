@@ -57,6 +57,14 @@ persisted to `OPFS` via `FileSystemSyncAccessHandle`.
   upserts any new/updated feeds and items into the local SQLite DB.
 - **Push sync** (`pushSync`) drains a local outbox of pending writes
   (read/star toggles, feed add/delete, etc.) back to the server.
+- Outbox pushes include `client_op_id` and `client_updated_at`. v1 does
+  not store a processed-op table on the server: add-feed retries use the
+  unique feed URL as the idempotency key, delete-feed retries treat
+  already-missing rows as success, and item updates plus mark-all-read
+  are idempotent value assignments.
+- Conflict responses use wrapped authoritative rows: feed conflicts
+  return `{ feed }`, item conflicts return `{ item }`, and mark-all-read
+  conflicts return `{ items }`.
 - `State.sync()` triggers pull + push automatically on app startup
   (when authenticated + online) and when the browser fires the
   `online` event.

@@ -153,10 +153,40 @@ function extractFeed (
 ):Record<string, unknown>|null {
     if (!body || typeof body !== 'object') return null
 
-    const feed = (body as Record<string, unknown>).feed
+    const record = body as Record<string, unknown>
+    if (typeof record.id === 'number') return record
+
+    const feed = record.feed
     if (!feed || typeof feed !== 'object') return null
 
     return feed as Record<string, unknown>
+}
+
+function extractItem (
+    body:unknown
+):Record<string, unknown>|null {
+    if (!body || typeof body !== 'object') return null
+
+    const record = body as Record<string, unknown>
+    if (typeof record.id === 'number') return record
+
+    const item = record.item
+    if (!item || typeof item !== 'object') return null
+
+    return item as Record<string, unknown>
+}
+
+function extractItems (
+    body:unknown
+):Record<string, unknown>[] {
+    if (Array.isArray(body)) return body as Record<string, unknown>[]
+    if (!body || typeof body !== 'object') return []
+
+    const items = (body as Record<string, unknown>).items
+    if (Array.isArray(items)) return items as Record<string, unknown>[]
+
+    const item = extractItem(body)
+    return item ? [item] : []
 }
 
 async function reconcileSuccessfulAddFeed (
@@ -268,7 +298,7 @@ function buildRequest (
             url: '/api/items/mark-all-read',
             method: 'POST',
             body: {
-                feedId: row.target_id ?? undefined,
+                feed_id: row.target_id ?? undefined,
                 ...base
             }
         }
@@ -332,27 +362,20 @@ export async function pushSync (
             }
 
             if (res.status === 409) {
-                const body = await res.json() as Record<string, unknown>
+                const body = await res.json()
                 await execDb(db, 'BEGIN')
                 try {
-                    if (row.op === 'add_feed' || row.op === 'delete_feed') {
-                        const feed = body as Record<string, unknown>
-                        if (feed.id) await upsertFeedFromServer(db, feed)
+                    if (row.op === 'add_feed') {
+                        await reconcileSuccessfulAddFeed(db, row, body)
+                    } else if (row.op === 'delete_feed') {
+                        const feed = extractFeed(body)
+                        if (feed) await upsertFeedFromServer(db, feed)
                     } else if (
                         row.op === 'update_item' ||
                         row.op === 'mark_all_read'
                     ) {
-                        if (Array.isArray(body)) {
-                            for (const item of body as Record<
-                                string, unknown
-                            >[]) {
-                                await upsertItemFromServer(db, item)
-                            }
-                        } else if (body.id) {
-                            await upsertItemFromServer(
-                                db,
-                                body as Record<string, unknown>
-                            )
+                        for (const item of extractItems(body)) {
+                            await upsertItemFromServer(db, item)
                         }
                     }
                     await deleteOutboxRow(db, row.id)

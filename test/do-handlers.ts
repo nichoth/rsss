@@ -76,6 +76,12 @@ function createSql () {
                 return result(feeds.filter(feed => feed.id === params[0]))
             }
 
+            if (query.includes('DELETE FROM feeds WHERE id = ?')) {
+                const index = feeds.findIndex(feed => feed.id === params[0])
+                if (index >= 0) feeds.splice(index, 1)
+                return result([])
+            }
+
             throw new Error(`Unexpected SQL: ${query}`)
         }
     }
@@ -155,3 +161,46 @@ test('UserDO feed handlers list create and refresh feeds', async t => {
     t.equal(refreshBody.success, true, 'refresh reports success')
     t.deepEqual(refreshed, [3, 3], 'created feed is refreshed')
 })
+
+test(
+    'UserDO add feed treats client_op_id duplicate URL as idempotent',
+    async t => {
+        const { app, sql, waitUntilPromises } = createDoHarness()
+
+        const response = await app.request('/feeds', {
+            method: 'POST',
+            body: JSON.stringify({
+                url: 'https://alpha.example/feed.xml',
+                client_op_id: 'op-duplicate-alpha',
+                client_updated_at: '2026-04-25 00:00:00'
+            })
+        })
+        const body = await response.json() as { feed:FeedRow }
+
+        t.equal(response.status, 200, 'duplicate outbox retry is success')
+        t.equal(body.feed.id, 2, 'authoritative feed is returned')
+        t.equal(body.feed.url, 'https://alpha.example/feed.xml', 'URL matches')
+        t.equal(sql.feeds.length, 2, 'no duplicate feed row is inserted')
+        t.equal(waitUntilPromises.length, 0, 'no refresh is scheduled')
+    }
+)
+
+test(
+    'UserDO delete feed treats client_op_id missing row as idempotent',
+    async t => {
+        const { app, sql } = createDoHarness()
+
+        const response = await app.request('/feeds/99', {
+            method: 'DELETE',
+            body: JSON.stringify({
+                client_op_id: 'op-delete-missing',
+                client_updated_at: '2026-04-25 00:00:00'
+            })
+        })
+        const body = await response.json() as { success:boolean }
+
+        t.equal(response.status, 200, 'missing deleted row is success')
+        t.equal(body.success, true, 'response matches delete success shape')
+        t.equal(sql.feeds.length, 2, 'no feed rows are changed')
+    }
+)

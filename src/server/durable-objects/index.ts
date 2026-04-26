@@ -178,6 +178,7 @@ export class UserDO extends DurableObject<Env> {
         app.post('/feeds', async (c) => {
             const body = await c.req.json<{
                 url:string
+                client_op_id?:string
                 client_updated_at?:string
             }>()
             console.log('[DO] POST /feeds', body.url)
@@ -219,6 +220,9 @@ export class UserDO extends DurableObject<Env> {
                         body.client_updated_at !== undefined &&
                         existingFeed
                     ) {
+                        if (body.client_op_id !== undefined) {
+                            return c.json({ feed: existingFeed })
+                        }
                         const serverTs = existingFeed.updated_at as string|null
                         if (serverTs && serverTs > body.client_updated_at) {
                             return c.json({ feed: existingFeed }, 409)
@@ -284,7 +288,11 @@ export class UserDO extends DurableObject<Env> {
         // Delete a feed
         app.delete('/feeds/:id', async (c) => {
             const id = parseInt(c.req.param('id'), 10)
-            const body:{ client_updated_at?:string } = await c.req.json<{
+            const body:{
+                client_op_id?:string
+                client_updated_at?:string
+            } = await c.req.json<{
+                client_op_id?:string
                 client_updated_at?:string
             }>().catch(() => ({}))
 
@@ -292,6 +300,9 @@ export class UserDO extends DurableObject<Env> {
                 'SELECT * FROM feeds WHERE id = ?', id
             ).one() as Record<string, unknown> | null
             if (!feed) {
+                if (body.client_op_id !== undefined) {
+                    return c.json({ success: true })
+                }
                 return c.json({ error: 'Feed not found' }, 404)
             }
 
