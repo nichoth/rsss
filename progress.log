@@ -68,6 +68,9 @@ Thread: https://ampcode.com/threads/unknown
   DO instance by using `Object.create(UserDO.prototype)`, assigning a focused
   fake `sql` object and `ctx.waitUntil`, then calling the private
   `createRouter()` through a typed test shim.
+- **Durable Object migration cache**: Server-only DO migrations are gated by
+  `schema_migration` in DO storage. Bump `USER_DO_MIGRATION_VERSION` whenever
+  a new introspective DO migration is added so existing objects rerun checks.
 - **Feed parser tests**: Durable Object parser behavior can be tested without
   constructing a DO by importing `UserDO`, creating
   `Object.create(UserDO.prototype)`, and calling the private parser through a
@@ -767,4 +770,31 @@ Thread: https://ampcode.com/threads/unknown
   - Current Wrangler KV namespace docs should use
     `wrangler kv namespace create SESSIONS`, not the deprecated
     colon-form command.
+---
+
+## 2026-04-26 01:09 PDT - US-037
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Cached Durable Object migration state.
+  - Added `schema_migration` storage state with
+    `USER_DO_MIGRATION_VERSION = 2`.
+  - Moved constructor database initialization into
+    `ctx.blockConcurrencyWhile` so DO storage can be checked before requests.
+  - Skips `PRAGMA table_info` and `ALTER TABLE` migration checks when the
+    stored migration version is current.
+  - Added focused constructor tests for current and stale migration versions.
+  - Updated the foreign-key constructor test harness to await async init.
+- Files changed:
+  - `src/server/durable-objects/index.ts`
+  - `test/do-migrations.ts`
+  - `test/server-foreign-keys.ts`
+  - `test/index.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Server-only DO migrations are versioned through `schema_migration` in DO
+    storage; bump `USER_DO_MIGRATION_VERSION` when adding new introspective
+    migration logic.
+  - Constructor tests using `new UserDO(...)` should make fake
+    `blockConcurrencyWhile` expose a promise and await it, otherwise async
+    initialization failures can be hidden.
 ---

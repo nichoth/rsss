@@ -14,6 +14,7 @@ import './alarm.js'
 import './autumn-billing.js'
 import './email.js'
 import './feed-cache-column.js'
+import './do-migrations.js'
 
 test('all done', () => {
     if (window) {

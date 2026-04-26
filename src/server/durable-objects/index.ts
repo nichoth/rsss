@@ -49,6 +49,12 @@ const FEED_XML_PARSER = new XMLParser({
     trimValues: true
 })
 const FEED_REFRESH_CONCURRENCY = 8
+const MIGRATION_STATE_KEY = 'schema_migration'
+const USER_DO_MIGRATION_VERSION = 2
+
+interface MigrationState {
+    migration_v?:number
+}
 
 /**
  * Store feeds and items for a single user.
@@ -66,12 +72,13 @@ export class UserDO extends DurableObject<Env> {
     constructor (ctx: DurableObjectState, env: Env) {
         super(ctx, env)
         this.sql = ctx.storage.sql
-        this.initDatabase()
         this.app = this.createRouter()
 
-        // Schedule initial alarm if none exists
-        // This wakes the DO periodically to refresh feeds
         ctx.blockConcurrencyWhile(async () => {
+            await this.initDatabase()
+
+            // Schedule initial alarm if none exists
+            // This wakes the DO periodically to refresh feeds
             const currentAlarm = await ctx.storage.getAlarm()
             if (!currentAlarm) {
                 // Set first alarm 10 minutes from now
@@ -80,7 +87,7 @@ export class UserDO extends DurableObject<Env> {
         })
     }
 
-    private initDatabase () {
+    private async initDatabase () {
         this.sql.exec('PRAGMA foreign_keys = ON;')
 
         // 1. Create tables (shared schema)
@@ -89,8 +96,16 @@ export class UserDO extends DurableObject<Env> {
         // 2. Server-only migrations: backfill columns on rows that existed
         // before those columns were added.
         // Must run after table creation but before updated_at indexes.
-        this.migrateAddUpdatedAt()
-        this.migrateAddFeedFailureColumns()
+        const migrationState = await this.ctx.storage.get<MigrationState>(
+            MIGRATION_STATE_KEY
+        )
+        if (migrationState?.migration_v !== USER_DO_MIGRATION_VERSION) {
+            this.migrateAddUpdatedAt()
+            this.migrateAddFeedFailureColumns()
+            await this.ctx.storage.put(MIGRATION_STATE_KEY, {
+                migration_v: USER_DO_MIGRATION_VERSION
+            })
+        }
 
         // 3. Create indexes and triggers (shared schema) - idempotent
         this.sql.exec(INDEXES_SQL)

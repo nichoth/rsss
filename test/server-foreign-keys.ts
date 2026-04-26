@@ -62,19 +62,24 @@ async function createDoWithMemorySql ():Promise<{
     })
     const db = new sqlite3.oo1.DB(':memory:')
     const sql = createFakeSqlStorage((opts) => db.exec(opts))
+    let barrier:Promise<void> = Promise.resolve()
     const ctx = {
         storage: {
             sql,
+            get: async () => null,
+            put: async () => {},
             getAlarm: async () => Date.now(),
             setAlarm: async () => {}
         },
         blockConcurrencyWhile: (fn:() => Promise<void>) => {
-            fn().catch(() => {})
+            barrier = fn()
         }
     } as unknown as DurableObjectState
+    const userDo = new UserDO(ctx, {} as Env)
+    await barrier
 
     return {
-        userDo: new UserDO(ctx, {} as Env),
+        userDo,
         sql,
         close: () => {
             db.close()
