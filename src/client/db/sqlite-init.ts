@@ -51,12 +51,25 @@ export type Sqlite3Db = InstanceType<Sqlite3['oo1']['DB']>
 function isOpfsSupported ():boolean {
     return (
         typeof navigator !== 'undefined' &&
-        'storage' in navigator &&
-        typeof (globalThis as Record<string, unknown>)
-            .FileSystemSyncAccessHandle !== 'undefined' &&
+        navigator.storage != null &&
+        typeof navigator.storage.getDirectory === 'function' &&
         (globalThis as { crossOriginIsolated?:boolean })
             .crossOriginIsolated === true
     )
+}
+
+export async function probeOpfsSupport ():Promise<boolean> {
+    if (!isOpfsSupported()) return false
+
+    const client = _workerClientFactory()
+    try {
+        await client.probe({ directory: 'rsss-db' })
+        return true
+    } catch {
+        return false
+    } finally {
+        client.dispose()
+    }
 }
 
 /**

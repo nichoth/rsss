@@ -1,4 +1,4 @@
-import { batch } from '@preact/signals'
+import { batch, signal } from '@preact/signals'
 import {
     syncSubscriptions,
     setSyncSubscriptions,
@@ -9,7 +9,8 @@ import { createLocalAdapter } from './local-adapter.js'
 import {
     openLocalDb,
     OPFSUnavailableError,
-    removeOpfsDb
+    removeOpfsDb,
+    probeOpfsSupport
 } from './sqlite-init.js'
 import {
     isLocalTabBlocked,
@@ -49,25 +50,30 @@ export {
 } from './bootstrap.js'
 export { getOutboxCount } from './push-sync.js'
 
-let _supportedCache:boolean|null = null
+export const localFirstSupported = signal(false)
 
-export function isLocalFirstSupported ():boolean {
+let _supportedCache:boolean|null = null
+let _supportedPromise:Promise<boolean>|null = null
+
+export async function isLocalFirstSupported ():Promise<boolean> {
     if (_supportedCache !== null) return _supportedCache
-    _supportedCache = (
-        typeof navigator !== 'undefined' &&
-        navigator.storage != null &&
-        typeof navigator.storage.getDirectory === 'function' &&
-        (globalThis as { crossOriginIsolated?:boolean })
-            .crossOriginIsolated === true &&
-        typeof (globalThis as Record<string, unknown>)
-            .FileSystemSyncAccessHandle !== 'undefined'
-    )
-    return _supportedCache
+    if (_supportedPromise) return _supportedPromise
+
+    _supportedPromise = probeOpfsSupport()
+        .then((supported) => {
+            _supportedCache = supported
+            localFirstSupported.value = supported
+            return supported
+        })
+
+    return _supportedPromise
 }
 
 /** Reset the cached support flag (for tests). */
 export function _resetSupportedCache ():void {
     _supportedCache = null
+    _supportedPromise = null
+    localFirstSupported.value = false
 }
 
 let _cachedAdapter:DbAdapter|null = null
@@ -101,9 +107,9 @@ interface ResetLocalFirstOptions {
 export async function getAdapter (did?:string):Promise<DbAdapter> {
     if (
         syncSubscriptions.value &&
-        isLocalFirstSupported() &&
         did &&
-        !bootstrapInProgress.value
+        !bootstrapInProgress.value &&
+        await isLocalFirstSupported()
     ) {
         startTabCoordination()
         if (isLocalTabBlocked()) {
@@ -141,7 +147,6 @@ export async function getAdapter (did?:string):Promise<DbAdapter> {
 export function getLocalDb (did?:string):Sqlite3Db|null {
     if (
         syncSubscriptions.value &&
-        isLocalFirstSupported() &&
         did &&
         _cachedAdapterDid === did
     ) {

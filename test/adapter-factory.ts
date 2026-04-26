@@ -12,22 +12,29 @@ import {
     resetTabCoordinationForTests,
     setLocalTabBlocked
 } from '../src/client/db/tab-coordination.js'
+import {
+    setSQLiteWorkerClientFactoryForTests
+} from '../src/client/db/sqlite-init.js'
+import type {
+    SQLiteWorkerClient
+} from '../src/client/db/sqlite-worker-client.js'
 
 function setup () {
     syncSubscriptions.value = false
     _resetSupportedCache()
     _resetAdapterCache()
     resetTabCoordinationForTests()
+    setSQLiteWorkerClientFactoryForTests(null)
 }
 
 test('isLocalFirstSupported returns false when navigator.storage missing',
-    (t) => {
+    async (t) => {
         setup()
         const origStorage = navigator.storage
         Object.defineProperty(navigator, 'storage', {
             value: undefined, configurable: true
         })
-        const result = isLocalFirstSupported()
+        const result = await isLocalFirstSupported()
         t.equal(result, false, 'returns false without navigator.storage')
         Object.defineProperty(navigator, 'storage', {
             value: origStorage, configurable: true
@@ -35,10 +42,60 @@ test('isLocalFirstSupported returns false when navigator.storage missing',
     }
 )
 
-test('isLocalFirstSupported caches result for session', (t) => {
+test('isLocalFirstSupported asks the SQLite worker before returning true',
+    async (t) => {
+        setup()
+        const origStorage = navigator.storage
+        const previousIsolated = (
+            globalThis as { crossOriginIsolated?:boolean }
+        ).crossOriginIsolated
+        const previousAccessHandle = (
+            globalThis as Record<string, unknown>
+        ).FileSystemSyncAccessHandle
+        let probes = 0
+
+        Object.defineProperty(navigator, 'storage', {
+            value: { getDirectory: async () => ({}) },
+            configurable: true
+        })
+        Object.defineProperty(globalThis, 'crossOriginIsolated', {
+            value: true,
+            configurable: true
+        })
+        ;(globalThis as Record<string, unknown>)
+            .FileSystemSyncAccessHandle = undefined
+        setSQLiteWorkerClientFactoryForTests(() => ({
+            probe: async () => {
+                probes++
+            },
+            dispose: () => {}
+        } as unknown as SQLiteWorkerClient))
+
+        try {
+            const result = await isLocalFirstSupported()
+
+            t.equal(result, true, 'returns true when the worker probe passes')
+            t.equal(probes, 1, 'consults the SQLite worker')
+        } finally {
+            Object.defineProperty(navigator, 'storage', {
+                value: origStorage,
+                configurable: true
+            })
+            Object.defineProperty(globalThis, 'crossOriginIsolated', {
+                value: previousIsolated,
+                configurable: true
+            })
+            ;(globalThis as Record<string, unknown>)
+                .FileSystemSyncAccessHandle = previousAccessHandle
+            setSQLiteWorkerClientFactoryForTests(null)
+        }
+    }
+)
+
+test('isLocalFirstSupported caches result for session', async (t) => {
     setup()
-    const first = isLocalFirstSupported()
-    const second = isLocalFirstSupported()
+    const first = await isLocalFirstSupported()
+    const second = await isLocalFirstSupported()
     t.equal(first, second, 'both calls return same cached value')
 })
 
@@ -71,6 +128,52 @@ test('getAdapter returns remoteAdapter when opted in but support missing',
     }
 )
 
+test('getAdapter returns remoteAdapter when worker OPFS probe fails',
+    async (t) => {
+        setup()
+        syncSubscriptions.value = true
+        const origStorage = navigator.storage
+        const previousIsolated = (
+            globalThis as { crossOriginIsolated?:boolean }
+        ).crossOriginIsolated
+        let probes = 0
+
+        Object.defineProperty(navigator, 'storage', {
+            value: { getDirectory: async () => ({}) },
+            configurable: true
+        })
+        Object.defineProperty(globalThis, 'crossOriginIsolated', {
+            value: true,
+            configurable: true
+        })
+        setSQLiteWorkerClientFactoryForTests(() => ({
+            probe: async () => {
+                probes++
+                throw new Error('OPFS VFS unavailable in worker')
+            },
+            dispose: () => {}
+        } as unknown as SQLiteWorkerClient))
+
+        try {
+            const adapter = await getAdapter('did:plc:test')
+
+            t.equal(adapter, remoteAdapter,
+                'returns remoteAdapter when worker probe fails')
+            t.equal(probes, 1, 'probes OPFS support in the worker')
+        } finally {
+            Object.defineProperty(navigator, 'storage', {
+                value: origStorage,
+                configurable: true
+            })
+            Object.defineProperty(globalThis, 'crossOriginIsolated', {
+                value: previousIsolated,
+                configurable: true
+            })
+            setSQLiteWorkerClientFactoryForTests(null)
+        }
+    }
+)
+
 test('getAdapter returns remoteAdapter when did is absent', async (t) => {
     setup()
     syncSubscriptions.value = true
@@ -95,6 +198,10 @@ test('getAdapter returns remoteAdapter when another tab owns OPFS',
             value: function FileSystemSyncAccessHandle () {},
             configurable: true
         })
+        setSQLiteWorkerClientFactoryForTests(() => ({
+            probe: async () => {},
+            dispose: () => {}
+        } as unknown as SQLiteWorkerClient))
         setLocalTabBlocked()
 
         const adapter = await getAdapter('did:plc:test')

@@ -75,6 +75,10 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Local-first support detection**: `isLocalFirstSupported()` is async and
+  must confirm OPFS through the SQLite worker probe before returning true.
+  Settings UI should read the `localFirstSupported` signal; do not gate local
+  first on main-thread `FileSystemSyncAccessHandle`.
 - **SQLite worker bridge testing**: Keep the mockable
   `SQLiteWorkerClient` separate from the Vite-specific worker factory that
   uses `new URL(..., import.meta.url)`. Browser-bundled tapout tests can
@@ -1401,4 +1405,35 @@ Thread: https://ampcode.com/threads/unknown
     and in-memory sqlite tests.
   - Vite worker builds that code-split sqlite-wasm need
     `worker.format = 'es'`.
+---
+
+## 2026-04-26 14:36 PDT - US-060
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Worker-backed OPFS support detection.
+  - Added a SQLite worker `probe` request that checks
+    `navigator.storage.getDirectory` from the worker and confirms the
+    OPFS-SAH-pool VFS is installable.
+  - Changed `isLocalFirstSupported()` to await the worker probe before
+    caching `true`, and exposed `localFirstSupported` for settings UI state.
+  - Removed the main-thread `FileSystemSyncAccessHandle` support gate from
+    local SQLite open/support detection.
+- Files changed:
+  - `src/client/db/index.ts`
+  - `src/client/db/sqlite-init.ts`
+  - `src/client/db/sqlite-worker.ts`
+  - `src/client/db/sqlite-worker-client.ts`
+  - `src/client/db/sqlite-worker-protocol.ts`
+  - `src/client/routes/settings.ts`
+  - `test/adapter-factory.ts`
+  - `test/sqlite-worker.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `isLocalFirstSupported()` now returns a `Promise<boolean>`; call sites
+    inside render should use the `localFirstSupported` signal instead.
+  - Tapout browser tests share a fixed port, so run focused tapout commands
+    serially.
+  - Tests that force browser support to true must mock
+    `setSQLiteWorkerClientFactoryForTests`; otherwise bundled tests may try
+    to construct the real Vite worker URL.
 ---

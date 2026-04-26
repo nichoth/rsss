@@ -73,6 +73,9 @@ async function handleRequest (
     request:SqliteWorkerRequest
 ):Promise<SqliteWorkerRow[]|void> {
     switch (request.type) {
+        case 'probe':
+            await probeOpfs(request.directory)
+            return
         case 'open':
             await openDb(request)
             return
@@ -83,6 +86,33 @@ async function handleRequest (
             return query(request.sql, request.bind)
         case 'close':
             closeDb()
+    }
+}
+
+async function probeOpfs (directory = 'rsss-db'):Promise<void> {
+    const workerNavigator = (globalThis as unknown as {
+        navigator?:{
+            storage?:{
+                getDirectory?:() => Promise<unknown>
+            }
+        }
+    }).navigator
+    const getDirectory = workerNavigator?.storage?.getDirectory
+
+    if (typeof getDirectory !== 'function') {
+        throw new Error('OPFS storage directory API is unavailable')
+    }
+
+    await getDirectory.call(workerNavigator!.storage)
+
+    const sqlite = await initSqliteInWorker()
+    if (typeof sqlite.installOpfsSAHPoolVfs !== 'function') {
+        throw new Error('SQLite OPFS-SAH-pool VFS is unavailable')
+    }
+
+    const pool = await sqlite.installOpfsSAHPoolVfs({ directory })
+    if (typeof pool.OpfsSAHPoolDb !== 'function') {
+        throw new Error('SQLite OPFS-SAH-pool database is unavailable')
     }
 }
 

@@ -10,6 +10,15 @@ export interface SqliteWorkerOpenOptions {
     inMemory?:boolean
 }
 
+export interface SqliteWorkerProbeOptions {
+    directory?:string
+}
+
+export interface SqliteWorkerProbeRequest extends SqliteWorkerProbeOptions {
+    id:number
+    type:'probe'
+}
+
 export interface SqliteWorkerOpenRequest extends SqliteWorkerOpenOptions {
     id:number
     type:'open'
@@ -35,12 +44,14 @@ export interface SqliteWorkerCloseRequest {
 }
 
 export type SqliteWorkerRequest =
+    SqliteWorkerProbeRequest |
     SqliteWorkerOpenRequest |
     SqliteWorkerExecRequest |
     SqliteWorkerQueryRequest |
     SqliteWorkerCloseRequest
 
 export type SqliteWorkerRequestBody =
+    Omit<SqliteWorkerProbeRequest, 'id'> |
     Omit<SqliteWorkerOpenRequest, 'id'> |
     Omit<SqliteWorkerExecRequest, 'id'> |
     Omit<SqliteWorkerQueryRequest, 'id'> |

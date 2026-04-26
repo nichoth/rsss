@@ -13,6 +13,7 @@ import {
 } from '../local-first-settings.js'
 import {
     isLocalFirstSupported,
+    localFirstSupported,
     bootstrapLocalDb,
     bootstrapInProgress,
     bootstrapFeedsCount,
@@ -37,12 +38,13 @@ export const SettingsRoute:FunctionComponent<{
 
     useEffect(() => {
         loadLocalFirstSettings()
+        isLocalFirstSupported()
         if (state.isAuthenticated.value) {
             State.loadBillingStatus()
         }
     }, [])
 
-    const supported = isLocalFirstSupported()
+    const supported = localFirstSupported.value
     const inProgress = bootstrapInProgress.value
     const bError = bootstrapError.value
     const tabLockError = localTabLockError.value

@@ -1,6 +1,7 @@
 import type {
     SqliteWorkerBindValue,
     SqliteWorkerOpenOptions,
+    SqliteWorkerProbeOptions,
     SqliteWorkerRequest,
     SqliteWorkerRequestBody,
     SqliteWorkerResponse
@@ -29,6 +30,10 @@ export class SQLiteWorkerClient {
             const message = event.message || 'SQLite worker failed'
             this.rejectAll(new Error(message))
         }
+    }
+
+    probe (options:SqliteWorkerProbeOptions = {}):Promise<void> {
+        return this.send<void>({ type: 'probe', ...options })
     }
 
     open (options:SqliteWorkerOpenOptions):Promise<void> {

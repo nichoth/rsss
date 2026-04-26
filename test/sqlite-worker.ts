@@ -36,25 +36,31 @@ test('SQLiteWorkerClient resolves successful worker responses', async (t) => {
     const worker = new MockWorker()
     const client = new SQLiteWorkerClient(worker)
 
-    const open = client.open({ did: 'did:plc:alice' })
-    t.equal(worker.sent[0].type, 'open', 'sends open request')
+    const probe = client.probe({ directory: 'rsss-db' })
+    t.equal(worker.sent[0].type, 'probe', 'sends probe request')
     t.equal(worker.sent[0].id, 1, 'first request has id 1')
     worker.respond({ id: 1, ok: true })
+    await probe
+
+    const open = client.open({ did: 'did:plc:alice' })
+    t.equal(worker.sent[1].type, 'open', 'sends open request')
+    t.equal(worker.sent[1].id, 2, 'second request has id 2')
+    worker.respond({ id: 2, ok: true })
     await open
 
     const exec = client.exec('PRAGMA foreign_keys = ON;')
-    t.equal(worker.sent[1].type, 'exec', 'sends exec request')
-    t.equal(worker.sent[1].id, 2, 'second request has id 2')
-    worker.respond({ id: 2, ok: true })
+    t.equal(worker.sent[2].type, 'exec', 'sends exec request')
+    t.equal(worker.sent[2].id, 3, 'third request has id 3')
+    worker.respond({ id: 3, ok: true })
     await exec
 
     const query = client.query<{ id:number }>(
         'SELECT id FROM feeds WHERE id = ?',
         [1]
     )
-    t.equal(worker.sent[2].type, 'query', 'sends query request')
+    t.equal(worker.sent[3].type, 'query', 'sends query request')
     worker.respond({
-        id: 3,
+        id: 4,
         ok: true,
         result: [{ id: 1 }]
     })
@@ -62,8 +68,8 @@ test('SQLiteWorkerClient resolves successful worker responses', async (t) => {
     t.deepEqual(await query, [{ id: 1 }], 'returns query rows')
 
     const close = client.close()
-    t.equal(worker.sent[3].type, 'close', 'sends close request')
-    worker.respond({ id: 4, ok: true })
+    t.equal(worker.sent[4].type, 'close', 'sends close request')
+    worker.respond({ id: 5, ok: true })
     await close
     t.equal(worker.terminated, true, 'terminates worker on close')
 })
