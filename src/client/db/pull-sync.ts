@@ -23,6 +23,13 @@ export interface SyncResponse {
     isFullSync:boolean
 }
 
+interface PendingOutboxRefs {
+    feedIds:Set<number>
+    itemIds:Set<number>
+    markAllReadFeedIds:Set<number>
+    markAllReadAll:boolean
+}
+
 function getLastPullAt (db:Sqlite3Db):string|null {
     const rows:{ last_pull_at:string|null }[] = []
     db.exec({
@@ -113,6 +120,69 @@ function upsertItem (
     })
 }
 
+function getPendingOutboxRefs (db:Sqlite3Db):PendingOutboxRefs {
+    const rows:Array<{ op:string; target_id:number|null }> = []
+    db.exec({
+        sql: `SELECT op, target_id
+              FROM outbox
+              WHERE op IN (
+                'add_feed',
+                'delete_feed',
+                'update_item',
+                'mark_all_read'
+              )`,
+        rowMode: 'object',
+        resultRows: rows as Record<string, SqlValue>[]
+    })
+
+    const refs:PendingOutboxRefs = {
+        feedIds: new Set(),
+        itemIds: new Set(),
+        markAllReadFeedIds: new Set(),
+        markAllReadAll: false
+    }
+
+    for (const row of rows) {
+        if (
+            (row.op === 'add_feed' || row.op === 'delete_feed') &&
+            row.target_id !== null
+        ) {
+            refs.feedIds.add(row.target_id)
+        } else if (row.op === 'update_item' && row.target_id !== null) {
+            refs.itemIds.add(row.target_id)
+        } else if (row.op === 'mark_all_read') {
+            if (row.target_id === null) {
+                refs.markAllReadAll = true
+            } else {
+                refs.markAllReadFeedIds.add(row.target_id)
+            }
+        }
+    }
+
+    return refs
+}
+
+function shouldSkipFeed (
+    feed:Record<string, unknown>,
+    refs:PendingOutboxRefs
+):boolean {
+    return refs.feedIds.has(feed.id as number)
+}
+
+function shouldSkipItem (
+    item:Record<string, unknown>,
+    refs:PendingOutboxRefs
+):boolean {
+    const id = item.id as number
+    const feedId = item.feed_id as number
+    return (
+        refs.itemIds.has(id) ||
+        refs.feedIds.has(feedId) ||
+        refs.markAllReadAll ||
+        refs.markAllReadFeedIds.has(feedId)
+    )
+}
+
 export interface PullSyncOptions {
     onFeedUpserted?:(count:number) => void
     onItemUpserted?:(count:number) => void
@@ -163,17 +233,20 @@ export async function pullSync (
 
     const data = (await res.json()) as SyncResponse
     const keepContent = storeContent.value
+    const pendingRefs = getPendingOutboxRefs(db)
 
     db.exec('BEGIN')
     try {
         let feedCount = 0
         for (const feed of data.feeds) {
+            if (shouldSkipFeed(feed, pendingRefs)) continue
             upsertFeed(db, feed)
             feedCount++
             opts.onFeedUpserted?.(feedCount)
         }
         let itemCount = 0
         for (const item of data.items) {
+            if (shouldSkipItem(item, pendingRefs)) continue
             upsertItem(db, item, keepContent)
             itemCount++
             opts.onItemUpserted?.(itemCount)

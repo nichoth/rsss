@@ -9,12 +9,12 @@ import Route from 'route-event'
 import ky from 'ky'
 import Debug from '@substrate-system/debug'
 import { getAdapter, getLocalDb } from './db/index.js'
-import { pullSync, SyncBillingError } from './db/pull-sync.js'
+import { SyncBillingError } from './db/pull-sync.js'
 import {
-    pushSync,
     getOutboxCount,
     PushSyncBillingError
 } from './db/push-sync.js'
+import { runSyncCycle } from './db/sync-cycle.js'
 import {
     isLocalFirstActive,
     updateOnlineStatus,
@@ -259,20 +259,16 @@ export function State ():AppState {
             const db = getLocalDb(did)
             if (db) {
                 isLocalFirstActive.value = true
-                pullSync(db).catch((err) => {
-                    if (err instanceof SyncBillingError) {
+                runSyncCycle(db).catch((err) => {
+                    if (
+                        err instanceof SyncBillingError ||
+                        err instanceof PushSyncBillingError
+                    ) {
                         State.loadBillingStatus(state)
                         return
                     }
-                    debug('pullSync error:', err)
+                    debug('sync cycle error:', err)
                 }).then(() => {
-                    pushSync(db).catch((err) => {
-                        if (err instanceof PushSyncBillingError) {
-                            State.loadBillingStatus(state)
-                            return
-                        }
-                        debug('pushSync error:', err)
-                    })
                     State.loadFeeds(state)
                     State.loadItems(state)
                     State.loadCounts(state)
@@ -291,20 +287,15 @@ export function State ():AppState {
         const did = state.user.value?.did
         const db = getLocalDb(did)
         if (db) {
-            pullSync(db).catch((err) => {
-                if (err instanceof SyncBillingError) {
+            runSyncCycle(db).catch((err) => {
+                if (
+                    err instanceof SyncBillingError ||
+                    err instanceof PushSyncBillingError
+                ) {
                     State.loadBillingStatus(state)
                     return
                 }
-                debug('pullSync online error:', err)
-            }).then(() => {
-                pushSync(db).catch((err) => {
-                    if (err instanceof PushSyncBillingError) {
-                        State.loadBillingStatus(state)
-                        return
-                    }
-                    debug('pushSync online error:', err)
-                })
+                debug('sync cycle online error:', err)
             })
         }
     })

@@ -196,3 +196,64 @@ test('pullSync throws on non-ok response', async (t) => {
         db.close()
     }
 })
+
+test('pullSync skips items with pending outbox updates', async (t) => {
+    storeContent.value = true
+    const db = await openLocalDb('did:test:pull-pending-item')
+    try {
+        db.exec({
+            sql: `INSERT INTO feeds
+                (id, url, title, created_at, updated_at)
+                VALUES (1, 'https://example.com/feed', 'Feed',
+                    '2026-01-01 00:00:00',
+                    '2026-01-01 00:00:00')`
+        })
+        db.exec({
+            sql: `INSERT INTO items
+                (id, feed_id, guid, title, link, is_read, is_starred,
+                 created_at, updated_at)
+                VALUES (10, 1, 'guid-10', 'Local optimistic',
+                    'https://example.com/item-10', 1, 0,
+                    '2026-01-01 00:00:00',
+                    '2026-01-03 00:00:00')`
+        })
+        db.exec({
+            sql: `INSERT INTO outbox
+                (op, target_id, payload, client_op_id, client_updated_at)
+                VALUES ('update_item', 10, ?, 'op-pending-item',
+                    '2026-01-03 00:00:00')`,
+            bind: [JSON.stringify({ id: 10, is_read: true })]
+        })
+
+        const staleServerItem = {
+            ...ITEM,
+            title: 'Stale server',
+            is_read: 0,
+            updated_at: '2026-01-02 00:00:00'
+        }
+        const syncData = {
+            feeds: [],
+            items: [staleServerItem],
+            syncedAt: '2026-01-04 00:00:00',
+            latestUpdatedAt: '2026-01-04 00:00:00',
+            isFullSync: false
+        }
+
+        await pullSync(db, makeFetch(syncData))
+
+        const item = queryOne<{
+            title:string
+            is_read:number
+            updated_at:string
+        }>(db, 'SELECT title, is_read, updated_at FROM items WHERE id = 10')
+        t.equal(item?.title, 'Local optimistic', 'local title preserved')
+        t.equal(item?.is_read, 1, 'optimistic read state preserved')
+        t.equal(
+            item?.updated_at,
+            '2026-01-03 00:00:00',
+            'local updated_at preserved'
+        )
+    } finally {
+        db.close()
+    }
+})

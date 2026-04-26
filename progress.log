@@ -53,7 +53,38 @@
 - **Dynamic Hono status codes**: When returning dynamic numeric statuses from
   server helper errors through `c.json`, narrow them at the response boundary
   with Hono's `ContentfulStatusCode` type so typecheck remains strict.
+- **Local-first sync cycle order**: Use `src/client/db/sync-cycle.ts` for
+  app-triggered sync cycles. It runs `pushSync` before `pullSync` so pending
+  optimistic writes reach the server before remote rows are merged locally.
+- **Pending outbox pull protection**: `pullSync` skips server rows covered by
+  pending outbox operations (`update_item`, `mark_all_read`, `add_feed`,
+  `delete_feed`) so stale pulls cannot overwrite local optimistic writes.
 
+---
+
+## 2026-04-25 22:06 PDT - US-022
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Fixed sync ordering and optimistic-write protection.
+  - Added `runSyncCycle(db, fetchFn?)` to run `pushSync` before `pullSync`.
+  - Updated startup and online sync paths in `State()` to use the ordered
+    sync cycle.
+  - Updated `pullSync` to skip feed/item rows that are covered by pending
+    outbox operations so stale server pulls do not overwrite local writes.
+  - Added focused tests for pending-outbox pull protection and sync phase
+    ordering.
+- Files changed:
+  - `src/client/db/pull-sync.ts`
+  - `src/client/db/sync-cycle.ts`
+  - `src/client/state.ts`
+  - `test/pull-sync.ts`
+  - `test/sync-cycle.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Local-first sync cycles should call `runSyncCycle` instead of manually
+    chaining `pullSync` and `pushSync`.
+  - Tapout browser tests use a fixed local port, so run focused browser test
+    scripts serially rather than in parallel.
 ---
 
 ## 2026-04-25 22:00 PDT - US-021
