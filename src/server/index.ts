@@ -44,6 +44,7 @@ export interface Env {
     RESEND_DISABLED?:string;
     RESEND_FROM?:string;
     ADMIN_TOKEN?:string;
+    APP_ORIGIN?:string;
     NODE_ENV:string;
 }
 
@@ -184,6 +185,80 @@ type Variables = {
     session:OAuthSession|null;
 }
 
+type AppContext = Context<{
+    Bindings:Env;
+    Variables:Variables;
+}>
+
+const DEFAULT_APP_ORIGIN = 'https://rsss.space'
+const STATE_CHANGING_METHODS = new Set([
+    'DELETE',
+    'PATCH',
+    'POST',
+    'PUT'
+])
+
+export function isAllowedRequestOrigin (
+    origin:string,
+    requestUrl:string,
+    appOrigin:string = DEFAULT_APP_ORIGIN
+):boolean {
+    const requestOrigin = new URL(requestUrl).origin
+    return origin === requestOrigin || origin === appOrigin
+}
+
+export function isCrossOriginStateChange (
+    method:string,
+    requestUrl:string,
+    origin:string|null|undefined,
+    fetchSite:string|null|undefined,
+    appOrigin:string = DEFAULT_APP_ORIGIN
+):boolean {
+    if (!STATE_CHANGING_METHODS.has(method)) return false
+    if (origin && !isAllowedRequestOrigin(
+        origin,
+        requestUrl,
+        appOrigin
+    )) {
+        return true
+    }
+    return fetchSite === 'cross-site'
+        || (!origin && fetchSite === 'same-site')
+}
+
+function allowedCorsOrigin (
+    origin:string,
+    c:Context
+):string|null {
+    const appContext = c as AppContext
+    if (!origin) return null
+    const appOrigin = appContext.env.APP_ORIGIN || DEFAULT_APP_ORIGIN
+    return isAllowedRequestOrigin(origin, appContext.req.url, appOrigin) ?
+        origin :
+        null
+}
+
+const rejectCrossOriginStateChanges = async (
+    c:AppContext,
+    next:Next
+) => {
+    const origin = c.req.header('origin')
+    const fetchSite = c.req.header('sec-fetch-site')
+    const appOrigin = c.env.APP_ORIGIN || DEFAULT_APP_ORIGIN
+
+    if (isCrossOriginStateChange(
+        c.req.method,
+        c.req.url,
+        origin,
+        fetchSite,
+        appOrigin
+    )) {
+        return c.json({ error: 'Cross-origin request rejected' }, 403)
+    }
+
+    await next()
+}
+
 const app = new Hono<{ Bindings:Env; Variables:Variables }>()
 
 // Cross-origin isolation headers required for OPFS sync access handles
@@ -193,7 +268,12 @@ app.use('*', async (c, next) => {
 })
 
 // CORS for API routes
-app.use('/api/*', cors())
+app.use('/api/*', cors({
+    origin: allowedCorsOrigin,
+    credentials: true
+}))
+
+app.use('*', rejectCrossOriginStateChanges)
 
 // Session middleware
 app.use('*', async (c, next) => {

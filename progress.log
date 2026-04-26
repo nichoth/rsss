@@ -45,6 +45,10 @@
   `cloudflare:workers` esbuild alias.
 - **Tapout browser tests**: Tapout uses a fixed local port, so focused
   browser test commands must run serially rather than in parallel.
+- **Forbidden browser headers in tests**: Chromium-based tapout tests cannot
+  set forbidden request headers such as `Origin` or `Sec-Fetch-Site`.
+  Keep security decisions in pure helpers when those headers need focused
+  regression coverage.
 - **Bounded feed reads**: `fetchFeedText` requires `response.body` and reads
   through a stream with the byte cap. Do not fall back to `response.text()`.
 - **Schema split pattern**: The shared schema exports `TABLES_SQL`, `INDEXES_SQL`, `TRIGGERS_SQL`, and `SCHEMA_SQL` (combined). The DO must apply them in order: tables → server migrations → indexes/triggers. Client (OPFS) can use `SCHEMA_SQL` directly on a fresh DB.
@@ -87,8 +91,6 @@
 - **Feed fetch failures**: Server feed rows include `last_error` and
   `last_status`; update both from `fetchFeed` failures so failed refreshes are
   queryable after alarm or manual refresh runs.
-
----
 
 ## 2026-04-25 22:33 PDT - US-026
 Thread: https://ampcode.com/threads/unknown
@@ -576,4 +578,27 @@ Thread: https://ampcode.com/threads/unknown
     make tapout exit nonzero even when TAP assertions pass.
   - Feed failure state is stored on the server `feeds` row as `last_error` and
     `last_status`; keep the shared schema and server migrations in sync.
+---
+
+## 2026-04-25 23:04 PDT - US-029
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Restricted public Worker API CORS and added
+  cross-origin protection for mutating requests.
+  - `/api/*` CORS now uses an explicit origin resolver instead of wildcard
+    `*`, allowing the request origin or configured `APP_ORIGIN`.
+  - Added CSRF-style middleware that rejects cross-origin state-changing
+    methods using `Origin` and `Sec-Fetch-Site` signals.
+  - Added focused tests for the origin policy, state-changing request
+    policy, and same-origin logout behavior.
+- Files changed:
+  - `src/server/index.ts`
+  - `test/api-router.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Browser-bundled tapout tests cannot set forbidden request headers like
+    `Origin`; expose pure policy helpers for focused coverage of those
+    branches.
+  - Keep public Worker CORS/CSRF controls in `src/server/index.ts`; internal
+    Durable Object CORS cleanup is covered by a later PRD story.
 ---
