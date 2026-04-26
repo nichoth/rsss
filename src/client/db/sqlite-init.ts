@@ -2,28 +2,13 @@ import {
     SCHEMA_SQL,
     DEAD_LETTER_OUTBOX_SQL
 } from '../../shared/schema.js'
+import { createSQLiteWorkerClient } from './sqlite-worker-factory.js'
+import { WorkerBackedLocalDb } from './local-db.js'
+import { OUTBOX_SQL, SYNC_META_SQL } from './local-schema.js'
 import { LOCAL_TAB_LOCK_ERROR } from './tab-coordination.js'
+import type { SQLiteWorkerClient } from './sqlite-worker-client.js'
 
-export const SYNC_META_SQL = `
-    CREATE TABLE IF NOT EXISTS sync_meta (
-        id INTEGER PRIMARY KEY CHECK (id = 1),
-        last_pull_at TEXT
-    );
-    INSERT OR IGNORE INTO sync_meta (id, last_pull_at) VALUES (1, NULL);
-`
-
-const OUTBOX_SQL = `
-    CREATE TABLE IF NOT EXISTS outbox (
-        id INTEGER PRIMARY KEY,
-        op TEXT NOT NULL,
-        target_id INTEGER,
-        payload TEXT NOT NULL,
-        client_op_id TEXT NOT NULL UNIQUE,
-        client_updated_at TEXT NOT NULL,
-        attempts INTEGER NOT NULL DEFAULT 0,
-        last_error TEXT
-    );
-`
+export { SYNC_META_SQL, OUTBOX_SQL } from './local-schema.js'
 
 export class OPFSUnavailableError extends Error {
     constructor (message = 'OPFS is not available in this browser') {
@@ -34,11 +19,18 @@ export class OPFSUnavailableError extends Error {
 
 let _testMode = false
 let _testWasmUrl:string|undefined
+let _workerClientFactory:(() => SQLiteWorkerClient) = createSQLiteWorkerClient
 
 /** Set to true in tests to use an in-memory DB instead of OPFS. */
 export function setTestMode (v:boolean, wasmUrl?:string):void {
     _testMode = v
     _testWasmUrl = wasmUrl
+}
+
+export function setSQLiteWorkerClientFactoryForTests (
+    factory:(() => SQLiteWorkerClient)|null
+):void {
+    _workerClientFactory = factory ?? createSQLiteWorkerClient
 }
 
 export async function initSqlite () {
@@ -75,9 +67,8 @@ function isOpfsSupported ():boolean {
  * Throws OPFSUnavailableError if OPFS is not supported.
  */
 export async function openLocalDb (did:string):Promise<Sqlite3Db> {
-    const sqlite3 = await initSqlite()
-
     if (_testMode) {
+        const sqlite3 = await initSqlite()
         const db = new sqlite3.oo1.DB(':memory:')
         db.exec('PRAGMA foreign_keys = ON;')
         db.exec(SCHEMA_SQL)
@@ -92,24 +83,9 @@ export async function openLocalDb (did:string):Promise<Sqlite3Db> {
     }
 
     try {
-        const poolUtil = await (
-            sqlite3 as unknown as {
-                installOpfsSAHPoolVfs:(opts:{
-                    directory:string
-                }) => Promise<{
-                    OpfsSAHPoolDb:new (filename:string) => Sqlite3Db
-                }>
-            }
-        ).installOpfsSAHPoolVfs({ directory: 'rsss-db' })
-
-        const filename = getOpfsFilename(did)
-        const db = new poolUtil.OpfsSAHPoolDb(filename)
-        db.exec('PRAGMA foreign_keys = ON;')
-        db.exec(SCHEMA_SQL)
-        db.exec(OUTBOX_SQL)
-        db.exec(DEAD_LETTER_OUTBOX_SQL)
-        db.exec(SYNC_META_SQL)
-        return db
+        const client = _workerClientFactory()
+        await client.open({ did, directory: 'rsss-db' })
+        return new WorkerBackedLocalDb(client) as unknown as Sqlite3Db
     } catch (err) {
         if (isExclusiveLockError(err)) {
             throw new OPFSUnavailableError(LOCAL_TAB_LOCK_ERROR)

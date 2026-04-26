@@ -76,7 +76,7 @@ export const SettingsRoute:FunctionComponent<{
                 return
             }
             const db = getBootstrappedDb() ?? getLocalDb(did)
-            const pending = db ? getOutboxCount(db) : 0
+            const pending = db ? await getOutboxCount(db) : 0
             const lines = [
                 'This will delete your local data on this device:',
                 '  - Subscriptions cache',
@@ -125,7 +125,7 @@ export const SettingsRoute:FunctionComponent<{
         const did = state.user.value?.did
         if (!did) return
         const db = getBootstrappedDb() ?? getLocalDb(did)
-        const pending = db ? getOutboxCount(db) : 0
+        const pending = db ? await getOutboxCount(db) : 0
         const lines = [
             'This will wipe and re-download all local data.'
         ]

@@ -1,4 +1,3 @@
-import type { SqlValue } from '@sqlite.org/sqlite-wasm'
 import type { Sqlite3Db } from './sqlite-init.js'
 import type {
     DbAdapter,
@@ -9,15 +8,16 @@ import type {
 } from './types.js'
 import { formatSqliteTs } from './time.js'
 import { itemRouteCandidates } from '../../shared/item-route.js'
+import { execDb, queryDb, queryOneDb } from './local-db.js'
 
-function insertOutbox (
+async function insertOutbox (
     db:Sqlite3Db,
     op:string,
     targetId:number|null,
     payload:Record<string, unknown>,
     clientUpdatedAt:string
-):void {
-    db.exec({
+):Promise<void> {
+    await execDb(db, {
         sql: `INSERT INTO outbox
             (op, target_id, payload, client_op_id, client_updated_at)
             VALUES (?, ?, ?, ?, ?)`,
@@ -31,34 +31,10 @@ function insertOutbox (
     })
 }
 
-function query<T> (
-    db:Sqlite3Db,
-    sql:string,
-    bind?:(string|number)[]
-):T[] {
-    const rows:T[] = []
-    db.exec({
-        sql,
-        bind: bind && bind.length ? bind : undefined,
-        rowMode: 'object',
-        resultRows: rows as Record<string, SqlValue>[]
-    })
-    return rows
-}
-
-function queryOne<T> (
-    db:Sqlite3Db,
-    sql:string,
-    bind?:(string|number)[]
-):T | undefined {
-    const rows = query<T>(db, sql, bind)
-    return rows[0]
-}
-
 export function createLocalAdapter (db:Sqlite3Db):DbAdapter {
     return {
         async getFeeds ():Promise<Feed[]> {
-            return query<Feed>(
+            return queryDb<Feed>(
                 db,
                 'SELECT * FROM feeds ORDER BY title ASC'
             )
@@ -66,45 +42,45 @@ export function createLocalAdapter (db:Sqlite3Db):DbAdapter {
 
         async addFeed (url:string):Promise<Feed> {
             const now = formatSqliteTs(new Date())
-            db.exec('BEGIN')
+            await execDb(db, 'BEGIN')
             try {
-                db.exec({
+                await execDb(db, {
                     sql: 'INSERT INTO feeds (url, created_at, updated_at)' +
                         ' VALUES (?, ?, ?)',
                     bind: [url, now, now]
                 })
-                const feed = queryOne<Feed>(
+                const feed = await queryOneDb<Feed>(
                     db,
                     'SELECT * FROM feeds WHERE url = ?' +
                         ' ORDER BY id DESC LIMIT 1',
                     [url]
                 )
                 if (!feed) throw new Error('addFeed: insert failed')
-                insertOutbox(db, 'add_feed', feed.id, { url }, now)
-                db.exec('COMMIT')
+                await insertOutbox(db, 'add_feed', feed.id, { url }, now)
+                await execDb(db, 'COMMIT')
                 return feed
             } catch (err) {
-                db.exec('ROLLBACK')
+                await execDb(db, 'ROLLBACK')
                 throw err
             }
         },
 
         async deleteFeed (id:number):Promise<void> {
             const now = formatSqliteTs(new Date())
-            db.exec('BEGIN')
+            await execDb(db, 'BEGIN')
             try {
-                db.exec({
+                await execDb(db, {
                     sql: 'DELETE FROM items WHERE feed_id = ?',
                     bind: [id]
                 })
-                db.exec({
+                await execDb(db, {
                     sql: 'DELETE FROM feeds WHERE id = ?',
                     bind: [id]
                 })
-                insertOutbox(db, 'delete_feed', id, { id }, now)
-                db.exec('COMMIT')
+                await insertOutbox(db, 'delete_feed', id, { id }, now)
+                await execDb(db, 'COMMIT')
             } catch (err) {
-                db.exec('ROLLBACK')
+                await execDb(db, 'ROLLBACK')
                 throw err
             }
         },
@@ -134,14 +110,14 @@ export function createLocalAdapter (db:Sqlite3Db):DbAdapter {
                 params.push(isStarred ? 1 : 0)
             }
 
-            const countRow = queryOne<{ count:number }>(
+            const countRow = await queryOneDb<{ count:number }>(
                 db,
                 'SELECT COUNT(*) as count FROM items' + where,
                 params
             )
 
             const listParams = [...params, limit, offset]
-            const items = query<Item>(
+            const items = await queryDb<Item>(
                 db,
                 'SELECT items.*, feeds.title as feed_title ' +
                 'FROM items JOIN feeds ON items.feed_id = feeds.id' +
@@ -166,7 +142,7 @@ export function createLocalAdapter (db:Sqlite3Db):DbAdapter {
                 .map(() => 'items.link = ?')
                 .join(' OR ')
 
-            const item = queryOne<Item>(
+            const item = await queryOneDb<Item>(
                 db,
                 `SELECT items.*, feeds.title as feed_title
                  FROM items
@@ -182,7 +158,7 @@ export function createLocalAdapter (db:Sqlite3Db):DbAdapter {
         },
 
         async getCounts ():Promise<CountsResponse> {
-            const row = queryOne<{
+            const row = await queryOneDb<{
                 unread:number
                 starred:number
                 total:number
@@ -190,7 +166,8 @@ export function createLocalAdapter (db:Sqlite3Db):DbAdapter {
                 db,
                 'SELECT ' +
                 '  SUM(CASE WHEN is_read = 0 THEN 1 ELSE 0 END) as unread,' +
-                '  SUM(CASE WHEN is_starred = 1 THEN 1 ELSE 0 END) as starred,' +
+                '  SUM(CASE WHEN is_starred = 1 THEN 1 ELSE 0 END) ' +
+                'as starred,' +
                 '  COUNT(*) as total ' +
                 'FROM items'
             )
@@ -223,50 +200,50 @@ export function createLocalAdapter (db:Sqlite3Db):DbAdapter {
             fields.push("updated_at = datetime('now')")
             params.push(id)
 
-            db.exec('BEGIN')
+            await execDb(db, 'BEGIN')
             try {
-                db.exec({
+                await execDb(db, {
                     sql: `UPDATE items SET ${fields.join(', ')} WHERE id = ?`,
                     bind: params
                 })
-                insertOutbox(db, 'update_item', id, {
+                await insertOutbox(db, 'update_item', id, {
                     id,
                     ...updates
                 }, now)
-                db.exec('COMMIT')
+                await execDb(db, 'COMMIT')
             } catch (err) {
-                db.exec('ROLLBACK')
+                await execDb(db, 'ROLLBACK')
                 throw err
             }
         },
 
         async markAllRead (feedId?:number):Promise<void> {
             const now = formatSqliteTs(new Date())
-            db.exec('BEGIN')
+            await execDb(db, 'BEGIN')
             try {
                 if (feedId !== undefined) {
-                    db.exec({
+                    await execDb(db, {
                         sql: 'UPDATE items SET is_read = 1,' +
                             " updated_at = datetime('now')" +
                             ' WHERE feed_id = ? AND is_read = 0',
                         bind: [feedId]
                     })
                 } else {
-                    db.exec({
+                    await execDb(db, {
                         sql: 'UPDATE items SET is_read = 1,' +
                             " updated_at = datetime('now') WHERE is_read = 0"
                     })
                 }
-                insertOutbox(
+                await insertOutbox(
                     db,
                     'mark_all_read',
                     feedId ?? null,
                     feedId !== undefined ? { feedId } : {},
                     now
                 )
-                db.exec('COMMIT')
+                await execDb(db, 'COMMIT')
             } catch (err) {
-                db.exec('ROLLBACK')
+                await execDb(db, 'ROLLBACK')
                 throw err
             }
         }

@@ -309,8 +309,16 @@ export function State ():AppState {
     const handleOffline = () => {
         const did = state.user.value?.did
         const db = getLocalDb(did)
-        const pending = db ? getOutboxCount(db) : 0
-        setSyncOffline(pending)
+        if (!db) {
+            setSyncOffline(0)
+            return
+        }
+        getOutboxCount(db)
+            .then((pending) => setSyncOffline(pending))
+            .catch((err) => {
+                debug('offline pending count error:', err)
+                setSyncOffline(0)
+            })
     }
 
     window.addEventListener('online', handleOnline)

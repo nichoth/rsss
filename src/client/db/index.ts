@@ -166,10 +166,10 @@ async function pushPendingWritesBeforeRemoval (
     try {
         await pushSync(db, fetchFn as Parameters<typeof pushSync>[1])
     } catch (err) {
-        throw new LocalFirstSyncFailureError(getOutboxCount(db), err)
+        throw new LocalFirstSyncFailureError(await getOutboxCount(db), err)
     }
 
-    const pending = getOutboxCount(db)
+    const pending = await getOutboxCount(db)
     if (pending > 0) {
         throw new LocalFirstSyncFailureError(pending)
     }

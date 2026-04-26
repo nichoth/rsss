@@ -54,6 +54,9 @@ export default defineConfig(({ mode }) => {
             emptyOutDir: true,
             sourcemap: 'inline',
         },
+        worker: {
+            format: 'es',
+        },
         environments: {
             client: {
                 build: {

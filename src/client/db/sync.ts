@@ -51,8 +51,8 @@ export async function runSync (
 
     if (trackStatus) {
         setSyncDone(
-            getOutboxCount(db),
-            getDeadLetterOutboxCount(db)
+            await getOutboxCount(db),
+            await getDeadLetterOutboxCount(db)
         )
     }
 }

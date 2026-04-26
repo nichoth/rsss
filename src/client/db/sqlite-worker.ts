@@ -6,6 +6,11 @@ import type {
     SqliteWorkerRow,
     SqliteWorkerSerializedError
 } from './sqlite-worker-protocol.js'
+import {
+    SCHEMA_SQL,
+    DEAD_LETTER_OUTBOX_SQL
+} from '../../shared/schema.js'
+import { OUTBOX_SQL, SYNC_META_SQL } from './local-schema.js'
 
 type WorkerDbExecArg =
     string |
@@ -87,7 +92,7 @@ async function openDb (options:SqliteWorkerOpenOptions):Promise<void> {
 
     if (options.inMemory || options.filename === ':memory:') {
         db = new sqlite.oo1.DB(':memory:')
-        db.exec('PRAGMA foreign_keys = ON;')
+        applySchema(db)
         return
     }
 
@@ -102,7 +107,15 @@ async function openDb (options:SqliteWorkerOpenOptions):Promise<void> {
         directory: options.directory || 'rsss-db'
     })
     db = new pool.OpfsSAHPoolDb(filename)
-    db.exec('PRAGMA foreign_keys = ON;')
+    applySchema(db)
+}
+
+function applySchema (targetDb:WorkerDb):void {
+    targetDb.exec('PRAGMA foreign_keys = ON;')
+    targetDb.exec(SCHEMA_SQL)
+    targetDb.exec(OUTBOX_SQL)
+    targetDb.exec(DEAD_LETTER_OUTBOX_SQL)
+    targetDb.exec(SYNC_META_SQL)
 }
 
 async function initSqliteInWorker ():Promise<SqliteWorkerNamespace> {

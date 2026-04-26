@@ -5,10 +5,81 @@ import wasmUrl from '@sqlite.org/sqlite-wasm/sqlite3.wasm'
 import {
     openLocalDb,
     setTestMode,
+    setSQLiteWorkerClientFactoryForTests,
     OPFSUnavailableError
 } from '../src/client/db/sqlite-init.js'
+import type {
+    SQLiteWorkerClient
+} from '../src/client/db/sqlite-worker-client.js'
 
 setTestMode(true, wasmUrl as string)
+
+test('openLocalDb delegates production open and schema setup to worker',
+    async (t) => {
+        const openCalls:unknown[] = []
+        const execSql:string[] = []
+        const previousNavigator = globalThis.navigator
+        const previousIsolated = (
+            globalThis as { crossOriginIsolated?:boolean }
+        ).crossOriginIsolated
+        const previousAccessHandle = (
+            globalThis as Record<string, unknown>
+        ).FileSystemSyncAccessHandle
+
+        const worker = {
+            open: async (options:unknown) => {
+                openCalls.push(options)
+            },
+            exec: async (sql:string) => {
+                execSql.push(sql)
+            },
+            query: async () => [],
+            close: async () => {}
+        } as unknown as SQLiteWorkerClient
+
+        Object.defineProperty(globalThis, 'navigator', {
+            configurable: true,
+            value: {
+                storage: {
+                    getDirectory: async () => ({})
+                }
+            }
+        })
+        Object.defineProperty(globalThis, 'crossOriginIsolated', {
+            configurable: true,
+            value: true
+        })
+        ;(globalThis as Record<string, unknown>)
+            .FileSystemSyncAccessHandle = function () {}
+
+        setTestMode(false)
+        setSQLiteWorkerClientFactoryForTests(() => worker)
+
+        try {
+            const db = await openLocalDb('did:plc:alice')
+
+            t.deepEqual(openCalls, [{
+                did: 'did:plc:alice',
+                directory: 'rsss-db'
+            }], 'opens the per-user OPFS database in the worker')
+            await db.exec({ sql: 'SELECT 1', bind: [] })
+            t.equal(execSql.at(-1), 'SELECT 1',
+                'returned db delegates exec calls to the worker')
+        } finally {
+            setSQLiteWorkerClientFactoryForTests(null)
+            setTestMode(true, wasmUrl as string)
+            Object.defineProperty(globalThis, 'navigator', {
+                configurable: true,
+                value: previousNavigator
+            })
+            Object.defineProperty(globalThis, 'crossOriginIsolated', {
+                configurable: true,
+                value: previousIsolated
+            })
+            ;(globalThis as Record<string, unknown>)
+                .FileSystemSyncAccessHandle = previousAccessHandle
+        }
+    })
 
 test('openLocalDb creates feeds and items tables', async (t) => {
     const db = await openLocalDb('did:test:user1')

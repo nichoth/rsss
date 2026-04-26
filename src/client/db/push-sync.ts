@@ -1,5 +1,5 @@
-import type { SqlValue } from '@sqlite.org/sqlite-wasm'
 import type { Sqlite3Db } from './sqlite-init.js'
+import { execDb, queryDb } from './local-db.js'
 import {
     setSyncSyncing,
     setSyncDone,
@@ -34,46 +34,41 @@ interface OutboxRow {
     last_error:string|null
 }
 
-export function getOutboxCount (db:Sqlite3Db):number {
-    const rows:Array<{ n:number }> = []
-    db.exec({
-        sql: 'SELECT COUNT(*) AS n FROM outbox',
-        rowMode: 'object',
-        resultRows: rows as Record<string, SqlValue>[]
-    })
+export async function getOutboxCount (db:Sqlite3Db):Promise<number> {
+    const rows = await queryDb<{ n:number }>(
+        db,
+        'SELECT COUNT(*) AS n FROM outbox'
+    )
     return rows[0]?.n ?? 0
 }
 
-export function getDeadLetterOutboxCount (db:Sqlite3Db):number {
-    const rows:Array<{ n:number }> = []
-    db.exec({
-        sql: 'SELECT COUNT(*) AS n FROM dead_letter_outbox',
-        rowMode: 'object',
-        resultRows: rows as Record<string, SqlValue>[]
-    })
+export async function getDeadLetterOutboxCount (
+    db:Sqlite3Db
+):Promise<number> {
+    const rows = await queryDb<{ n:number }>(
+        db,
+        'SELECT COUNT(*) AS n FROM dead_letter_outbox'
+    )
     return rows[0]?.n ?? 0
 }
 
-function getOutboxRows (db:Sqlite3Db):OutboxRow[] {
-    const rows:OutboxRow[] = []
-    db.exec({
-        sql: 'SELECT * FROM outbox ORDER BY id ASC',
-        rowMode: 'object',
-        resultRows: rows as unknown as Record<string, SqlValue>[]
+function getOutboxRows (db:Sqlite3Db):Promise<OutboxRow[]> {
+    return queryDb<OutboxRow>(db, 'SELECT * FROM outbox ORDER BY id ASC')
+}
+
+async function deleteOutboxRow (db:Sqlite3Db, id:number):Promise<void> {
+    await execDb(db, {
+        sql: 'DELETE FROM outbox WHERE id = ?',
+        bind: [id]
     })
-    return rows
 }
 
-function deleteOutboxRow (db:Sqlite3Db, id:number):void {
-    db.exec({ sql: 'DELETE FROM outbox WHERE id = ?', bind: [id] })
-}
-
-function incrementAttempt (
+async function incrementAttempt (
     db:Sqlite3Db,
     id:number,
     error:string
-):void {
-    db.exec({
+):Promise<void> {
+    await execDb(db, {
         sql: `UPDATE outbox
               SET attempts = attempts + 1, last_error = ?
               WHERE id = ?`,
@@ -81,14 +76,14 @@ function incrementAttempt (
     })
 }
 
-function moveOutboxRowToDeadLetters (
+async function moveOutboxRowToDeadLetters (
     db:Sqlite3Db,
     row:OutboxRow,
     error:string
-):void {
-    db.exec('BEGIN')
+):Promise<void> {
+    await execDb(db, 'BEGIN')
     try {
-        db.exec({
+        await execDb(db, {
             sql: `INSERT INTO dead_letter_outbox
                 (op, target_id, payload, client_op_id, client_updated_at,
                  attempts, last_error)
@@ -103,32 +98,32 @@ function moveOutboxRowToDeadLetters (
                 error
             ]
         })
-        deleteOutboxRow(db, row.id)
-        db.exec('COMMIT')
+        await deleteOutboxRow(db, row.id)
+        await execDb(db, 'COMMIT')
     } catch (err) {
-        db.exec('ROLLBACK')
+        await execDb(db, 'ROLLBACK')
         throw err
     }
 }
 
-function recordFailedAttempt (
+async function recordFailedAttempt (
     db:Sqlite3Db,
     row:OutboxRow,
     error:string
-):void {
+):Promise<void> {
     if (row.attempts + 1 >= OUTBOX_ATTEMPT_LIMIT) {
-        moveOutboxRowToDeadLetters(db, row, error)
+        await moveOutboxRowToDeadLetters(db, row, error)
         return
     }
 
-    incrementAttempt(db, row.id, error)
+    await incrementAttempt(db, row.id, error)
 }
 
-function upsertFeedFromServer (
+async function upsertFeedFromServer (
     db:Sqlite3Db,
     feed:Record<string, unknown>
-):void {
-    db.exec({
+):Promise<void> {
+    await execDb(db, {
         sql: `INSERT INTO feeds
             (id, url, title, description, site_url, last_fetched,
              created_at, updated_at)
@@ -164,30 +159,30 @@ function extractFeed (
     return feed as Record<string, unknown>
 }
 
-function reconcileSuccessfulAddFeed (
+async function reconcileSuccessfulAddFeed (
     db:Sqlite3Db,
     row:OutboxRow,
     body:unknown
-):void {
+):Promise<void> {
     const feed = extractFeed(body)
     if (!feed || typeof feed.id !== 'number') {
         throw new Error('pushSync: add_feed response missing feed')
     }
 
     if (row.target_id !== null) {
-        db.exec({
+        await execDb(db, {
             sql: 'DELETE FROM feeds WHERE id = ?',
             bind: [row.target_id]
         })
     }
-    upsertFeedFromServer(db, feed)
+    await upsertFeedFromServer(db, feed)
 }
 
-function upsertItemFromServer (
+async function upsertItemFromServer (
     db:Sqlite3Db,
     item:Record<string, unknown>
-):void {
-    db.exec({
+):Promise<void> {
+    await execDb(db, {
         sql: `INSERT INTO items
             (id, feed_id, guid, title, link, description, content,
              author, pub_date, is_read, is_starred, created_at, updated_at)
@@ -292,14 +287,14 @@ export async function pushSync (
     opts:PushSyncOptions = {}
 ):Promise<void> {
     const trackStatus = opts.trackStatus ?? isLocalFirstActive.value
-    const rows = getOutboxRows(db)
+    const rows = await getOutboxRows(db)
     if (trackStatus && rows.length > 0) setSyncSyncing()
 
     for (const row of rows) {
         const req = buildRequest(row)
         if (!req) {
             // Unknown op — skip silently
-            deleteOutboxRow(db, row.id)
+            await deleteOutboxRow(db, row.id)
             continue
         }
 
@@ -313,18 +308,18 @@ export async function pushSync (
             if (res.ok) {
                 if (row.op === 'add_feed') {
                     const body = await res.json()
-                    db.exec('BEGIN')
+                    await execDb(db, 'BEGIN')
                     try {
-                        reconcileSuccessfulAddFeed(db, row, body)
-                        deleteOutboxRow(db, row.id)
-                        db.exec('COMMIT')
+                        await reconcileSuccessfulAddFeed(db, row, body)
+                        await deleteOutboxRow(db, row.id)
+                        await execDb(db, 'COMMIT')
                     } catch (err) {
-                        db.exec('ROLLBACK')
+                        await execDb(db, 'ROLLBACK')
                         throw err
                     }
                     continue
                 }
-                deleteOutboxRow(db, row.id)
+                await deleteOutboxRow(db, row.id)
                 continue
             }
 
@@ -338,11 +333,11 @@ export async function pushSync (
 
             if (res.status === 409) {
                 const body = await res.json() as Record<string, unknown>
-                db.exec('BEGIN')
+                await execDb(db, 'BEGIN')
                 try {
                     if (row.op === 'add_feed' || row.op === 'delete_feed') {
                         const feed = body as Record<string, unknown>
-                        if (feed.id) upsertFeedFromServer(db, feed)
+                        if (feed.id) await upsertFeedFromServer(db, feed)
                     } else if (
                         row.op === 'update_item' ||
                         row.op === 'mark_all_read'
@@ -351,38 +346,38 @@ export async function pushSync (
                             for (const item of body as Record<
                                 string, unknown
                             >[]) {
-                                upsertItemFromServer(db, item)
+                                await upsertItemFromServer(db, item)
                             }
                         } else if (body.id) {
-                            upsertItemFromServer(
+                            await upsertItemFromServer(
                                 db,
                                 body as Record<string, unknown>
                             )
                         }
                     }
-                    deleteOutboxRow(db, row.id)
-                    db.exec('COMMIT')
+                    await deleteOutboxRow(db, row.id)
+                    await execDb(db, 'COMMIT')
                 } catch (err) {
-                    db.exec('ROLLBACK')
+                    await execDb(db, 'ROLLBACK')
                     throw err
                 }
                 continue
             }
 
             // 5xx or other non-success
-            recordFailedAttempt(db, row, `HTTP ${res.status}`)
+            await recordFailedAttempt(db, row, `HTTP ${res.status}`)
         } catch (err) {
             if (err instanceof PushSyncAuthError) throw err
             if (err instanceof PushSyncBillingError) throw err
             const errMsg = err instanceof Error ? err.message : String(err)
-            recordFailedAttempt(db, row, errMsg)
+            await recordFailedAttempt(db, row, errMsg)
             if (trackStatus) setSyncError(errMsg)
         }
     }
 
     if (trackStatus) {
-        const pending = getOutboxCount(db)
-        const deadLetters = getDeadLetterOutboxCount(db)
+        const pending = await getOutboxCount(db)
+        const deadLetters = await getDeadLetterOutboxCount(db)
         setSyncDone(pending, deadLetters)
     }
 }

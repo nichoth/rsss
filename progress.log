@@ -80,6 +80,10 @@ Thread: https://ampcode.com/threads/unknown
   uses `new URL(..., import.meta.url)`. Browser-bundled tapout tests can
   import the client without esbuild `import.meta` warnings, while app code can
   import the factory for lazy worker packaging.
+- **Worker-backed local DB calls**: Production local SQLite handles may be
+  worker-backed and asynchronous. Shared local-first code should use
+  `execDb`, `queryDb`, and `queryOneDb` instead of direct synchronous
+  `db.exec` when it must work in both production and in-memory tests.
 - **Client routing helpers**: Pure item-route helpers live in
   `src/client/routing.ts` and use canonical `Item` types from
   `src/client/db/types.ts`. `state.ts` re-exports these helpers for legacy
@@ -1362,4 +1366,39 @@ Thread: https://ampcode.com/threads/unknown
   - Worker protocol types live in `sqlite-worker-protocol.ts`; reuse those
     for future worker-backed DB calls rather than adding ad hoc message
     shapes.
+---
+
+## 2026-04-26 14:09 PDT - US-059
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Moved production local SQLite opening through the
+  SQLite worker.
+  - Added a worker-backed local DB wrapper and shared async DB helpers.
+  - Moved local-only schema addenda into `local-schema.ts` so both
+    in-memory tests and the worker apply the same schema.
+  - Updated local adapter, pull-sync, push-sync, sync orchestration, and
+    pending-count UI paths to await DB operations.
+  - Set Vite worker output to ES modules so the SQLite worker can
+    code-split sqlite-wasm assets.
+- Files changed:
+  - `src/client/db/local-db.ts`
+  - `src/client/db/local-schema.ts`
+  - `src/client/db/sqlite-init.ts`
+  - `src/client/db/sqlite-worker.ts`
+  - `src/client/db/local-adapter.ts`
+  - `src/client/db/pull-sync.ts`
+  - `src/client/db/push-sync.ts`
+  - `src/client/db/sync.ts`
+  - `src/client/db/index.ts`
+  - `src/client/routes/settings.ts`
+  - `src/client/state.ts`
+  - `test/sqlite-init.ts`
+  - `vite.config.js`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Worker-backed local DB operations are asynchronous; use the shared
+    helpers in `local-db.ts` for code that must work with both the worker
+    and in-memory sqlite tests.
+  - Vite worker builds that code-split sqlite-wasm need
+    `worker.format = 'es'`.
 ---

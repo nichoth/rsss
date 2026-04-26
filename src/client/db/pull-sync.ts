@@ -1,6 +1,6 @@
-import type { SqlValue } from '@sqlite.org/sqlite-wasm'
 import type { Sqlite3Db } from './sqlite-init.js'
 import { storeContent } from '../local-first-settings.js'
+import { execDb, queryDb } from './local-db.js'
 import {
     setSyncSyncing,
     setSyncDone,
@@ -37,25 +37,26 @@ interface PendingOutboxRefs {
     markAllReadAll:boolean
 }
 
-function getLastPullAt (db:Sqlite3Db):string|null {
-    const rows:{ last_pull_at:string|null }[] = []
-    db.exec({
-        sql: 'SELECT last_pull_at FROM sync_meta WHERE id = 1',
-        rowMode: 'object',
-        resultRows: rows as Record<string, SqlValue>[]
-    })
+async function getLastPullAt (db:Sqlite3Db):Promise<string|null> {
+    const rows = await queryDb<{ last_pull_at:string|null }>(
+        db,
+        'SELECT last_pull_at FROM sync_meta WHERE id = 1'
+    )
     return rows[0]?.last_pull_at ?? null
 }
 
-function setLastPullAt (db:Sqlite3Db, value:string):void {
-    db.exec({
+async function setLastPullAt (db:Sqlite3Db, value:string):Promise<void> {
+    await execDb(db, {
         sql: 'UPDATE sync_meta SET last_pull_at = ? WHERE id = 1',
         bind: [value]
     })
 }
 
-function upsertFeed (db:Sqlite3Db, feed:Record<string, unknown>):void {
-    db.exec({
+async function upsertFeed (
+    db:Sqlite3Db,
+    feed:Record<string, unknown>
+):Promise<void> {
+    await execDb(db, {
         sql: `INSERT INTO feeds
             (id, url, title, description, site_url, last_fetched,
              created_at, updated_at)
@@ -80,11 +81,11 @@ function upsertFeed (db:Sqlite3Db, feed:Record<string, unknown>):void {
     })
 }
 
-function upsertItem (
+async function upsertItem (
     db:Sqlite3Db,
     item:Record<string, unknown>,
     keepContent:boolean
-):void {
+):Promise<void> {
     const content = keepContent
         ? (item.content as string|null) ?? null
         : null
@@ -92,7 +93,7 @@ function upsertItem (
         ? (item.description as string|null) ?? null
         : null
 
-    db.exec({
+    await execDb(db, {
         sql: `INSERT INTO items
             (id, feed_id, guid, title, link, description, content,
              author, pub_date, is_read, is_starred, created_at, updated_at)
@@ -127,20 +128,20 @@ function upsertItem (
     })
 }
 
-function getPendingOutboxRefs (db:Sqlite3Db):PendingOutboxRefs {
-    const rows:Array<{ op:string; target_id:number|null }> = []
-    db.exec({
-        sql: `SELECT op, target_id
-              FROM outbox
-              WHERE op IN (
-                'add_feed',
-                'delete_feed',
-                'update_item',
-                'mark_all_read'
-              )`,
-        rowMode: 'object',
-        resultRows: rows as Record<string, SqlValue>[]
-    })
+async function getPendingOutboxRefs (
+    db:Sqlite3Db
+):Promise<PendingOutboxRefs> {
+    const rows = await queryDb<{ op:string; target_id:number|null }>(
+        db,
+        `SELECT op, target_id
+         FROM outbox
+         WHERE op IN (
+            'add_feed',
+            'delete_feed',
+            'update_item',
+            'mark_all_read'
+         )`
+    )
 
     const refs:PendingOutboxRefs = {
         feedIds: new Set(),
@@ -209,7 +210,7 @@ export async function pullSync (
     const trackStatus = opts.trackStatus ?? isLocalFirstActive.value
     if (trackStatus) setSyncSyncing()
 
-    const lastPullAt = getLastPullAt(db)
+    const lastPullAt = await getLastPullAt(db)
     const url = lastPullAt
         ? `/api/sync?since=${encodeURIComponent(lastPullAt)}`
         : '/api/sync'
@@ -245,28 +246,28 @@ export async function pullSync (
 
     const data = (await res.json()) as SyncResponse
     const keepContent = storeContent.value
-    const pendingRefs = getPendingOutboxRefs(db)
+    const pendingRefs = await getPendingOutboxRefs(db)
 
-    db.exec('BEGIN')
+    await execDb(db, 'BEGIN')
     try {
         let feedCount = 0
         for (const feed of data.feeds) {
             if (shouldSkipFeed(feed, pendingRefs)) continue
-            upsertFeed(db, feed)
+            await upsertFeed(db, feed)
             feedCount++
             opts.onFeedUpserted?.(feedCount)
         }
         let itemCount = 0
         for (const item of data.items) {
             if (shouldSkipItem(item, pendingRefs)) continue
-            upsertItem(db, item, keepContent)
+            await upsertItem(db, item, keepContent)
             itemCount++
             opts.onItemUpserted?.(itemCount)
         }
-        setLastPullAt(db, data.latestUpdatedAt)
-        db.exec('COMMIT')
+        await setLastPullAt(db, data.latestUpdatedAt)
+        await execDb(db, 'COMMIT')
     } catch (err) {
-        db.exec('ROLLBACK')
+        await execDb(db, 'ROLLBACK')
         if (trackStatus) {
             setSyncError(
                 err instanceof Error ? err.message : String(err)
