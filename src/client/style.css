@@ -29,6 +29,16 @@ body {
     overflow-x: hidden;
 }
 
+a {
+    transition: all 0.2s;
+    text-decoration: underline;
+    text-underline-offset: 1px;
+    
+    &:hover {
+        text-underline-offset: 3px;
+    }
+}
+
 #root {
     display: flex;
     flex-direction: column;
