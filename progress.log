@@ -106,6 +106,11 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Bootstrap failure classification**: `bootstrapLocalDb` treats fetch
+  rejection, abort, 5xx, unavailable storage, and local-tab lock failures as
+  transient. Transient failures keep `syncSubscriptions` enabled, keep OPFS
+  data in place, and set `bootstrapRetryAvailable`; destructive cleanup must
+  stay behind the terminal-confirmation branch.
 - **Paginated sync cursoring**: `/api/sync` returns `hasMore` and an
   opaque `nextCursor`; `pullSync` persists that cursor in `sync_meta` after
   each committed page and clears it only when the final page advances
@@ -258,6 +263,7 @@ Thread: https://ampcode.com/threads/unknown
 - **SQLite foreign keys**: `PRAGMA foreign_keys = ON;` is connection-local.
   Run it immediately after opening any client or Durable Object SQLite handle,
   before applying schema or relying on `ON DELETE CASCADE`.
+
 - **Test command**: `npm run test:db` runs `test/db-adapter.ts` via esbuild + tapout in a browser (Chromium). All DB adapter interface tests live there.
 - **Import paths**: TypeScript source uses `.js` extensions in imports (e.g. `../../shared/schema.js`) for ESM compatibility with esbuild.
 - **sqlite-wasm in tapout tests**: tapout's HTTP server only serves the test bundle. To use sqlite-wasm in tests, use `--loader:.wasm=dataurl` with esbuild (inlines WASM as base64), import the wasm as `import wasmUrl from '@sqlite.org/sqlite-wasm/sqlite3.wasm'`, and pass `{ locateFile: () => wasmUrl }` to `sqlite3Module.default()`. Use `setTestMode(true, wasmUrl)` before tests to enable in-memory mode.
@@ -1745,4 +1751,31 @@ Thread: https://ampcode.com/threads/unknown
   - Local-first settings/status CSS contracts are now guarded by
     `test/local-first-a11y-static.mjs`; add future local-first a11y/static
     regressions there instead of relying only on manual review.
+---
+
+## 2026-04-27 15:07 PDT - US-070
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Bootstrap failure classification and retry handling.
+  - Transient bootstrap failures now leave `syncSubscriptions` enabled,
+    preserve the local OPFS file, and expose `bootstrapRetryAvailable`.
+  - Terminal bootstrap failures only wipe OPFS and flip the setting off after
+    the caller confirms the reset.
+  - Settings now passes the terminal confirmation callback and renders a
+    "Retry setup" button for retryable bootstrap failures.
+  - Added regression coverage for fetch rejection retry and updated server
+    5xx coverage to assert retryable behavior.
+- Files changed:
+  - `src/client/db/bootstrap.ts`
+  - `src/client/db/index.ts`
+  - `src/client/routes/settings.ts`
+  - `src/client/routes/settings.css`
+  - `test/bootstrap.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Retryable bootstrap state belongs in `bootstrap.ts` as a signal so the
+    Settings route can render recovery UI without duplicating error
+    classification.
+  - Do not call `setSyncSubscriptions(false)` or `removeOpfsDb` for network,
+    abort, 5xx, tab-lock, or unavailable-storage bootstrap failures.
 ---

@@ -58,6 +58,7 @@ export {
     bootstrapFeedsCount,
     bootstrapItemsCount,
     bootstrapError,
+    bootstrapRetryAvailable,
     getBootstrappedDb,
     clearBootstrappedDb
 } from './bootstrap.js'
