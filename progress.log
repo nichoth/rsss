@@ -129,6 +129,11 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **SQLite OPFS probe/open reuse**: A successful `probeOpfsSupport()`
+  keeps its `SQLiteWorkerClient` for the next `openLocalDb()` call, and
+  the worker caches the installed OPFS-SAH pool by directory. Test resets
+  that swap worker factories or return to in-memory mode should dispose
+  the cached probe worker.
 - **OPFS tab coordination authority**: `acquireLocalTabLock()` uses the
   Web Locks API lock named `rsss-opfs` as the primary-tab source of truth.
   `BroadcastChannel('rsss-tab')` remains only a compatibility/status hint;
@@ -1894,4 +1899,28 @@ Thread: https://ampcode.com/threads/unknown
     `navigator.locks` when they rely on isolated in-memory local DB state.
   - Browser-based tapout tests share port 8123, so run focused browser test
     scripts sequentially instead of in parallel.
+---
+
+## 2026-04-27 16:38 PDT - US-075
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Reused SQLite OPFS setup across support probing and
+  local DB open.
+  - `probeOpfsSupport()` now retains a successful worker client for the next
+    `openLocalDb()` call instead of disposing it immediately.
+  - The SQLite worker now caches the installed OPFS-SAH pool by directory, so
+    a probe followed by open on the same worker does not reinstall the VFS.
+  - Added a regression test that verifies probe + open uses one worker and
+    one OPFS-SAH install in a fresh session.
+- Files changed:
+  - `src/client/db/sqlite-init.ts`
+  - `src/client/db/sqlite-worker.ts`
+  - `test/sqlite-init.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - A successful OPFS support probe intentionally keeps the worker alive for
+    the next local DB open; tests that replace the worker factory or switch
+    back to in-memory mode should dispose that cached probe worker.
+  - Do not run multiple `tapout` browser suites in parallel; they share the
+    default local port and can fail with `EADDRINUSE`.
 ---

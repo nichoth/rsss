@@ -41,16 +41,19 @@ export class LocalDbOpenError extends Error {
 let _testMode = false
 let _testWasmUrl:string|undefined
 let _workerClientFactory:(() => SQLiteWorkerClient) = createSQLiteWorkerClient
+let _probedWorkerClient:SQLiteWorkerClient|null = null
 
 /** Set to true in tests to use an in-memory DB instead of OPFS. */
 export function setTestMode (v:boolean, wasmUrl?:string):void {
     _testMode = v
     _testWasmUrl = wasmUrl
+    if (v) disposeProbedWorkerClient()
 }
 
 export function setSQLiteWorkerClientFactoryForTests (
     factory:(() => SQLiteWorkerClient)|null
 ):void {
+    disposeProbedWorkerClient()
     _workerClientFactory = factory ?? createSQLiteWorkerClient
 }
 
@@ -80,16 +83,21 @@ function isOpfsSupported ():boolean {
 }
 
 export async function probeOpfsSupport ():Promise<boolean> {
-    if (!isOpfsSupported()) return false
+    if (!isOpfsSupported()) {
+        disposeProbedWorkerClient()
+        return false
+    }
+
+    if (_probedWorkerClient) return true
 
     const client = _workerClientFactory()
     try {
         await client.probe({ directory: 'rsss-db' })
+        _probedWorkerClient = client
         return true
     } catch {
-        return false
-    } finally {
         client.dispose()
+        return false
     }
 }
 
@@ -147,7 +155,7 @@ export async function openLocalDb (did:string):Promise<Sqlite3Db> {
         throw new OPFSUnavailableError()
     }
 
-    const client = _workerClientFactory()
+    const client = takeProbedWorkerClient() ?? _workerClientFactory()
     try {
         await client.open({ did, directory: 'rsss-db' })
         return new WorkerBackedLocalDb(client) as unknown as Sqlite3Db
@@ -161,6 +169,17 @@ export async function openLocalDb (did:string):Promise<Sqlite3Db> {
             localDbOpenMessage(category, err)
         throw new LocalDbOpenError(category, message, err)
     }
+}
+
+function takeProbedWorkerClient ():SQLiteWorkerClient|null {
+    const client = _probedWorkerClient
+    _probedWorkerClient = null
+    return client
+}
+
+function disposeProbedWorkerClient ():void {
+    _probedWorkerClient?.dispose()
+    _probedWorkerClient = null
 }
 
 function isExclusiveLockError (err:unknown):boolean {
