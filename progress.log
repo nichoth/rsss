@@ -129,6 +129,10 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Update-item outbox coalescing**: Local `updateItem` writes should keep
+  one pending `update_item` outbox row per item and merge new payload values
+  into it. Build the payload from the row after the SQL update so booleans
+  preserve false values and match the local state that will be pushed.
 - **Bootstrap failure classification**: `bootstrapLocalDb` treats fetch
   rejection, abort, 5xx, unavailable storage, and local-tab lock failures as
   transient. Transient failures keep `syncSubscriptions` enabled, keep OPFS
@@ -1801,4 +1805,26 @@ Thread: https://ampcode.com/threads/unknown
     classification.
   - Do not call `setSyncSubscriptions(false)` or `removeOpfsDb` for network,
     abort, 5xx, tab-lock, or unavailable-storage bootstrap failures.
+---
+
+## 2026-04-27 16:14 PDT - US-072
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Stabilized local `update_item` outbox payloads.
+  - Added regression coverage for `is_read: false` and `is_starred: false`
+    payloads matching the local row values.
+  - Added rapid toggle coverage to ensure repeated local item updates leave
+    one pending outbox row with the final state.
+  - Changed local item writes to build outbox payload booleans from the
+    stored row after the SQL update and merge into an existing pending row.
+- Files changed:
+  - `src/client/db/local-adapter.ts`
+  - `test/local-adapter.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `update_item` outbox rows are coalesced per item before push-sync; do not
+    append one row per toggle while a previous update for the item is still
+    pending.
+  - False boolean payloads should be derived from the post-update SQLite row,
+    not inferred later from truthy checks.
 ---

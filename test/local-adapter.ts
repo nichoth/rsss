@@ -339,6 +339,20 @@ function getOutbox (db:Sqlite3Db):OutboxRow[] {
     return rows
 }
 
+function getItemFlags (
+    db:Sqlite3Db,
+    id:number
+):{ is_read:number; is_starred:number } {
+    const rows:{ is_read:number; is_starred:number }[] = []
+    db.exec({
+        sql: 'SELECT is_read, is_starred FROM items WHERE id = ?',
+        bind: [id],
+        rowMode: 'object',
+        resultRows: rows as Record<string, SqlValue>[]
+    })
+    return rows[0]
+}
+
 test('addFeed creates an outbox row', async (t) => {
     const db = await openLocalDb('did:test:outbox-addfeed')
     const adapter = createLocalAdapter(db)
@@ -394,6 +408,60 @@ test('updateItem creates an outbox row', async (t) => {
         const payload = JSON.parse(rows[0].payload)
         t.equal(payload.is_read, true, 'payload contains is_read')
         t.ok(rows[0].client_updated_at, 'client_updated_at is set')
+    } finally {
+        db.close()
+    }
+})
+
+test('updateItem outbox payload preserves false values', async (t) => {
+    const db = await openLocalDb('did:test:outbox-updateitem-false')
+    await seedDb(db)
+    const adapter = createLocalAdapter(db)
+    try {
+        const items = await adapter.getItems({ isRead: true })
+        const itemId = items.items[0].id
+        await adapter.updateItem(itemId, {
+            is_read: false,
+            is_starred: false
+        })
+
+        const flags = getItemFlags(db, itemId)
+        const rows = getOutbox(db)
+        const payload = JSON.parse(rows[0].payload)
+
+        t.equal(flags.is_read, 0, 'row is marked unread')
+        t.equal(flags.is_starred, 0, 'row is unstarred')
+        t.equal(payload.is_read, false, 'payload sends is_read false')
+        t.equal(
+            payload.is_starred,
+            false,
+            'payload sends is_starred false'
+        )
+    } finally {
+        db.close()
+    }
+})
+
+test('updateItem coalesces pending outbox row to final state', async (t) => {
+    const db = await openLocalDb('did:test:outbox-updateitem-coalesce')
+    await seedDb(db)
+    const adapter = createLocalAdapter(db)
+    try {
+        const items = await adapter.getItems({ isRead: false })
+        const itemId = items.items[0].id
+
+        await adapter.updateItem(itemId, { is_read: true })
+        await adapter.updateItem(itemId, { is_read: false })
+        await adapter.updateItem(itemId, { is_read: true })
+
+        const flags = getItemFlags(db, itemId)
+        const rows = getOutbox(db)
+        const payload = JSON.parse(rows[0].payload)
+
+        t.equal(flags.is_read, 1, 'row keeps the final read state')
+        t.equal(rows.length, 1, 'one pending update_item row remains')
+        t.equal(rows[0].target_id, itemId, 'pending row targets item')
+        t.equal(payload.is_read, true, 'payload matches final read state')
     } finally {
         db.close()
     }
