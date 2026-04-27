@@ -10,12 +10,11 @@ import {
 } from './sqlite-init.js'
 import { pullSync } from './pull-sync.js'
 import {
-    isLocalTabBlocked,
+    acquireLocalTabLock,
     LOCAL_TAB_LOCK_ERROR,
     localTabLockError,
-    markLocalTabPrimary,
-    setLocalTabBlocked,
-    startTabCoordination
+    releaseLocalTabLock,
+    setLocalTabBlocked
 } from './tab-coordination.js'
 import { closeDb } from './local-db.js'
 import type { Sqlite3Db } from './sqlite-init.js'
@@ -89,6 +88,7 @@ export async function bootstrapLocalDb (
     opts:BootstrapLocalDbOptions = {}
 ):Promise<void> {
     let openedDb:Sqlite3Db|null = null
+    let lockAcquired = false
     batch(() => {
         bootstrapInProgress.value = true
         bootstrapFeedsCount.value = 0
@@ -98,8 +98,8 @@ export async function bootstrapLocalDb (
     })
 
     try {
-        startTabCoordination()
-        if (isLocalTabBlocked()) {
+        lockAcquired = await acquireLocalTabLock()
+        if (!lockAcquired) {
             throw new Error(localTabLockError.value ?? (
                 LOCAL_TAB_LOCK_ERROR
             ))
@@ -118,7 +118,6 @@ export async function bootstrapLocalDb (
 
         _bootstrappedDb = db
         openedDb = null
-        markLocalTabPrimary()
         batch(() => {
             bootstrapInProgress.value = false
             bootstrapRetryAvailable.value = false
@@ -136,6 +135,9 @@ export async function bootstrapLocalDb (
         })
         _bootstrappedDb = null
         await closeDb(openedDb)
+        if (lockAcquired) {
+            await releaseLocalTabLock()
+        }
 
         if (isTransient) return
 

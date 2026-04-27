@@ -63,6 +63,10 @@ function setupSupportedLocalFirst ():void {
         },
         configurable: true
     })
+    Object.defineProperty(navigator, 'locks', {
+        value: undefined,
+        configurable: true
+    })
     Object.defineProperty(globalThis, 'crossOriginIsolated', {
         value: true,
         configurable: true

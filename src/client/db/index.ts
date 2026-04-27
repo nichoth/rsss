@@ -17,12 +17,9 @@ import {
 } from './sqlite-init.js'
 import { closeDb } from './local-db.js'
 import {
-    isLocalTabBlocked,
+    acquireLocalTabLock,
     LOCAL_TAB_LOCK_ERROR,
-    markLocalTabPrimary,
-    markLocalTabReleased,
-    setLocalTabBlocked,
-    startTabCoordination
+    releaseLocalTabLock
 } from './tab-coordination.js'
 import {
     bootstrapInProgress,
@@ -172,8 +169,7 @@ export async function getAdapter (did?:string):Promise<DbAdapter> {
         !bootstrapInProgress.value &&
         await isLocalFirstSupported()
     ) {
-        startTabCoordination()
-        if (isLocalTabBlocked()) {
+        if (!await acquireLocalTabLock()) {
             return remoteAdapter
         }
         if (_cachedAdapter && _cachedAdapterDid === did) {
@@ -187,7 +183,6 @@ export async function getAdapter (did?:string):Promise<DbAdapter> {
             _cachedAdapter = createLocalAdapter(db)
             _cachedAdapterDid = did
             localDbError.value = null
-            markLocalTabPrimary()
             return _cachedAdapter
         } catch (err) {
             const category = reportLocalDbError(err)
@@ -196,9 +191,10 @@ export async function getAdapter (did?:string):Promise<DbAdapter> {
                 category === 'unavailable' ||
                 category === 'locked'
             ) {
-                if (category === 'locked') setLocalTabBlocked()
+                await releaseLocalTabLock()
                 return remoteAdapter
             }
+            await releaseLocalTabLock()
             return remoteAdapter
         }
     }
@@ -236,7 +232,7 @@ export function _resetAdapterCache ():void {
 
 addBootstrapFailureCleanup(() => {
     _resetAdapterCache()
-    markLocalTabReleased()
+    releaseLocalTabLock()
 })
 
 async function pushPendingWritesBeforeRemoval (
@@ -273,7 +269,7 @@ export async function disableLocalFirst (
     await closeDb(db)
     clearBootstrappedDb()
     _resetAdapterCache()
-    markLocalTabReleased()
+    await releaseLocalTabLock()
     await removeOpfsDb(did)
     batch(() => {
         setSyncSubscriptions(false)
@@ -300,7 +296,7 @@ export async function resetLocalFirst (
     await closeDb(db)
     clearBootstrappedDb()
     _resetAdapterCache()
-    markLocalTabReleased()
+    await releaseLocalTabLock()
     await removeOpfsDb(did)
     await bootstrapLocalDb(did, fetchFn)
 }

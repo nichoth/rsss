@@ -129,6 +129,11 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **OPFS tab coordination authority**: `acquireLocalTabLock()` uses the
+  Web Locks API lock named `rsss-opfs` as the primary-tab source of truth.
+  `BroadcastChannel('rsss-tab')` remains only a compatibility/status hint;
+  release adapter-held locks through `releaseLocalTabLock()` and await it
+  when immediately retrying local DB open paths.
 - **Local write timestamp source**: Client local-first writes should compute
   one `const now = formatSqliteTs(new Date())` per mutation and bind that
   value into both affected row `updated_at` columns and the outbox
@@ -1855,4 +1860,38 @@ Thread: https://ampcode.com/threads/unknown
   - Tests that assert `markAllRead` row timestamps should only inspect rows
     actually changed by the mutation; already-read rows are intentionally
     left untouched.
+---
+
+## 2026-04-27 16:26 PDT - US-074
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Replaced BroadcastChannel-only OPFS tab coordination
+  with Web Locks authority.
+  - Added `acquireLocalTabLock()` and `releaseLocalTabLock()` around the
+    `rsss-opfs` exclusive Web Lock, keeping the callback pending while a tab
+    owns local SQLite access.
+  - Kept `BroadcastChannel('rsss-tab')` as a status hint for existing UI
+    messaging, while blocked tabs queue for the Web Lock and promote when it
+    becomes available.
+  - Updated adapter selection to acquire the Web Lock before opening OPFS and
+    to await lock release after failed local DB open attempts.
+  - Updated first-time bootstrap to use the same Web Lock acquisition path
+    before opening OPFS.
+  - Added regression coverage for held-lock behavior and promotion after an
+    ungraceful primary-tab exit.
+- Files changed:
+  - `src/client/db/tab-coordination.ts`
+  - `src/client/db/index.ts`
+  - `src/client/db/bootstrap.ts`
+  - `test/tab-coordination.ts`
+  - `test/bootstrap.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Web Locks `request()` resolves only after the callback finishes; adapter
+    cleanup that immediately retries local DB open should await
+    `releaseLocalTabLock()`.
+  - Browser suites that are not testing tab coordination should stub
+    `navigator.locks` when they rely on isolated in-memory local DB state.
+  - Browser-based tapout tests share port 8123, so run focused browser test
+    scripts sequentially instead of in parallel.
 ---

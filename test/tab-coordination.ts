@@ -1,9 +1,11 @@
 import { test } from '@substrate-system/tapzero'
 import {
+    acquireLocalTabLock,
     getLocalTabLockError,
     getTabCoordinationState,
     markLocalTabPrimary,
     markLocalTabReleased,
+    releaseLocalTabLock,
     resetTabCoordinationForTests,
     startTabCoordination
 } from '../src/client/db/tab-coordination.js'
@@ -37,6 +39,54 @@ class FakeBroadcastChannel {
     }
 }
 
+type LockCallback = (lock:{ name:string }) => unknown
+
+class FakeLocks {
+    held = new Set<string>()
+    queues = new Map<string, LockCallback[]>()
+
+    async request (
+        name:string,
+        options:LockOptions,
+        callback:LockCallback
+    ):Promise<unknown> {
+        if (options.ifAvailable) {
+            if (this.held.has(name)) return callback(null as never)
+            this.held.add(name)
+            return Promise.resolve(callback({ name })).finally(() => {
+                this.release(name)
+            })
+        }
+
+        if (this.held.has(name)) {
+            return new Promise((resolve, reject) => {
+                const run = (lock:{ name:string }) => {
+                    Promise.resolve(callback(lock)).then(resolve, reject)
+                }
+                const queue = this.queues.get(name) ?? []
+                queue.push(run)
+                this.queues.set(name, queue)
+            })
+        }
+
+        this.held.add(name)
+        return Promise.resolve(callback({ name })).finally(() => {
+            this.release(name)
+        })
+    }
+
+    release (name:string):void {
+        const queue = this.queues.get(name) ?? []
+        const next = queue.shift()
+        if (queue.length === 0) this.queues.delete(name)
+        if (next) {
+            next({ name })
+            return
+        }
+        this.held.delete(name)
+    }
+}
+
 function setup () {
     FakeBroadcastChannel.reset()
     resetTabCoordinationForTests()
@@ -44,6 +94,19 @@ function setup () {
         value: FakeBroadcastChannel,
         configurable: true
     })
+    Object.defineProperty(navigator, 'locks', {
+        value: undefined,
+        configurable: true
+    })
+}
+
+function setupLocks ():FakeLocks {
+    const locks = new FakeLocks()
+    Object.defineProperty(navigator, 'locks', {
+        value: locks,
+        configurable: true
+    })
+    return locks
 }
 
 test('subsequent tab detects an existing primary tab', async (t) => {
@@ -110,4 +173,57 @@ test('primary tabs announce availability and release', async (t) => {
 
     coordinator.close()
     listener.close()
+})
+
+test('tab coordination acquires and holds a Web Lock', async (t) => {
+    setup()
+    const locks = setupLocks()
+    const acquired = await acquireLocalTabLock()
+
+    t.equal(acquired, true, 'first tab acquires the Web Lock')
+    t.equal(
+        getTabCoordinationState(),
+        'primary',
+        'acquired lock marks the tab primary'
+    )
+
+    let secondAcquired = false
+    navigator.locks.request(
+        'rsss-opfs',
+        { ifAvailable: true, mode: 'exclusive' },
+        (lock) => {
+            secondAcquired = Boolean(lock)
+        }
+    )
+
+    t.equal(secondAcquired, false, 'the lock stays held after acquisition')
+    releaseLocalTabLock()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    t.equal(locks.held.has('rsss-opfs'), false, 'release frees the lock')
+})
+
+test('blocked tab can acquire after an ungraceful primary exit', async (t) => {
+    setup()
+    const locks = setupLocks()
+    locks.held.add('rsss-opfs')
+
+    const acquired = await acquireLocalTabLock()
+    t.equal(acquired, false, 'tab is blocked while another tab owns the lock')
+    t.equal(
+        getLocalTabLockError().value,
+        'Local data is open in another tab',
+        'blocked lock state is surfaced'
+    )
+
+    const promoted = acquireLocalTabLock()
+    locks.release('rsss-opfs')
+
+    t.equal(await promoted, true, 'waiting tab promotes without page refresh')
+    t.equal(
+        getTabCoordinationState(),
+        'primary',
+        'promoted tab becomes primary'
+    )
+
+    releaseLocalTabLock()
 })
