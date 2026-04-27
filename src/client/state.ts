@@ -10,8 +10,10 @@ import ky from 'ky'
 import Debug from '@substrate-system/debug'
 import {
     getAdapter,
+    getTabCoordinationState,
     getLocalDb,
-    getRemoteItemByRoute
+    getRemoteItemByRoute,
+    localTabLockRevision
 } from './db/index.js'
 import type {
     CountsResponse,
@@ -279,6 +281,40 @@ export function State ():AppState {
      * in parallel so the UI can show free-vs-paid state quickly.
      */
     let authLoadGeneration = 0
+    let lockRecoveryGeneration = 0
+    let localTabWasBlocked = false
+
+    const startLocalSync = (
+        did:string,
+        isCurrent:() => boolean
+    ) => {
+        getAdapter(did).then(() => {
+            if (!isCurrent()) return
+            const db = getLocalDb(did)
+            if (db) {
+                isLocalFirstActive.value = true
+                runSync(db).catch((err) => {
+                    if (State.handleSyncAuthError(state, err)) {
+                        return
+                    }
+                    if (
+                        err instanceof SyncBillingError ||
+                        err instanceof PushSyncBillingError
+                    ) {
+                        State.loadBillingStatus()
+                        return
+                    }
+                    debug('sync cycle error:', err)
+                }).then(() => {
+                    if (!isCurrent()) return
+                    State.refreshAfterSync(state)
+                })
+            } else {
+                isLocalFirstActive.value = false
+                State.refreshAfterSync(state)
+            }
+        })
+    }
 
     effect(() => {
         const user = state.user.value
@@ -290,32 +326,33 @@ export function State ():AppState {
             if (generation !== authLoadGeneration) return
             State.loadBillingStatus()
 
-            getAdapter(user.did).then(() => {
-                if (generation !== authLoadGeneration) return
-                const db = getLocalDb(user.did)
-                if (db) {
-                    isLocalFirstActive.value = true
-                    runSync(db).catch((err) => {
-                        if (State.handleSyncAuthError(state, err)) {
-                            return
-                        }
-                        if (
-                            err instanceof SyncBillingError ||
-                            err instanceof PushSyncBillingError
-                        ) {
-                            State.loadBillingStatus()
-                            return
-                        }
-                        debug('sync cycle error:', err)
-                    }).then(() => {
-                        if (generation !== authLoadGeneration) return
-                        State.refreshAfterSync(state)
-                    })
-                } else {
-                    isLocalFirstActive.value = false
-                    State.refreshAfterSync(state)
-                }
-            })
+            startLocalSync(
+                user.did,
+                () => generation === authLoadGeneration
+            )
+        })
+    })
+
+    effect(() => {
+        const lockRevision = localTabLockRevision.value
+        const user = state.user.value
+        const tabState = getTabCoordinationState()
+
+        if (lockRevision === 0 && tabState === 'idle') return
+        if (tabState === 'blocked') {
+            localTabWasBlocked = true
+            return
+        }
+        if (!user || !localTabWasBlocked || tabState !== 'waiting') return
+
+        localTabWasBlocked = false
+        const generation = ++lockRecoveryGeneration
+        queueMicrotask(() => {
+            if (generation !== lockRecoveryGeneration) return
+            startLocalSync(
+                user.did,
+                () => generation === lockRecoveryGeneration
+            )
         })
     })
 

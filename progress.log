@@ -129,6 +129,11 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Cached local DB ownership**: `getLocalDb(did)` must only return the
+  cached SQLite handle while `getTabCoordinationState() === 'primary'`.
+  A blocked tab can still have an old cached adapter/DB from an earlier
+  lock, but state-level sync must treat it as remote until `getAdapter()`
+  reacquires the local tab lock.
 - **SQLite OPFS probe/open reuse**: A successful `probeOpfsSupport()`
   keeps its `SQLiteWorkerClient` for the next `openLocalDb()` call, and
   the worker caches the installed OPFS-SAH pool by directory. Test resets
@@ -1923,4 +1928,35 @@ Thread: https://ampcode.com/threads/unknown
     back to in-memory mode should dispose that cached probe worker.
   - Do not run multiple `tapout` browser suites in parallel; they share the
     default local port and can fail with `EADDRINUSE`.
+---
+
+## 2026-04-27 16:54 PDT - US-076
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Auto-recovery after the OPFS tab lock is released.
+  - Added a tab-lock revision signal that bumps on coordination state
+    transitions so UI/state effects can react to lock availability changes.
+  - State now watches blocked-to-waiting transitions, retries adapter
+    acquisition, and starts the existing sync cycle without a manual
+    refresh.
+  - Guarded `getLocalDb(did)` so a blocked tab cannot run sync against an
+    old cached SQLite handle before it reacquires primary ownership.
+  - Added regressions for release-signal bumps and release-triggered
+    adapter reacquisition plus sync.
+- Files changed:
+  - `src/client/db/tab-coordination.ts`
+  - `src/client/db/index.ts`
+  - `src/client/state.ts`
+  - `test/tab-coordination.ts`
+  - `test/state-auth-storage.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `localTabLockRevision` is the reactive bridge for tab-lock transitions;
+    state effects should still check `getTabCoordinationState()` before
+    trying local work.
+  - A cached local DB is not enough to prove local-first is active; the tab
+    must currently be the primary OPFS owner.
+  - Tests that stub `globalThis.fetch` while opening SQLite need to pass
+    non-API asset requests through to the original bound `fetch`, otherwise
+    sqlite-wasm receives JSON instead of WASM bytes.
 ---

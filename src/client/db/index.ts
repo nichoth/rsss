@@ -18,6 +18,7 @@ import {
 import { closeDb } from './local-db.js'
 import {
     acquireLocalTabLock,
+    getTabCoordinationState,
     LOCAL_TAB_LOCK_ERROR,
     releaseLocalTabLock
 } from './tab-coordination.js'
@@ -44,7 +45,9 @@ export {
 } from './sqlite-init.js'
 export {
     getLocalTabLockError,
+    getTabCoordinationState,
     localTabLockError,
+    localTabLockRevision,
     startTabCoordination
 } from './tab-coordination.js'
 export type { Sqlite3, Sqlite3Db } from './sqlite-init.js'
@@ -215,7 +218,8 @@ export function getLocalDb (did?:string):Sqlite3Db|null {
     if (
         syncSubscriptions.value &&
         did &&
-        _cachedAdapterDid === did
+        _cachedAdapterDid === did &&
+        getTabCoordinationState() === 'primary'
     ) {
         return _cachedDb
     }

@@ -3,6 +3,7 @@ import {
     acquireLocalTabLock,
     getLocalTabLockError,
     getTabCoordinationState,
+    localTabLockRevision,
     markLocalTabPrimary,
     markLocalTabReleased,
     releaseLocalTabLock,
@@ -135,6 +136,8 @@ test('a waiting tab can promote after the primary releases', async (t) => {
     setup()
     const second = startTabCoordination()
     const primary = new FakeBroadcastChannel('rsss-tab')
+    const before = localTabLockRevision.value
+
     primary.postMessage({ type: 'primary' })
     await new Promise(resolve => setTimeout(resolve, 0))
     primary.postMessage({ type: 'released' })
@@ -149,6 +152,11 @@ test('a waiting tab can promote after the primary releases', async (t) => {
         getLocalTabLockError().value,
         null,
         'released message clears UI error'
+    )
+    t.equal(
+        localTabLockRevision.value,
+        before + 2,
+        'primary and released transitions bump the render signal'
     )
 
     second.close()
