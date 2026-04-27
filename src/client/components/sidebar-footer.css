@@ -2,12 +2,12 @@
     margin-top: 1rem;
     padding: 1rem;
     text-align: center;
-}
 
-.footer-links {
-    margin-top: 1rem;
-    padding-top: 0.5rem;
-    border-top: 1px solid var(--color-border);
+    & .footer-links {
+        margin-top: 1rem;
+        padding-top: 0.5rem;
+        border-top: 1px solid var(--color-border);
+    }
 }
 
 .settings-link {

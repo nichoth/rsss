@@ -66,7 +66,6 @@ export const App:FunctionComponent<{
         <footer>
             <nav class="footer-links" aria-label="Footer">
                 <a href="/terms">Terms</a>
-                <span aria-hidden="true">·</span>
                 <a href="/privacy">Privacy</a>
             </nav>
         </footer>
