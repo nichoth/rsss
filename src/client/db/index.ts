@@ -1,4 +1,5 @@
 import { batch, signal } from '@preact/signals'
+import { billingStatus } from '../billing-status.js'
 import {
     syncSubscriptions,
     setSyncSubscriptions,
@@ -164,6 +165,7 @@ interface ResetLocalFirstOptions {
  */
 export async function getAdapter (did?:string):Promise<DbAdapter> {
     if (
+        billingStatus.value?.entitled &&
         syncSubscriptions.value &&
         did &&
         !bootstrapInProgress.value &&

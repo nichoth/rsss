@@ -51,7 +51,15 @@ test('setSyncSubscriptions(false) also forces storeContent to false', async (t) 
 test('setSyncSubscriptions(true) does not change storeContent', async (t) => {
     localStorage.removeItem(LS_KEY)
     const mod = await import('../src/client/local-first-settings.js')
+    const billing = await import('../src/client/billing-status.js')
 
+    billing.billingStatus.value = {
+        entitled: true,
+        planId: 'local-first',
+        status: 'active',
+        refreshedAt: Date.now(),
+        useLive: false
+    }
     mod.syncSubscriptions.value = false
     mod.storeContent.value = false
 
@@ -62,3 +70,25 @@ test('setSyncSubscriptions(true) does not change storeContent', async (t) => {
     t.equal(mod.storeContent.value, false,
         'storeContent unchanged when syncSubscriptions enabled')
 })
+
+test('setSyncSubscriptions(true) is a no-op for free (unentitled) users',
+    async (t) => {
+        localStorage.removeItem(LS_KEY)
+        const mod = await import('../src/client/local-first-settings.js')
+        const billing = await import('../src/client/billing-status.js')
+
+        billing.billingStatus.value = {
+            entitled: false,
+            planId: 'local-first',
+            status: 'none',
+            refreshedAt: Date.now(),
+            useLive: false
+        }
+        mod.syncSubscriptions.value = false
+
+        mod.setSyncSubscriptions(true)
+
+        t.equal(mod.syncSubscriptions.value, false,
+            'free users cannot enable local-first')
+    }
+)

@@ -55,7 +55,7 @@ export const SignupPage:FunctionComponent<{
         if (!emailValid) return
         await State.startCheckout(
             state,
-            'sync',
+            'local-first',
             email.trim()
         )
     }
@@ -71,9 +71,10 @@ export const SignupPage:FunctionComponent<{
                 <header class="signup-header">
                     <h1>Choose a plan</h1>
                     <p>
-                        RSSS is free to use on a single device. To
-                        sync your feeds, read state, and starred
-                        items across machines, subscribe to Sync.
+                        RSSS Free works in your browser while you're
+                        online. Upgrade to Local-first to keep your
+                        feeds on your device and sync across machines
+                        automatically.
                     </p>
                 </header>
 
@@ -113,9 +114,9 @@ export const SignupPage:FunctionComponent<{
                             <h2>Free</h2>
                             <p class="plan-price">$0</p>
                             <ul class="plan-features">
-                                <li>Use on one device</li>
-                                <li>Local storage in your browser</li>
-                                <li>Works offline</li>
+                                <li>Works online, anywhere</li>
+                                <li>Read on any device with a browser</li>
+                                <li>Requires an internet connection</li>
                             </ul>
                             <button
                                 type="button"
@@ -130,15 +131,18 @@ export const SignupPage:FunctionComponent<{
                         </article>
 
                         <article class="plan-card plan-sync">
-                            <h2>Sync</h2>
+                            <h2>Local-first</h2>
                             <p class="plan-price">
                                 $10
                                 <span class="plan-period">/month</span>
                             </p>
                             <ul class="plan-features">
-                                <li>Everything in Free</li>
-                                <li>Sync across all your devices</li>
-                                <li>Server-side feed polling</li>
+                                <li>Works offline on each device</li>
+                                <li>Auto-syncs across all your devices</li>
+                                <li>
+                                    Your feeds live on your device,
+                                    not a server
+                                </li>
                             </ul>
                             ${isAuthed.value && html`
                                 <div class="plan-email">

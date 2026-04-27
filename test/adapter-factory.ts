@@ -1,5 +1,6 @@
 import { test } from '@substrate-system/tapzero'
 import { syncSubscriptions } from '../src/client/local-first-settings.js'
+import { billingStatus } from '../src/client/billing-status.js'
 import {
     isLocalFirstSupported,
     getAdapter,
@@ -23,6 +24,13 @@ import type {
 
 function setup () {
     syncSubscriptions.value = false
+    billingStatus.value = {
+        entitled: true,
+        planId: 'local-first',
+        status: 'active',
+        refreshedAt: Date.now(),
+        useLive: false
+    }
     localDbError.value = null
     _resetSupportedCache()
     _resetAdapterCache()
@@ -292,6 +300,34 @@ test('getAdapter reports corrupt open failures as resettable',
             setTestMode(true)
             setSQLiteWorkerClientFactoryForTests(null)
         }
+    }
+)
+
+test('getAdapter returns remoteAdapter for free (unentitled) users',
+    async (t) => {
+        setup()
+        syncSubscriptions.value = true
+        billingStatus.value = {
+            entitled: false,
+            planId: 'local-first',
+            status: 'none',
+            refreshedAt: Date.now(),
+            useLive: false
+        }
+        const adapter = await getAdapter('did:plc:test')
+        t.equal(adapter, remoteAdapter,
+            'free users get remoteAdapter even with the toggle on')
+    }
+)
+
+test('getAdapter returns remoteAdapter when billingStatus is null',
+    async (t) => {
+        setup()
+        syncSubscriptions.value = true
+        billingStatus.value = null
+        const adapter = await getAdapter('did:plc:test')
+        t.equal(adapter, remoteAdapter,
+            'unloaded billing falls back to remoteAdapter')
     }
 )
 

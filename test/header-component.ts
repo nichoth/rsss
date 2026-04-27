@@ -158,7 +158,7 @@ test('Header sync status exposes accessible live status text', t => {
     syncedAt.value = null
     billingStatus.value = {
         entitled: true,
-        planId: 'sync',
+        planId: 'local-first',
         status: 'active',
         refreshedAt: Date.now(),
         useLive: false

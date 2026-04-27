@@ -15,7 +15,7 @@ export interface BillingEnv {
     NODE_ENV?:string;
 }
 
-export const BILLING_PLAN_IDS = ['sync'] as const
+export const BILLING_PLAN_IDS = ['local-first'] as const
 export type BillingPlanId = typeof BILLING_PLAN_IDS[number]
 
 export function isValidPlanId (id:string):id is BillingPlanId {

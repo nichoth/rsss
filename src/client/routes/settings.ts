@@ -53,7 +53,7 @@ export const SettingsRoute:FunctionComponent<{
     const tabLockError = localTabLockError.value
     const billing = useComputed(() => billingStatus.value)
     const isEntitled = Boolean(billing.value?.entitled)
-    const planLabel = billing.value?.planId ?? 'sync'
+    const planLabel = billing.value?.planId ?? 'local-first'
 
     function handleManageSubscription (e:Event) {
         e.preventDefault()
@@ -211,8 +211,9 @@ export const SettingsRoute:FunctionComponent<{
             ${isEntitled ? html`
                 <p>
                     You're on the
-                    <strong>${planLabel}</strong> plan. Your feeds
-                    sync across all your devices.
+                    <strong>${planLabel}</strong> plan. Your feeds and
+                    read state are stored on each device and sync
+                    automatically.
                 </p>
                 <button
                     class="btn-manage"
@@ -222,20 +223,28 @@ export const SettingsRoute:FunctionComponent<{
                 </button>
             ` : html`
                 <p>
-                    You're on the <strong>Free</strong> plan. Your
-                    feeds and read state stay on this device only.
+                    You're on the <strong>Free</strong> plan. RSSS
+                    works while you're online; your data lives on
+                    our servers.
                 </p>
                 <button
                     class="btn-upgrade"
                     onClick=${handleUpgrade}
                 >
-                    Upgrade to Sync
+                    Upgrade to Local-first
                 </button>
             `}
         </section>
 
         <section class="settings-section local-first-section">
             <h2>Local Storage</h2>
+            ${!isEntitled && html`
+                <p class="upgrade-note">
+                    Local storage is part of the Local-first plan.
+                    <a href="/signup" onClick=${handleUpgrade}>Upgrade</a>
+                    to keep your feeds on this device and work offline.
+                </p>
+            `}
             ${!supported && html`
                 <p class="unsupported-note">
                     Local storage is not supported in this browser.
@@ -251,7 +260,8 @@ export const SettingsRoute:FunctionComponent<{
                     name="sync-subscriptions"
                     aria-describedby="sync-subscriptions-desc"
                     checked=${syncSubscriptions.value || undefined}
-                    disabled=${(!supported || inProgress) || undefined}
+                    disabled=${(!isEntitled || !supported || inProgress) ||
+                        undefined}
                     onChange=${handleSyncChange}
                 >
                     Sync subscriptions and read state to this device
@@ -269,8 +279,9 @@ export const SettingsRoute:FunctionComponent<{
                     name="store-content"
                     aria-describedby="store-content-desc"
                     checked=${storeContent.value || undefined}
-                    disabled=${(!supported || !syncSubscriptions.value ||
-                        inProgress) || undefined}
+                    disabled=${(!isEntitled || !supported ||
+                        !syncSubscriptions.value || inProgress) ||
+                        undefined}
                     onChange=${handleContentChange}
                 >
                     Store article content locally for offline reading

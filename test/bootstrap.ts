@@ -18,6 +18,7 @@ import {
     syncSubscriptions,
     storeContent
 } from '../src/client/local-first-settings.js'
+import { billingStatus } from '../src/client/billing-status.js'
 import {
     disableLocalFirst,
     resetLocalFirst,
@@ -40,6 +41,13 @@ function setupSupportedLocalFirst ():void {
     _resetAdapterCache()
     resetTabCoordinationForTests()
     syncSubscriptions.value = true
+    billingStatus.value = {
+        entitled: true,
+        planId: 'local-first',
+        status: 'active',
+        refreshedAt: Date.now(),
+        useLive: false
+    }
     setSQLiteWorkerClientFactoryForTests(() => ({
         probe: async () => {},
         dispose: () => {}

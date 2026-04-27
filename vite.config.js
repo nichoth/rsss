@@ -39,7 +39,9 @@ export default defineConfig(({ mode }) => {
         server: {
             port: 8888,
             host: true,
-            open: true,
+            // Use 127.0.0.1 (not localhost) so the OAuth loopback-client
+            // redirect lands on the same origin as the session cookie.
+            open: 'http://127.0.0.1:8888/',
             headers: {
                 'Cross-Origin-Opener-Policy': 'same-origin',
                 'Cross-Origin-Embedder-Policy': 'credentialless',

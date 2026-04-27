@@ -237,7 +237,7 @@ export async function sendSubscriptionStarted (
         'subscription_started',
         {
             to: params.to,
-            subject: "You're subscribed to RSSS Sync",
+            subject: "You're subscribed to RSSS Local-first",
             text,
             html
         },

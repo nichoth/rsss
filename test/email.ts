@@ -20,7 +20,7 @@ function paymentParams () {
     return {
         to: 'reader@example.com',
         did: 'did:plc:reader',
-        planId: 'sync',
+        planId: 'local-first',
         signupUrl: 'https://rsss.space/signup'
     }
 }
@@ -75,7 +75,7 @@ test('billing email dedupe suppresses a second live send', async t => {
             {
                 to: 'reader@example.com',
                 did: 'did:plc:reader',
-                planId: 'sync',
+                planId: 'local-first',
                 baseUrl: 'https://rsss.space'
             }
         )
@@ -85,7 +85,7 @@ test('billing email dedupe suppresses a second live send', async t => {
             {
                 to: 'reader@example.com',
                 did: 'did:plc:reader',
-                planId: 'sync',
+                planId: 'local-first',
                 baseUrl: 'https://rsss.space'
             }
         )
@@ -117,7 +117,7 @@ test('subscription email settings links use absolute base URL',
                 {
                     to: 'reader@example.com',
                     did: 'did:plc:reader',
-                    planId: 'sync',
+                    planId: 'local-first',
                     baseUrl: 'https://rsss.space'
                 }
             )
@@ -171,7 +171,7 @@ test('subscription email retries once after transient Resend failure',
                 {
                     to: 'reader@example.com',
                     did: 'did:plc:reader',
-                    planId: 'sync',
+                    planId: 'local-first',
                     baseUrl: 'https://rsss.space'
                 }
             )
@@ -211,7 +211,7 @@ test('subscription email schedules transient retry with waitUntil',
                 {
                     to: 'reader@example.com',
                     did: 'did:plc:reader',
-                    planId: 'sync',
+                    planId: 'local-first',
                     baseUrl: 'https://rsss.space'
                 },
                 {

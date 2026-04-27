@@ -1,0 +1,24 @@
+.route.legal {
+    max-width: 40rem;
+    margin: 0 auto;
+    padding: 2rem;
+    margin-bottom: 4rem;
+
+    & .legal-header {
+        margin-bottom: 2rem;
+    }
+
+    & .legal-meta {
+        color: var(--color-text-secondary);
+        font-style: italic;
+        margin-bottom: 2rem;
+    }
+
+    & h2 {
+        margin-top: 2.5rem;
+    }
+
+    & address {
+        font-style: normal;
+    }
+}
