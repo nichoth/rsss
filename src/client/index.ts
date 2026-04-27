@@ -64,7 +64,11 @@ export const App:FunctionComponent<{
         <${Header} state=${state} />
         <${ChildNode} state=${state} params=${params} splats=${splats} />
         <footer>
-            <span></span>
+            <nav class="footer-links" aria-label="Footer">
+                <a href="/terms">Terms</a>
+                <span aria-hidden="true">·</span>
+                <a href="/privacy">Privacy</a>
+            </nav>
         </footer>
     `
 }

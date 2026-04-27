@@ -224,17 +224,24 @@ export const TermsRoute:FunctionComponent<{
             </section>
 
             <section>
-                <h2>12. Governing law</h2>
+                <h2>12. Governing law and venue</h2>
                 <p>
                     These terms are governed by the laws
-                    applicable to the Operator's place of
-                    residence, without regard to
-                    conflict-of-laws principles. Any
-                    dispute will be brought in the courts
-                    located in that jurisdiction, except
+                    of the State of Washington, USA,
+                    without regard to its conflict-of-laws
+                    rules. Any dispute arising out of or
+                    relating to these terms or the
+                    Service will be brought exclusively
+                    in the state or federal courts
+                    located in King County, Washington,
+                    and you consent to personal
+                    jurisdiction there${EM_DASH + ' '}
+                    except that either party may bring an
+                    individual claim in small-claims
+                    court if it qualifies, and except
                     where mandatory consumer-protection
-                    law in your country requires
-                    otherwise.
+                    law in your country of residence
+                    requires otherwise.
                 </p>
             </section>
 
