@@ -29,6 +29,7 @@ import {
     setSyncSubscriptions,
     syncSubscriptions
 } from '../src/client/local-first-settings.js'
+import { billingStatus } from '../src/client/billing-status.js'
 import { State, type AppState } from '../src/client/state.js'
 import { FeedReader } from '../src/client/routes/feed-reader.js'
 import type {
@@ -331,6 +332,13 @@ function resetLocalFirstState ():void {
     _resetAdapterCache()
     _resetSupportedCache()
     resetTabCoordinationForTests()
+    billingStatus.value = {
+        entitled: true,
+        planId: 'local-first',
+        status: 'active',
+        refreshedAt: Date.now(),
+        useLive: false
+    }
     setSyncSubscriptions(false)
     saveLocalFirstSettings()
 }

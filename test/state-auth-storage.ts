@@ -20,6 +20,7 @@ import {
     resetTabCoordinationForTests
 } from '../src/client/db/tab-coordination.js'
 import { syncSubscriptions } from '../src/client/local-first-settings.js'
+import { billingStatus } from '../src/client/billing-status.js'
 import { State, type AppState } from '../src/client/state.js'
 
 type ErrorCtor = new () => Error
@@ -48,6 +49,13 @@ function setupLocalFirstForStateTest ():void {
     _resetAdapterCache()
     resetTabCoordinationForTests()
     syncSubscriptions.value = true
+    billingStatus.value = {
+        entitled: true,
+        planId: 'local-first',
+        status: 'active',
+        refreshedAt: Date.now(),
+        useLive: false
+    }
     setSQLiteWorkerClientFactoryForTests(() => ({
         open: async () => undefined,
         exec: async () => undefined,

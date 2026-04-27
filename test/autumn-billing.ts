@@ -39,7 +39,7 @@ function jsonResponse (body:unknown):Response {
 function subscriptionBody (status:string) {
     return {
         id: `sub_${status}`,
-        plan_id: 'sync',
+        plan_id: 'local-first',
         auto_enable: false,
         add_on: false,
         status,
@@ -56,7 +56,7 @@ function subscriptionBody (status:string) {
 
 test('VerifiedSubscription status is narrowed to known statuses', t => {
     const verified:VerifiedSubscription = {
-        planId: 'sync',
+        planId: 'local-first',
         status: 'active'
     }
     const status:'active'|'scheduled' = verified.status
@@ -107,12 +107,12 @@ test('verifySubscription accepts active subscriptions', async t => {
         const subscription = await verifySubscription(
             { AUTUMN_SECRET_KEY: 'test-secret' },
             did,
-            'sync'
+            'local-first'
         )
 
         t.deepEqual(
             subscription,
-            { planId: 'sync', status: 'active' },
+            { planId: 'local-first', status: 'active' },
             'returns active matching subscription'
         )
     } finally {
@@ -133,12 +133,12 @@ test('verifySubscription accepts scheduled subscriptions', async t => {
         const subscription = await verifySubscription(
             { AUTUMN_SECRET_KEY: 'test-secret' },
             did,
-            'sync'
+            'local-first'
         )
 
         t.deepEqual(
             subscription,
-            { planId: 'sync', status: 'scheduled' },
+            { planId: 'local-first', status: 'scheduled' },
             'returns scheduled matching subscription'
         )
     } finally {
@@ -159,7 +159,7 @@ test('verifySubscription ignores unknown subscription statuses', async t => {
         const subscription = await verifySubscription(
             { AUTUMN_SECRET_KEY: 'test-secret' },
             did,
-            'sync'
+            'local-first'
         )
 
         t.equal(

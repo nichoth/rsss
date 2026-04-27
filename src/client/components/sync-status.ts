@@ -22,16 +22,16 @@ export const SyncStatus:FunctionComponent = function () {
     const active = isLocalFirstActive.value
     const billing = billingStatus.value
 
-    // Free plan: show a local-only indicator with an upgrade CTA,
-    // regardless of sync activity (sync is gated to 402 anyway).
+    // Free plan: show an online-only indicator with an upgrade CTA.
+    // Free users hit the server directly; local-first is paid-only.
     if (billing && !billing.entitled) {
         return html`
             <span
                 class="sync-status free"
-                aria-label="Local only: free plan changes stay on this device"
-                title="Free plan -- changes stay on this device"
+                aria-label="Online only: free plan requires an internet connection"
+                title="Free plan -- requires internet"
             >
-                Local only -${' '}
+                Online only -${' '}
                 <a href="/signup">Upgrade</a>
             </span>
         `

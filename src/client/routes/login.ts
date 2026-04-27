@@ -41,7 +41,9 @@ export const LoginPage: FunctionComponent<{ state: AppState }> = function LoginP
 
                 <form onSubmit=${handleSubmit} class="login-form">
                     <div class="form-group">
-                        <label for="handle">Bluesky Handle</label>
+                        <label for="handle">
+                            Bluesky / AT protocol Handle
+                        </label>
                         <input
                             type="text"
                             id="handle"
@@ -79,8 +81,8 @@ export const LoginPage: FunctionComponent<{ state: AppState }> = function LoginP
 
                 <div class="login-footer">
                     <p>
-                        Sign in with your Bluesky account to access your personal
-                        feed reader. Each user gets their own isolated instance.
+                        Sign in with an AT protocol account to access your
+                        feed reader.
                     </p>
                 </div>
             </div>

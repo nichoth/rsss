@@ -7,6 +7,8 @@ import { State, type AppState } from '../state.js'
 import { SettingsRoute } from './settings.js'
 import { SignupPage } from './signup.js'
 import { PaymentSuccessPage } from './payment-success.js'
+import { TermsRoute } from './terms.js'
+import { PrivacyRoute } from './privacy.js'
 // import Debug from '@substrate-system/debug'
 // const debug = Debug('rsss:routes')
 
@@ -38,6 +40,14 @@ export default function _Router (state:AppState):InstanceType<typeof Router> {
 
     router.addRoute('/about', () => {
         return AboutRoute
+    })
+
+    router.addRoute('/terms', () => {
+        return TermsRoute
+    })
+
+    router.addRoute('/privacy', () => {
+        return PrivacyRoute
     })
 
     router.addRoute('/settings', () => {

@@ -54,7 +54,7 @@ interface CachedBilling {
 }
 
 const BILLING_CACHE_TTL_SECONDS = 600
-const DEFAULT_PLAN_ID:BillingPlanId = 'sync'
+const DEFAULT_PLAN_ID:BillingPlanId = 'local-first'
 
 function billingCacheKey (did:string):string {
     return `billing:${did}`
@@ -290,6 +290,52 @@ app.get('/api/health', (c) => {
 })
 
 /**
+ * Resolve the OAuth client_id and redirect_uri for the current request.
+ *
+ * Production / any deployment with OAUTH_CLIENT_ID set: use the
+ * metadata-document flow (client_id is a public HTTPS URL pointing
+ * at /oauth/client-metadata.json).
+ *
+ * Localhost dev: use the AT Protocol "loopback client" pattern.
+ * The spec requires client_id to be the literal string
+ * `http://localhost` with optional `redirect_uri` and `scope` query
+ * params (not a URL pointing to a metadata document), and the
+ * redirect_uri must use 127.0.0.1 (or [::1]) -- not `localhost`.
+ *
+ * Visit the dev server at http://127.0.0.1:PORT so the session
+ * cookie lives on the same origin as the OAuth redirect target.
+ */
+function resolveOAuthClient (
+    requestUrl:string,
+    envClientId?:string
+):{ clientId:string; redirectUri:string } {
+    const url = new URL(requestUrl)
+    const isLoopback = (
+        url.hostname === 'localhost' ||
+        url.hostname === '127.0.0.1'
+    )
+
+    if (envClientId || !isLoopback) {
+        const baseUrl = url.origin
+        return {
+            clientId: envClientId ||
+                `${baseUrl}/oauth/client-metadata.json`,
+            redirectUri: `${baseUrl}/oauth/callback`
+        }
+    }
+
+    const redirectUri = `http://127.0.0.1:${url.port}/oauth/callback`
+    const params = new URLSearchParams({
+        redirect_uri: redirectUri,
+        scope: 'atproto'
+    })
+    return {
+        clientId: `http://localhost?${params.toString()}`,
+        redirectUri
+    }
+}
+
+/**
  * OAuth client metadata (AT Protocol OAuth discovery)
  */
 app.get('/oauth/client-metadata.json', (c) => {
@@ -343,12 +389,10 @@ app.post('/api/auth/login', async (c) => {
             return c.json({ error: 'Handle is required' }, 400)
         }
 
-        const baseUrl = new URL(c.req.url).origin
-        const clientId = (
-            c.env.OAUTH_CLIENT_ID ||
-            `${baseUrl}/oauth/client-metadata.json`
+        const { clientId, redirectUri } = resolveOAuthClient(
+            c.req.url,
+            c.env.OAUTH_CLIENT_ID
         )
-        const redirectUri = `${baseUrl}/oauth/callback`
 
         const { authUrl, state } = await startOAuthFlow(
             body.handle,
@@ -436,12 +480,10 @@ app.post('/api/auth/callback', async (c) => {
             }, 400)
         }
 
-        const baseUrl = new URL(c.req.url).origin
-        const clientId = (
-            c.env.OAUTH_CLIENT_ID ||
-            `${baseUrl}/oauth/client-metadata.json`
+        const { clientId, redirectUri } = resolveOAuthClient(
+            c.req.url,
+            c.env.OAUTH_CLIENT_ID
         )
-        const redirectUri = `${baseUrl}/oauth/callback`
 
         const session = await exchangeCode(
             body.code,
@@ -969,32 +1011,12 @@ app.post('/api/billing/portal', requireAuth, async (c) => {
     }
 })
 
-/**
- * Entitlement gate for proxied DO requests. Free users get a 402;
- * the client falls back to local-only mode.
- */
-const requireEntitlement = async (
-    c:Context<{ Bindings:Env; Variables:Variables }>,
-    next:Next
-) => {
-    const session = c.get('session')!
-    const billing = await resolveBilling(c.env, session.did)
-    if (!isEntitled(billing)) {
-        return c.json({
-            error: 'sync_required_subscription',
-            planId: billing.planId
-        }, 402)
-    }
-    await next()
-}
-
 export const dataRouter = new Hono<{
     Bindings:Env;
     Variables:Variables
 }>()
 
 dataRouter.use('*', requireAuth)
-dataRouter.use('*', requireEntitlement)
 
 /**
  * Proxy requests to user's Durable Object.
