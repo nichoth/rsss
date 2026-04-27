@@ -4,6 +4,7 @@ import { useComputed } from '@preact/signals'
 import { State, type AppState } from './state.js'
 import Router from './routes/index.js'
 import { NotFound } from './not-found.js'
+import { COPYRIGHT } from './constants.js'
 import { Header } from './components/header.js'
 import { configureDebugStorage } from './debug-storage.js'
 import './style.css'
@@ -64,10 +65,7 @@ export const App:FunctionComponent<{
         <${Header} state=${state} />
         <${ChildNode} state=${state} params=${params} splats=${splats} />
         <footer>
-            <iframe
-                src="https://github.com/sponsors/nichoth/card"
-                title="Sponsor nichoth"
-            ></iframe>
+        ${COPYRIGHT}
         </footer>
     `
 }

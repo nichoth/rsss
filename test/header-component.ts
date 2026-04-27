@@ -14,10 +14,12 @@ import {
 } from '../src/client/db/sync-status.js'
 import { billingStatus } from '../src/client/billing-status.js'
 
-function headerState ():AppState {
+function headerState (
+    user:{ did:string; handle:string; avatar?:string }|null = null
+):AppState {
     return {
         route: signal('/'),
-        user: signal(null)
+        user: signal(user)
     } as AppState
 }
 
@@ -48,6 +50,93 @@ test('Header sponsor iframes limit embed capabilities', t => {
                 frame.getAttribute('referrerpolicy'),
                 'no-referrer',
                 'removes iframe referrers'
+            )
+        }
+    } finally {
+        render(null, root)
+        root.remove()
+    }
+})
+
+test('Header user icon shows empty circle linking to /login when logged out', t => {
+    const body = document.querySelector('body') as HTMLElement
+    const root = document.createElement('div')
+    body.appendChild(root)
+
+    try {
+        render(html`<${Header} state=${headerState(null)} />`, root)
+
+        const icons = Array.from(
+            root.querySelectorAll('a.user-icon')
+        )
+        t.ok(icons.length > 0, 'renders at least one user icon')
+
+        for (const icon of icons) {
+            t.equal(
+                icon.getAttribute('href'),
+                '/login',
+                'links to /login when logged out'
+            )
+            t.equal(
+                icon.getAttribute('aria-label'),
+                'Sign in',
+                'has Sign in accessible label'
+            )
+            t.ok(
+                icon.querySelector('.user-icon-placeholder'),
+                'shows the empty circle placeholder'
+            )
+            t.ok(
+                !icon.querySelector('img'),
+                'does not render an avatar image'
+            )
+        }
+    } finally {
+        render(null, root)
+        root.remove()
+    }
+})
+
+test('Header user icon shows avatar linking to /settings when logged in', t => {
+    const body = document.querySelector('body') as HTMLElement
+    const root = document.createElement('div')
+    body.appendChild(root)
+
+    const user = {
+        did: 'did:plc:test123',
+        handle: 'alice.bsky.social',
+        avatar: 'https://example.test/alice.jpg'
+    }
+
+    try {
+        render(html`<${Header} state=${headerState(user)} />`, root)
+
+        const icons = Array.from(
+            root.querySelectorAll('a.user-icon')
+        )
+        t.ok(icons.length > 0, 'renders at least one user icon')
+
+        for (const icon of icons) {
+            t.equal(
+                icon.getAttribute('href'),
+                '/settings',
+                'links to /settings when logged in'
+            )
+            t.equal(
+                icon.getAttribute('aria-label'),
+                'Account settings for @alice.bsky.social',
+                'accessible label includes the handle'
+            )
+            const img = icon.querySelector('img') as HTMLImageElement
+            t.ok(img, 'renders an avatar image')
+            t.equal(
+                img.getAttribute('src'),
+                'https://example.test/alice.jpg',
+                'image points at the avatar URL'
+            )
+            t.ok(
+                !icon.querySelector('.user-icon-placeholder'),
+                'does not show the placeholder'
             )
         }
     } finally {

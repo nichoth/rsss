@@ -327,7 +327,8 @@ app.get('/api/me', (c) => {
     return c.json({
         authenticated: true,
         did: session.did,
-        handle: session.handle
+        handle: session.handle,
+        avatar: session.avatar
     })
 })
 

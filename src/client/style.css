@@ -4,24 +4,7 @@
 @import url("@substrate-system/tool-tip/css");
 @import url("@substrate-system/hamburger-two/css");
 @import url("./routes/feed-reader.css");
-
-:root {
-    --color-bg: #fafafa;
-    --color-surface: #fff;
-    --color-text: black;
-    /* --color-text-secondary: #666; */
-    --color-text-secondary: black;
-    --color-border: #7e7d7d;
-    /* --color-border: #e0e0e0; */
-    --color-primary: #2563eb;
-    --color-primary-hover: #1d4ed8;
-    --color-accent: #f59e0b;
-    --color-warning: #b45309;
-    --color-error: #dc2626;
-    --color-success: #16a34a;
-    --sidebar-width: 280px;
-    --header-height: 56px;
-}
+@import url("./_variables.css");
 
 * {
     line-height: calc(6px + 2ex);
@@ -337,14 +320,6 @@ footer {
     align-items: center;
     background-color: white;
     border-top: 1px solid;
-
-    & iframe {
-        border: none;
-        width: 100%;
-        min-width: 0;
-        max-width: 700px;
-        max-height: 100px;
-    }
 }
 
 .items-filters {

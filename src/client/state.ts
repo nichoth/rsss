@@ -117,6 +117,7 @@ function clearCheckoutEmail ():void {
 export interface User {
     did:string
     handle:string
+    avatar?:string
 }
 
 export type { BillingStatus }
@@ -517,12 +518,14 @@ State.checkAuth = async function (
             const data = await response.json<{
                 authenticated:boolean;
                 did:string;
-                handle:string
+                handle:string;
+                avatar?:string
             }>()
             if (data.authenticated) {
-                const user = {
+                const user:User = {
                     did: data.did,
-                    handle: data.handle
+                    handle: data.handle,
+                    avatar: data.avatar
                 }
                 state.user.value = user
             } else {

@@ -5,6 +5,7 @@ import { HamburgerTwo } from '@substrate-system/hamburger-two'
 import { type AppState } from '../state.js'
 import { State } from '../state.js'
 import { SyncStatus } from './sync-status.js'
+import { UserIcon } from './user-icon.js'
 import './header.css'
 
 HamburgerTwo.define()
@@ -81,29 +82,9 @@ export const Header:FunctionComponent<{
                 </a>
             </nav>
 
-            <div class="desktop-nav">
-                <iframe
-                    src="https://github.com/sponsors/nichoth/button"
-                    title="Sponsor nichoth"
-                    height="32"
-                    width="114"
-                    sandbox="allow-scripts allow-same-origin"
-                    loading="lazy"
-                    referrerpolicy="no-referrer"
-                    style="border: 0;"
-                ></iframe>
-            </div>
-
             <div class="header header-right desktop-nav">
                 <${SyncStatus} />
                 ${user.value && html`
-                    <span class="user-handle">
-                        <a href="/settings">
-                            <code>
-                                @${user.value?.handle}
-                            </code>
-                        </a>
-                    </span>
                     <button
                         class="btn btn-small"
                         onClick=${handleLogout}
@@ -111,6 +92,7 @@ export const Header:FunctionComponent<{
                         Logout
                     </button>
                 `}
+                <${UserIcon} state=${state} />
             </div>
 
             <${HamburgerTwo.TAG} ref=${hamburgerRef} />
@@ -145,21 +127,17 @@ export const Header:FunctionComponent<{
                 ></iframe>
             </div>
 
-            ${user.value && html`
-                <span class="user-handle">
-                    <a href="/settings">
-                        <code>
-                            @${user.value?.handle}
-                        </code>
-                    </a>
-                </span>
-                <button
-                    class="btn btn-small"
-                    onClick=${handleLogout}
-                >
-                    Logout
-                </button>
-            `}
+            <div class="mobile-user">
+                <${UserIcon} state=${state} />
+                ${user.value && html`
+                    <button
+                        class="btn btn-small"
+                        onClick=${handleLogout}
+                    >
+                        Logout
+                    </button>
+                `}
+            </div>
         </div>
     `
 }

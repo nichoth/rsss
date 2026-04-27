@@ -25,6 +25,7 @@ export interface DPoPKeyPair {
 export interface OAuthSession {
     did: string
     handle: string
+    avatar?: string
 }
 
 export interface OAuthState {
@@ -521,13 +522,18 @@ export async function exchangeCode (
     // here are intentionally discarded -- see the OAuthSession docs
     // for why we do not persist them.
 
-    // Get handle from DID
+    // Get handle (and avatar, if any) from DID
     let handle = tokens.sub
+    let avatar: string | undefined
     try {
         const profileResponse = await fetch(`https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile?actor=${tokens.sub}`)
         if (profileResponse.ok) {
-            const profile = await profileResponse.json() as { handle: string }
+            const profile = await profileResponse.json() as {
+                handle: string
+                avatar?: string
+            }
             handle = profile.handle
+            if (profile.avatar) avatar = profile.avatar
         }
     } catch {
         // Use DID as fallback
@@ -535,7 +541,8 @@ export async function exchangeCode (
 
     return {
         did: tokens.sub,
-        handle
+        handle,
+        avatar
     }
 }
 
