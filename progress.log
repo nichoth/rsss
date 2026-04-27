@@ -129,6 +129,11 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Local write timestamp source**: Client local-first writes should compute
+  one `const now = formatSqliteTs(new Date())` per mutation and bind that
+  value into both affected row `updated_at` columns and the outbox
+  `client_updated_at`. Do not mix a JS timestamp with SQL `datetime('now')`
+  in the same mutation.
 - **Update-item outbox coalescing**: Local `updateItem` writes should keep
   one pending `update_item` outbox row per item and merge new payload values
   into it. Build the payload from the row after the SQL update so booleans
@@ -1827,4 +1832,27 @@ Thread: https://ampcode.com/threads/unknown
     pending.
   - False boolean payloads should be derived from the post-update SQLite row,
     not inferred later from truthy checks.
+---
+
+## 2026-04-27 16:19 PDT - US-073
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Unified local mutation timestamps for row and
+  outbox writes.
+  - `updateItem` now binds the same `formatSqliteTs(new Date())` value into
+    `items.updated_at` and the coalesced `update_item` outbox row.
+  - `markAllRead` now binds the same timestamp into affected item rows and
+    the `mark_all_read` outbox row.
+  - Added focused regression tests with a mocked JS clock so mixed JS/SQLite
+    timestamp sources diverge visibly.
+- Files changed:
+  - `src/client/db/local-adapter.ts`
+  - `test/local-adapter.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Local mutations should compute one JS SQLite-format timestamp and reuse
+    it for both data rows and outbox metadata.
+  - Tests that assert `markAllRead` row timestamps should only inspect rows
+    actually changed by the mutation; already-read rows are intentionally
+    left untouched.
 ---

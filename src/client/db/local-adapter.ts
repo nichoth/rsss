@@ -236,8 +236,8 @@ export function createLocalAdapter (db:Sqlite3Db):DbAdapter {
             if (fields.length === 0) return
 
             const now = formatSqliteTs(new Date())
-            fields.push("updated_at = datetime('now')")
-            params.push(id)
+            fields.push('updated_at = ?')
+            params.push(now, id)
 
             await execDb(db, 'BEGIN')
             try {
@@ -279,14 +279,15 @@ export function createLocalAdapter (db:Sqlite3Db):DbAdapter {
                 if (feedId !== undefined) {
                     await execDb(db, {
                         sql: 'UPDATE items SET is_read = 1,' +
-                            " updated_at = datetime('now')" +
+                            ' updated_at = ?' +
                             ' WHERE feed_id = ? AND is_read = 0',
-                        bind: [feedId]
+                        bind: [now, feedId]
                     })
                 } else {
                     await execDb(db, {
                         sql: 'UPDATE items SET is_read = 1,' +
-                            " updated_at = datetime('now') WHERE is_read = 0"
+                            ' updated_at = ? WHERE is_read = 0',
+                        bind: [now]
                     })
                 }
                 await insertOutbox(
