@@ -1,3 +1,26 @@
+## 2026-04-27 15:56 PDT - US-071
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Preserved local item state during add-feed
+  reconciliation.
+  - Added a regression test for offline-added feed items keeping read and
+    starred flags after the server returns a canonical feed id.
+  - Replaced cascade-causing optimistic feed deletion with an in-place feed
+    id swap plus child item reattachment inside the existing push-sync
+    transaction.
+- Files changed:
+  - `src/client/db/push-sync.ts`
+  - `test/push-sync.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Add-feed reconciliation already runs inside a push-sync transaction with
+    outbox deletion; helper code should participate in that transaction and
+    avoid nested `BEGIN` calls.
+  - Because `items.feed_id` has `ON DELETE CASCADE` but no `ON UPDATE
+    CASCADE`, never delete an optimistic feed row before preserving or
+    reattaching its local items.
+---
+
 ## 2026-04-24 - US-017
 - What was implemented: Reset/disable flow for local-first mode.
   - Disabling `syncSubscriptions` toggle shows a confirmation dialog listing what will be deleted (subscriptions cache, items cache, pending offline changes count). On confirm: best-effort pushSync drain, OPFS file removed, adapter cache cleared, toggle flipped to false. On cancel: toggle reverted to `true`.

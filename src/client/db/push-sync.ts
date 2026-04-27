@@ -162,6 +162,48 @@ function extractFeed (
     return feed as Record<string, unknown>
 }
 
+async function replaceOptimisticFeed (
+    db:Sqlite3Db,
+    optimisticId:number,
+    feed:Record<string, unknown>
+):Promise<void> {
+    const serverId = feed.id as number
+
+    if (optimisticId === serverId) {
+        await upsertFeedFromServer(db, feed)
+        return
+    }
+
+    await execDb(db, 'PRAGMA defer_foreign_keys = ON')
+    await execDb(db, {
+        sql: `UPDATE feeds
+              SET id = ?,
+                  url = ?,
+                  title = ?,
+                  description = ?,
+                  site_url = ?,
+                  last_fetched = ?,
+                  created_at = ?,
+                  updated_at = ?
+              WHERE id = ?`,
+        bind: [
+            serverId,
+            feed.url as string,
+            (feed.title as string|null) ?? null,
+            (feed.description as string|null) ?? null,
+            (feed.site_url as string|null) ?? null,
+            (feed.last_fetched as string|null) ?? null,
+            feed.created_at as string,
+            feed.updated_at as string,
+            optimisticId
+        ]
+    })
+    await execDb(db, {
+        sql: 'UPDATE items SET feed_id = ? WHERE feed_id = ?',
+        bind: [serverId, optimisticId]
+    })
+}
+
 function extractItem (
     body:unknown
 ):Record<string, unknown>|null {
@@ -200,10 +242,8 @@ async function reconcileSuccessfulAddFeed (
     }
 
     if (row.target_id !== null) {
-        await execDb(db, {
-            sql: 'DELETE FROM feeds WHERE id = ?',
-            bind: [row.target_id]
-        })
+        await replaceOptimisticFeed(db, row.target_id, feed)
+        return
     }
     await upsertFeedFromServer(db, feed)
 }

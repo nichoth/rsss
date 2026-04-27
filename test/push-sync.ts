@@ -182,6 +182,79 @@ test('pushSync: add_feed 2xx replaces optimistic feed ID', async (t) => {
     }
 })
 
+test(
+    'pushSync: add_feed reconcile preserves attached item state',
+    async (t) => {
+        const db = await openLocalDb('did:test:push-add-feed-items')
+        try {
+            const adapter = createLocalAdapter(db)
+            const optimisticFeed = await adapter.addFeed(
+                'https://example.com/offline.xml'
+            )
+
+            db.exec({
+                sql: `INSERT INTO items
+                    (feed_id, guid, title, link, is_read, is_starred,
+                     created_at, updated_at)
+                    VALUES
+                        (?, 'offline-1', 'Offline 1',
+                         'https://example.com/offline/1', 1, 0,
+                         '2026-01-01 00:00:00', '2026-01-02 00:00:00'),
+                        (?, 'offline-2', 'Offline 2',
+                         'https://example.com/offline/2', 1, 0,
+                         '2026-01-01 00:00:00', '2026-01-02 00:00:00'),
+                        (?, 'offline-3', 'Offline 3',
+                         'https://example.com/offline/3', 0, 1,
+                         '2026-01-01 00:00:00', '2026-01-02 00:00:00')`,
+                bind: [
+                    optimisticFeed.id,
+                    optimisticFeed.id,
+                    optimisticFeed.id
+                ]
+            })
+
+            const serverFeed = {
+                id: optimisticFeed.id + 100,
+                url: 'https://example.com/offline.xml',
+                title: 'Offline Feed',
+                description: null,
+                site_url: 'https://example.com',
+                last_fetched: '2026-01-03 00:00:00',
+                created_at: '2026-01-03 00:00:00',
+                updated_at: '2026-01-03 00:00:00'
+            }
+
+            await pushSync(db, makeFetch(201, { feed: serverFeed }))
+
+            const items = queryAll<{
+                guid:string
+                feed_id:number
+                is_read:number
+                is_starred:number
+            }>(
+                db,
+                `SELECT guid, feed_id, is_read, is_starred
+                 FROM items
+                 WHERE feed_id = ?
+                 ORDER BY guid ASC`,
+                [serverFeed.id]
+            )
+
+            t.equal(items.length, 3, 'all attached items survive reconcile')
+            t.equal(
+                items[0]?.feed_id,
+                serverFeed.id,
+                'items use server feed id'
+            )
+            t.equal(items[0]?.is_read, 1, 'first read flag survives')
+            t.equal(items[1]?.is_read, 1, 'second read flag survives')
+            t.equal(items[2]?.is_starred, 1, 'starred flag survives')
+        } finally {
+            db.close()
+        }
+    }
+)
+
 // ── 5xx retry ─────────────────────────────────────────────────────────────────
 
 test('pushSync: 5xx increments attempts and preserves row', async (t) => {
