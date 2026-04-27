@@ -77,11 +77,11 @@ export async function bootstrapLocalDb (
         openedDb = db
 
         await pullSync(db, fetchFn, {
-            onFeedUpserted: (count) => {
-                bootstrapFeedsCount.value = count
+            onFeedPage: (count) => {
+                bootstrapFeedsCount.value += count
             },
-            onItemUpserted: (count) => {
-                bootstrapItemsCount.value = count
+            onItemPage: (count) => {
+                bootstrapItemsCount.value += count
             }
         })
 

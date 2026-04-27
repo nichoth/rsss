@@ -14,6 +14,37 @@
   - `getOutboxCount` exported from `push-sync.ts` lets the UI show pending count without re-opening the DB.
 ---
 
+## 2026-04-27 15:02 PDT - US-069
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Paginated local-first sync end-to-end.
+  - Durable Object `/sync` now accepts `cursor` and `limit`, caps pages at
+    500 rows, returns `hasMore` and `nextCursor`, and avoids unbounded
+    feed/item sync queries.
+  - `pullSync` loops through sync pages, commits `pull_cursor` per page, and
+    clears it only after the final page advances `last_pull_at`.
+  - Bootstrap progress now ticks from page-level callbacks instead of
+    per-row callback updates.
+  - Added a 1500-item interrupted-bootstrap regression test and static DO
+    route guards.
+- Files changed:
+  - `src/server/durable-objects/index.ts`
+  - `src/client/db/local-schema.ts`
+  - `src/client/db/pull-sync.ts`
+  - `src/client/db/bootstrap.ts`
+  - `test/pull-sync.ts`
+  - `test/server-routing-static.mjs`
+  - `test/signup-ui.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Store pagination resume state in `sync_meta.pull_cursor`, not in memory,
+    so failed bootstraps resume from the last committed page.
+  - Keep `pullSync` cursor values opaque to the client; the Durable Object
+    owns cursor encoding and tie-breaking.
+  - Existing lint covers all tests, so unrelated lint violations can block
+    task completion even when focused story files are clean.
+---
+
 ## 2026-04-26 11:55 PDT - US-046
 Thread: https://ampcode.com/threads/unknown
 - What was implemented: Completed missing critical-path test coverage.
@@ -75,6 +106,11 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Paginated sync cursoring**: `/api/sync` returns `hasMore` and an
+  opaque `nextCursor`; `pullSync` persists that cursor in `sync_meta` after
+  each committed page and clears it only when the final page advances
+  `last_pull_at`. Bootstrap progress should use page callbacks rather than
+  per-row callbacks.
 - **Local-first a11y/CSS regression checks**:
   `test/local-first-a11y-static.mjs` owns static checks for the local-first
   settings and sync status surface, including live status semantics,

@@ -50,9 +50,122 @@ const FEED_XML_PARSER = new XMLParser({
 const FEED_REFRESH_CONCURRENCY = 8
 const MIGRATION_STATE_KEY = 'schema_migration'
 const USER_DO_MIGRATION_VERSION = 2
+const SYNC_PAGE_LIMIT = 500
+const FEED_SYNC_COLUMNS = `
+    id, url, title, description, site_url, last_fetched, last_error,
+    last_status, created_at, updated_at
+`
+const ITEM_SYNC_COLUMNS = `
+    items.id, items.feed_id, items.guid, items.title, items.link,
+    items.description, items.content, items.author, items.pub_date,
+    items.is_read, items.is_starred, items.created_at, items.updated_at,
+    feeds.title AS feed_title
+`
 
 interface MigrationState {
     migration_v?:number
+}
+
+type SyncRowKind = 'feed' | 'item'
+
+interface SyncCursor {
+    updated_at:string
+    id:number
+    kind:SyncRowKind
+}
+
+interface SyncRow {
+    kind:SyncRowKind
+    row:Record<string, unknown>
+    updated_at:string
+    id:number
+}
+
+function encodeSyncCursor (row:SyncRow):string {
+    return JSON.stringify({
+        updated_at: row.updated_at,
+        id: row.id,
+        kind: row.kind
+    })
+}
+
+function parseSyncCursor (value:string|undefined):SyncCursor|null {
+    if (!value) return null
+
+    try {
+        const parsed = JSON.parse(value) as Partial<SyncCursor>
+        if (
+            typeof parsed.updated_at === 'string' &&
+            typeof parsed.id === 'number' &&
+            (parsed.kind === 'feed' || parsed.kind === 'item')
+        ) {
+            return {
+                updated_at: parsed.updated_at,
+                id: parsed.id,
+                kind: parsed.kind
+            }
+        }
+    } catch {
+        return null
+    }
+
+    return null
+}
+
+function normalizeSyncLimit (value:string|undefined):number {
+    const parsed = value ? Number(value) : SYNC_PAGE_LIMIT
+    if (!Number.isFinite(parsed) || parsed < 1) return SYNC_PAGE_LIMIT
+    return Math.min(Math.floor(parsed), SYNC_PAGE_LIMIT)
+}
+
+function syncRowCompare (a:SyncRow, b:SyncRow):number {
+    if (a.updated_at !== b.updated_at) {
+        return a.updated_at < b.updated_at ? -1 : 1
+    }
+    if (a.id !== b.id) return a.id - b.id
+    return a.kind.localeCompare(b.kind)
+}
+
+function syncCursorWhere (
+    cursor:SyncCursor|null,
+    since:string|undefined,
+    tableName:string,
+    kind:SyncRowKind
+):{ sql:string; bind:unknown[] } {
+    const conditions:string[] = []
+    const bind:unknown[] = []
+
+    if (since) {
+        conditions.push(`${tableName}.updated_at > ?`)
+        bind.push(since)
+    }
+
+    if (cursor) {
+        conditions.push(`(
+            ${tableName}.updated_at > ? OR (
+                ${tableName}.updated_at = ? AND (
+                    ${tableName}.id > ? OR (
+                        ${tableName}.id = ? AND ? > ?
+                    )
+                )
+            )
+        )`)
+        bind.push(
+            cursor.updated_at,
+            cursor.updated_at,
+            cursor.id,
+            cursor.id,
+            kind,
+            cursor.kind
+        )
+    }
+
+    return {
+        sql: conditions.length > 0
+            ? `WHERE ${conditions.join(' AND ')}`
+            : 'WHERE 1 = 1',
+        bind
+    }
 }
 
 /**
@@ -548,37 +661,58 @@ export class UserDO extends DurableObject<Env> {
         // Sync endpoint - returns all data changed since a timestamp
         app.get('/sync', (c) => {
             const since = c.req.query('since')
+            const cursor = parseSyncCursor(c.req.query('cursor'))
+            const limit = normalizeSyncLimit(c.req.query('limit'))
+            const feedWhere = syncCursorWhere(cursor, since, 'feeds', 'feed')
+            const itemWhere = syncCursorWhere(cursor, since, 'items', 'item')
 
-            let feeds:unknown[]
-            let items:unknown[]
+            const feedsPage = this.sql.exec(
+                `SELECT ${FEED_SYNC_COLUMNS}
+                 FROM feeds
+                 ${feedWhere.sql}
+                 ORDER BY updated_at ASC, id ASC
+                 LIMIT ?`,
+                ...feedWhere.bind,
+                limit + 1
+            ).toArray() as Record<string, unknown>[]
 
-            if (since) {
-                // Incremental sync - get only changed records
-                feeds = this.sql.exec(
-                    'SELECT * FROM feeds ' +
-                    'WHERE updated_at > ? ' +
-                    'ORDER BY updated_at ASC',
-                    since
-                ).toArray()
+            const itemsPage = this.sql.exec(
+                `SELECT ${ITEM_SYNC_COLUMNS}
+                 FROM items
+                 JOIN feeds ON items.feed_id = feeds.id
+                 ${itemWhere.sql}
+                 ORDER BY items.updated_at ASC, items.id ASC
+                 LIMIT ?`,
+                ...itemWhere.bind,
+                limit + 1
+            ).toArray() as Record<string, unknown>[]
 
-                items = this.sql.exec(
-                    `SELECT items.*, feeds.title as feed_title
-                     FROM items
-                     JOIN feeds ON items.feed_id = feeds.id
-                     WHERE items.updated_at > ?
-                     ORDER BY items.updated_at ASC`,
-                    since
-                ).toArray()
-            } else {
-                // Full sync - get everything
-                feeds = this.sql.exec('SELECT * FROM feeds ORDER BY id ASC').toArray()
-                items = this.sql.exec(
-                    `SELECT items.*, feeds.title as feed_title
-                     FROM items
-                     JOIN feeds ON items.feed_id = feeds.id
-                     ORDER BY items.id ASC`
-                ).toArray()
-            }
+            const combinedRows:SyncRow[] = [
+                ...feedsPage.map((row) => ({
+                    kind: 'feed' as const,
+                    row,
+                    updated_at: row.updated_at as string,
+                    id: row.id as number
+                })),
+                ...itemsPage.map((row) => ({
+                    kind: 'item' as const,
+                    row,
+                    updated_at: row.updated_at as string,
+                    id: row.id as number
+                }))
+            ].sort(syncRowCompare)
+
+            const pageRows = combinedRows.slice(0, limit)
+            const hasMore = combinedRows.length > limit
+            const nextCursor = hasMore && pageRows.length > 0
+                ? encodeSyncCursor(pageRows[pageRows.length - 1])
+                : null
+            const feeds = pageRows
+                .filter((row) => row.kind === 'feed')
+                .map((row) => row.row)
+            const items = pageRows
+                .filter((row) => row.kind === 'item')
+                .map((row) => row.row)
 
             // Get the latest updated_at timestamp for the client to store
             const latestFeed = this.sql.exec(
@@ -609,6 +743,8 @@ export class UserDO extends DurableObject<Env> {
             return c.json({
                 feeds,
                 items,
+                hasMore,
+                nextCursor,
                 syncedAt,
                 latestUpdatedAt,
                 isFullSync: !since
