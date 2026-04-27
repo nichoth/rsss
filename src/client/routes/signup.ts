@@ -72,9 +72,10 @@ export const SignupPage:FunctionComponent<{
                     <h1>Choose a plan</h1>
                     <p>
                         RSSS Free works in your browser while you're
-                        online. Upgrade to Local-first to keep your
-                        feeds on your device and sync across machines
-                        automatically.
+                        online. Upgrade to the local-first version to cache your
+                        feeds on your device, for offline reading, and
+                        automatically sync your settings across multiple
+                        machines.
                     </p>
                 </header>
 
@@ -137,11 +138,13 @@ export const SignupPage:FunctionComponent<{
                                 <span class="plan-period">/month</span>
                             </p>
                             <ul class="plan-features">
-                                <li>Works offline on each device</li>
-                                <li>Auto-syncs across all your devices</li>
                                 <li>
-                                    Your feeds live on your device,
-                                    not a server
+                                    Cache feeds on your device, so you
+                                    can read them even when offline.
+                                </li>
+                                <li>
+                                    Your settings automatically synchronize
+                                    across all your devices.
                                 </li>
                             </ul>
                             ${isAuthed.value && html`

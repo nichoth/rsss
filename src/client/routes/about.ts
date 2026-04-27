@@ -26,9 +26,9 @@ export const AboutRoute:FunctionComponent<{
                     RSSS is an <a href="https://en.wikipedia.org/wiki/RSS">
                     RSS/Atom</a> feed reader. It lets you subscribe
                     to feeds and read them in one place. You can
-                    sign in with a${NBSP}
-                    <a href="https://bsky.app/">Bluesky</a>
-                    account.
+                    sign in with a <a href="https://bsky.app/">
+                        Bluesky
+                    </a> account.
                 </p>
             </section>
 
@@ -43,30 +43,22 @@ export const AboutRoute:FunctionComponent<{
                     </a> ${EM_DASH + ' '}
                     each user gets their own Durable Object
                     with a SQLite database. This stores your
-                    feeds, items, read/starred states, and
+                    feeds, read/starred states, and
                     handles periodic feed fetching.
                 </p>
 
                 <p>
-                    The server periodically polls the feeds
-                    you are subscribed to (every 10 minutes)
-                    to check for new items.
+                    The server polls the feeds you are subscribed to
+                    (every 10 minutes) to check for new items.
                 </p>
             </section>
 
             <section>
                 <h2>Local</h2>
                 <p>
-                    The end-goal for this is to fully support offline
-                    reading. That is, provide and intuitive UI to control
-                    which feeds are saved locally, and which are saved in the
-                    cloud only.
-                </p>
-
-                <p>
-                    That's on the todo list though, because I do not want
-                    to release a bad UX, and it's hard to devote a lot of time
-                    to this, since it is not a job.
+                    Upgrade and pay $10 per month to get offline-first
+                    reading. Choose which feeds are cached to your local
+                    machine, so you can read them without an internet connection.
                 </p>
             </section>
 
@@ -84,23 +76,6 @@ export const AboutRoute:FunctionComponent<{
                     You <em>are</em> taking it at my word that
                     I am not reading your RSS subscription
                     data, and no one at Cloudflare is either.
-                </p>
-            </section>
-
-            <section>
-                <h2>Status</h2>
-                <p>
-                    RSSS is open source. View the code or
-                    report issues on <a
-                        href="https://github.com/nichoth/rsss"
-                        target="_blank"
-                        rel="noopener"
-                    >GitHub</a>.
-                </p>
-
-                <p>
-                    This is considered to be "alpha" quality
-                    software at this point, hence the donation links.
                 </p>
             </section>
         </article>

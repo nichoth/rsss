@@ -9,6 +9,9 @@ See [rsss.space](https://rsss.space/).
 * https://brittanyellich.com/index.xml
 * https://www.404media.co/rss/
 * https://interconnected.org/home/feed
+* https://piccalil.li/feed.xml
+* https://piccalil.li/articles.xml
+* https://piccalil.li/the-index/feed.xml
 
 <details><summary><h2>Contents</h2></summary>
 

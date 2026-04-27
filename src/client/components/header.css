@@ -19,6 +19,7 @@
 
             &.active {
                 border-color: initial;
+                text-decoration: none;
             }
         }
     }
