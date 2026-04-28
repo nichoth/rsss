@@ -147,6 +147,11 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Add-feed dependent outbox rewrites**: When an optimistic `add_feed`
+  reconciles to a canonical server id, update dependent pending operations
+  that reference the optimistic feed id. `pushSync` snapshots outbox rows at
+  drain start, so rewrite both SQLite rows and the in-memory queued rows
+  before later operations in the same drain run.
 - **State-level sync active gate**: Window `online` handlers should check
   `isLocalFirstActive.value` before looking up a cached DB or calling
   `runSync`. A cached local DB can briefly outlive the active UI state during
@@ -2165,4 +2170,23 @@ Thread: https://ampcode.com/threads/unknown
     promise mutex.
   - Focused browser tests can use `npx esbuild ... | npx tapout` when the
     local binaries are not on the shell `PATH`.
+---
+
+## 2026-04-27 17:44 PDT - US-085
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Rewrote pending delete-feed targets after add-feed
+  reconciliation.
+  - Added a regression test for adding and immediately deleting a feed
+    offline, then draining push sync against the canonical server id.
+  - Updated add-feed reconciliation to rewrite matching `delete_feed`
+    outbox rows in SQLite and in the current push-sync row snapshot.
+- Files changed:
+  - `src/client/db/push-sync.ts`
+  - `test/push-sync.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `pushSync` reads the outbox once at drain start, so same-cycle outbox
+    rewrites must update both persisted rows and the queued `OutboxRow`
+    objects already being iterated.
 ---

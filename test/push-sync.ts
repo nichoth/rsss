@@ -183,6 +183,62 @@ test('pushSync: add_feed 2xx replaces optimistic feed ID', async (t) => {
 })
 
 test(
+    'pushSync: add_feed rewrite lets pending delete use server ID',
+    async (t) => {
+        const db = await openLocalDb('did:test:push-add-delete-feed')
+        try {
+            const adapter = createLocalAdapter(db)
+            const optimisticFeed = await adapter.addFeed(
+                'https://example.com/delete-me.xml'
+            )
+            await adapter.deleteFeed(optimisticFeed.id)
+
+            const serverFeed = {
+                id: optimisticFeed.id + 100,
+                url: 'https://example.com/delete-me.xml',
+                title: 'Deleted Feed',
+                description: null,
+                site_url: 'https://example.com',
+                last_fetched: '2026-01-03 00:00:00',
+                created_at: '2026-01-03 00:00:00',
+                updated_at: '2026-01-03 00:00:00'
+            }
+            const urls:string[] = []
+            const fetchFn:FakeFetch = async (url) => {
+                urls.push(url)
+                if (url === '/api/feeds') {
+                    return {
+                        ok: true,
+                        status: 201,
+                        json: async () => ({ feed: serverFeed })
+                    }
+                }
+                return {
+                    ok: url === `/api/feeds/${serverFeed.id}`,
+                    status: url === `/api/feeds/${serverFeed.id}` ? 204 : 404,
+                    json: async () => ({})
+                }
+            }
+
+            await pushSync(db, fetchFn)
+
+            t.deepEqual(urls, [
+                '/api/feeds',
+                `/api/feeds/${serverFeed.id}`
+            ], 'delete request uses canonical server id')
+
+            const feeds = queryAll(db, 'SELECT * FROM feeds')
+            t.equal(feeds.length, 0, 'no local feed is recreated')
+
+            const outboxRows = queryAll(db, 'SELECT * FROM outbox')
+            t.equal(outboxRows.length, 0, 'both outbox rows are drained')
+        } finally {
+            db.close()
+        }
+    }
+)
+
+test(
     'pushSync: add_feed reconcile preserves attached item state',
     async (t) => {
         const db = await openLocalDb('did:test:push-add-feed-items')
