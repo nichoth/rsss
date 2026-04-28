@@ -4,12 +4,17 @@
  */
 import { type Signal, signal, batch } from '@preact/signals'
 
+export interface PendingDeletion {
+    scheduledFor:number
+}
+
 export interface BillingStatus {
     entitled:boolean
     planId:string
     status:'active'|'scheduled'|'none'
     refreshedAt:number
     useLive:boolean
+    pendingDeletion?:PendingDeletion|null
 }
 
 export const billingStatus:Signal<BillingStatus|null> =

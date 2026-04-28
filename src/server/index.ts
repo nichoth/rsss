@@ -20,11 +20,13 @@ import {
     attachCheckout,
     verifySubscription,
     getCustomerPortalUrl,
+    getCurrentPeriodEnd,
     type BillingPlanId
 } from './autumn-billing.js'
 import {
     sendSubscriptionStarted,
-    sendPaymentFailed
+    sendPaymentFailed,
+    sendAccountDeletionScheduled
 } from './email.js'
 import type { Context, Next } from 'hono'
 
@@ -820,12 +822,17 @@ app.get('/api/billing/status', requireAuth, async (c) => {
     const session = c.get('session')!
     try {
         const billing = await resolveBilling(c.env, session.did)
+        const pendingDeletion = await readPendingDeletion(
+            c.env,
+            session.did
+        )
         return c.json({
             entitled: isEntitled(billing),
             planId: billing.planId,
             status: billing.status,
             refreshedAt: billing.refreshedAt,
-            useLive: billingUseLive(c.env)
+            useLive: billingUseLive(c.env),
+            pendingDeletion
         })
     } catch (err) {
         console.error('billing/status error:', err)
@@ -833,6 +840,123 @@ app.get('/api/billing/status', requireAuth, async (c) => {
             error: 'billing_unavailable'
         }, 503)
     }
+})
+
+async function readPendingDeletion (
+    env:Env,
+    did:string
+):Promise<{ scheduledFor:number }|null> {
+    try {
+        const stub = getUserDO(env, did)
+        const res = await stub.fetch(
+            new Request(
+                'http://do/internal/account/deletion',
+                { method: 'GET' }
+            )
+        )
+        if (!res.ok) return null
+        const body = await res.json() as {
+            pendingDeletion?:{ scheduledFor:number }|null
+        }
+        return body.pendingDeletion ?? null
+    } catch (err) {
+        console.error('readPendingDeletion error:', err)
+        return null
+    }
+}
+
+/**
+ * Schedule deletion of the authenticated user's account.
+ * For active subscriptions, deletion is scheduled for the end of
+ * the current billing period. Otherwise (free tier or no live
+ * billing), deletion runs immediately.
+ */
+app.post('/api/account/delete', requireAuth, async (c) => {
+    const session = c.get('session')!
+
+    let scheduledFor = Date.now()
+    if (billingUseLive(c.env)) {
+        try {
+            const periodEnd = await getCurrentPeriodEnd(
+                c.env,
+                session.did
+            )
+            if (periodEnd && periodEnd > Date.now()) {
+                scheduledFor = periodEnd
+            }
+        } catch (err) {
+            console.error('getCurrentPeriodEnd error:', err)
+        }
+    }
+
+    const stub = getUserDO(c.env, session.did)
+    const res = await stub.fetch(
+        new Request(
+            'http://do/internal/account/deletion',
+            {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                    scheduledFor,
+                    did: session.did
+                })
+            }
+        )
+    )
+    if (!res.ok) {
+        console.error(
+            'account/delete: DO returned',
+            res.status
+        )
+        return c.json({
+            error: 'deletion_unavailable'
+        }, 503)
+    }
+
+    // Send confirmation email best-effort. Use the contact email
+    // we recorded during checkout, if any.
+    try {
+        const to = await readContactEmail(c.env, session.did)
+        if (to) {
+            const baseUrl = new URL(c.req.url).origin
+            await sendAccountDeletionScheduled(
+                c.env,
+                c.env.SESSIONS,
+                {
+                    to,
+                    did: session.did,
+                    handle: session.handle,
+                    scheduledFor,
+                    baseUrl
+                },
+                c.executionCtx
+            )
+        }
+    } catch (err) {
+        console.error('account/delete email error:', err)
+    }
+
+    return c.json({ scheduledFor })
+})
+
+/**
+ * Cancel a pending account deletion.
+ */
+app.delete('/api/account/delete', requireAuth, async (c) => {
+    const session = c.get('session')!
+    const stub = getUserDO(c.env, session.did)
+    const res = await stub.fetch(
+        new Request(
+            'http://do/internal/account/deletion',
+            { method: 'DELETE' }
+        )
+    )
+    if (!res.ok) {
+        return c.json({
+            error: 'cancellation_failed'
+        }, 503)
+    }
+    return c.json({ ok: true })
 })
 
 /**

@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { type FunctionComponent } from 'preact'
 import { useEffect, useRef } from 'preact/hooks'
 import { useComputed } from '@preact/signals'
+import { CheckBox } from '@substrate-system/check-box'
 import { type AppState, State } from '../state.js'
 import { billingStatus } from '../billing-status.js'
 import {
@@ -32,8 +33,8 @@ import {
     LocalFirstSyncFailureError,
     purgeStoredContent
 } from '../db/index.js'
-import '@substrate-system/check-box'
 import './settings.css'
+import { NBSP } from '../constants.js'
 
 export const SettingsRoute:FunctionComponent<{
     state:AppState
@@ -61,6 +62,27 @@ export const SettingsRoute:FunctionComponent<{
     const syncChecked = syncSubscriptions.value ||
         pendingSyncSubscriptions.value
     const planLabel = billing.value?.planId ?? 'local-first'
+    const pendingDeletion = useComputed(() =>
+        billing.value?.pendingDeletion ?? null)
+
+    async function handleCancelDeletion () {
+        try {
+            await State.cancelAccountDeletion()
+        } catch (err) {
+            alert(err instanceof Error ?
+                err.message :
+                'Failed to cancel deletion')
+        }
+    }
+
+    function handleDeleteAccount (e:Event) {
+        e.preventDefault()
+        state._setRoute('/confirm-close')
+    }
+
+    function formatDeletionDate (ms:number):string {
+        return new Date(ms).toLocaleString()
+    }
 
     useEffect(() => {
         const did = pendingBootstrapDid.current
@@ -295,7 +317,7 @@ export const SettingsRoute:FunctionComponent<{
                 <p class="upgrade-note">
                     Local storage is part of the Local-first plan.
                     <a href="/signup" onClick=${handleUpgrade}>Upgrade</a>
-                    to keep your feeds on this device and work offline.
+                    ${NBSP}to keep your feeds on this device and work offline.
                 </p>
             `}
             ${!supported && html`
@@ -309,7 +331,7 @@ export const SettingsRoute:FunctionComponent<{
                 </p>
             `}
             <div class="local-first-toggle">
-                <check-box
+                <${CheckBox.TAG}
                     name="sync-subscriptions"
                     aria-describedby="sync-subscriptions-desc"
                     checked=${syncChecked || undefined}
@@ -318,11 +340,8 @@ export const SettingsRoute:FunctionComponent<{
                     onChange=${handleSyncChange}
                 >
                     Sync subscriptions and read state to this device
-                </check-box>
-                <p
-                    class="toggle-desc"
-                    id="sync-subscriptions-desc"
-                >
+                <//>
+                <p class="toggle-desc" id="sync-subscriptions-desc">
                     Keeps subscriptions, read state, and starred items in
                     local SQLite storage on this device.
                 </p>
@@ -446,6 +465,36 @@ export const SettingsRoute:FunctionComponent<{
             })
         }
             </ul>
+        </section>
+
+        <section class="settings-section danger-zone">
+            <h2>Danger Zone</h2>
+            ${pendingDeletion.value ? html`
+                <p class="pending-deletion-notice">
+                    <strong>Account deletion scheduled.</strong>
+                    ${' '}Your account will be deleted on
+                    ${' '}${formatDeletionDate(
+                        pendingDeletion.value.scheduledFor)}.
+                </p>
+                <button
+                    class="btn-cancel-deletion"
+                    onClick=${handleCancelDeletion}
+                >
+                    Cancel deletion
+                </button>
+            ` : html`
+                <p>
+                    Permanently delete your account and all associated
+                    data. This action cannot be undone.
+                </p>
+                <a
+                    href="/confirm-close"
+                    class="btn-delete-account"
+                    onClick=${handleDeleteAccount}
+                >
+                    Delete account
+                </a>
+            `}
         </section>
     </div>`
 }

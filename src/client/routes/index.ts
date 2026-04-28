@@ -9,6 +9,7 @@ import { SignupPage } from './signup.js'
 import { PaymentSuccessPage } from './payment-success.js'
 import { TermsRoute } from './terms.js'
 import { PrivacyRoute } from './privacy.js'
+import { ConfirmCloseRoute } from './confirm-close.js'
 // import Debug from '@substrate-system/debug'
 // const debug = Debug('rsss:routes')
 
@@ -52,6 +53,13 @@ export default function _Router (state:AppState):InstanceType<typeof Router> {
 
     router.addRoute('/settings', () => {
         return SettingsRoute
+    })
+
+    router.addRoute('/confirm-close', () => {
+        if (!state.authLoading.value && !state.isAuthenticated.value) {
+            return state._setRoute('/login')
+        }
+        return ConfirmCloseRoute
     })
 
     router.addRoute('/oauth/callback', () => {

@@ -820,6 +820,51 @@ State.signalCheckoutFailed = async function (
 }
 
 /**
+ * Schedule deletion of the current user's account. Resolves with
+ * the scheduled deletion timestamp (in ms). Updates billingStatus
+ * so the settings UI reflects the pending state.
+ */
+State.scheduleAccountDeletion = async function (
+):Promise<{ scheduledFor:number }> {
+    const res = await api.post('account/delete', {
+        throwHttpErrors: false
+    })
+    if (!res.ok) {
+        const body = await res.json<{
+            error?:string
+        }>().catch(() => ({} as { error?:string }))
+        throw new Error(
+            body.error || `account_delete_${res.status}`
+        )
+    }
+    const data = await res.json<{ scheduledFor:number }>()
+
+    // Refresh billing status so settings reflects the pending
+    // deletion without an extra round-trip.
+    await State.loadBillingStatus()
+    return data
+}
+
+/**
+ * Cancel a pending account deletion.
+ */
+State.cancelAccountDeletion = async function (
+):Promise<void> {
+    const res = await api.delete('account/delete', {
+        throwHttpErrors: false
+    })
+    if (!res.ok) {
+        const body = await res.json<{
+            error?:string
+        }>().catch(() => ({} as { error?:string }))
+        throw new Error(
+            body.error || `cancel_delete_${res.status}`
+        )
+    }
+    await State.loadBillingStatus()
+}
+
+/**
  * Open the Autumn-hosted customer portal in the same tab.
  */
 State.openCustomerPortal = async function (

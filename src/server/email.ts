@@ -30,6 +30,7 @@ const EMAIL_RETRY_DELAY_MS = 500
 export type BillingEmailEvent =
     | 'subscription_started'
     | 'payment_failed'
+    | 'account_deletion_scheduled'
 
 export function useLive (env:EmailEnv):boolean {
     if (env.RESEND_DISABLED) return false
@@ -303,6 +304,91 @@ export async function sendPaymentFailed (
         {
             to: params.to,
             subject: 'Your RSSS payment did not go through',
+            text,
+            html
+        },
+        retryContext
+    )
+}
+
+export interface AccountDeletionScheduledParams {
+    to:string;
+    did:string;
+    scheduledFor:number;
+    baseUrl:string;
+    handle?:string|null;
+}
+
+function formatDeletionDate (ms:number):string {
+    return new Date(ms).toUTCString()
+}
+
+export async function sendAccountDeletionScheduled (
+    env:EmailEnv,
+    kv:BillingEmailKv,
+    params:AccountDeletionScheduledParams,
+    retryContext?:BillingEmailRetryContext
+):Promise<{ sent:boolean; deduped:boolean }> {
+    const greeting = params.handle ?
+        `Hi @${params.handle},` :
+        'Hi,'
+    const settingsUrl = new URL('/settings', params.baseUrl).toString()
+    const when = formatDeletionDate(params.scheduledFor)
+    const isImmediate = params.scheduledFor <= Date.now() + 5 * 60 * 1000
+
+    const text = isImmediate ? [
+        greeting,
+        '',
+        'Your RSSS account is being deleted now. All your feeds,',
+        'read state, and starred items will be removed.',
+        '',
+        'If this was a mistake, reply to this email and we will',
+        'try to help.',
+        '',
+        'RSSS'
+    ].join('\n') : [
+        greeting,
+        '',
+        'Your RSSS account is scheduled for deletion at the end',
+        'of your current billing cycle:',
+        when,
+        '',
+        'You can cancel the deletion any time before then from',
+        'Settings:',
+        settingsUrl,
+        '',
+        'RSSS'
+    ].join('\n')
+
+    const html = isImmediate ? [
+        '<p>', greeting, '</p>',
+        '<p>Your RSSS account is being deleted now. All your',
+        ' feeds, read state, and starred items will be removed.</p>',
+        '<p>If this was a mistake, reply to this email and we',
+        ' will try to help.</p>',
+        '<p>RSSS</p>'
+    ].join('') : [
+        '<p>', greeting, '</p>',
+        '<p>Your RSSS account is scheduled for deletion at the',
+        ' end of your current billing cycle: <strong>',
+        escapeHtml(when), '</strong>.</p>',
+        '<p>You can cancel the deletion any time before then',
+        ' from <a href="', escapeHtmlAttr(settingsUrl),
+        '">Settings</a>.</p>',
+        '<p>RSSS</p>'
+    ].join('')
+
+    return sendOnce(
+        env,
+        kv,
+        params.did,
+        'account',
+        'account_deletion_scheduled',
+        {
+            to: params.to,
+            subject: isImmediate ?
+                'Your RSSS account is being deleted' :
+                'Your RSSS account deletion is scheduled',
             text,
             html
         },

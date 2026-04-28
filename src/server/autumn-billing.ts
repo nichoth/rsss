@@ -146,3 +146,69 @@ export async function getCustomerPortalUrl (
     })
     return res.url
 }
+
+/**
+ * Return the end of the user's current billing period, in ms,
+ * for any active or scheduled subscription. Returns null if no
+ * such subscription exists or if Autumn isn't configured.
+ */
+export async function getCurrentPeriodEnd (
+    env:BillingEnv,
+    did:string
+):Promise<number|null> {
+    if (!useLive(env)) return null
+    const customer = await client(env).customers.getOrCreate({
+        customerId: didToCustomerId(did),
+        expand: ['subscriptions.plan']
+    })
+    const subs = customer.subscriptions ?? []
+    for (const s of subs) {
+        if (s.canceledAt) continue
+        if (!isVerifiedSubscriptionStatus(s.status)) continue
+        const periodEnd = (s as { currentPeriodEnd?:number|null })
+            .currentPeriodEnd
+        if (typeof periodEnd === 'number' && Number.isFinite(periodEnd)) {
+            return periodEnd
+        }
+    }
+    return null
+}
+
+/**
+ * Best-effort cancel/delete the Autumn customer record. A 404 (no
+ * such customer) is tolerated -- a free-tier user may never have
+ * been registered with Autumn.
+ */
+export async function cancelCustomer (
+    env:BillingEnv,
+    did:string
+):Promise<void> {
+    if (!useLive(env)) return
+    const customerId = didToCustomerId(did)
+    const c = client(env) as unknown as {
+        customers:{
+            delete?:(args:{ customerId:string }) => Promise<unknown>;
+        };
+        billing?:{
+            cancel?:(args:{ customerId:string }) => Promise<unknown>;
+        };
+    }
+    try {
+        if (typeof c.customers.delete === 'function') {
+            await c.customers.delete({ customerId })
+            return
+        }
+        if (c.billing && typeof c.billing.cancel === 'function') {
+            await c.billing.cancel({ customerId })
+        }
+    } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        if (
+            message.includes('404') ||
+            message.toLowerCase().includes('not found')
+        ) {
+            return
+        }
+        throw err
+    }
+}

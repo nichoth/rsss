@@ -23,6 +23,9 @@ export interface Env {
     USER:DurableObjectNamespace<UserDO>
     SESSIONS:KVNamespace
     ASSETS:Fetcher
+    AUTUMN_SECRET_KEY?:string
+    AUTUMN_DISABLED?:string
+    NODE_ENV?:string
 }
 
 interface Feed {
@@ -74,6 +77,7 @@ const FEED_REFRESH_INTERVAL_MS = 10 * 60 * 1000
 const MANUAL_REFRESH_LIMIT_MS = 60 * 1000
 const MANUAL_REFRESH_STORAGE_PREFIX = 'manual_refresh:'
 const ALARM_REFRESH_CURSOR_KEY = 'alarm_refresh_cursor'
+const PENDING_DELETION_KEY = 'pending_deletion'
 const MIGRATION_STATE_KEY = 'schema_migration'
 const USER_DO_MIGRATION_VERSION = 2
 const SYNC_PAGE_LIMIT = 500
@@ -111,6 +115,11 @@ interface MigrationState {
 
 interface AlarmRefreshCursor {
     last_feed_id?:number
+}
+
+interface PendingDeletion {
+    scheduledFor:number
+    did:string
 }
 
 interface ManualRefreshState {
@@ -877,6 +886,48 @@ export class UserDO extends DurableObject<Env> {
             })
         })
 
+        app.get('/internal/account/deletion', async (c) => {
+            const pending = await this.ctx.storage.get<PendingDeletion>(
+                PENDING_DELETION_KEY
+            )
+            return c.json({
+                pendingDeletion: pending ?
+                    { scheduledFor: pending.scheduledFor } :
+                    null
+            })
+        })
+
+        app.post('/internal/account/deletion', async (c) => {
+            const body = await c.req.json<{
+                scheduledFor?:number;
+                did?:string
+            }>().catch(() => ({} as {
+                scheduledFor?:number;
+                did?:string
+            }))
+            const scheduledFor = Number(body.scheduledFor)
+            const did = typeof body.did === 'string' ? body.did : ''
+            if (!Number.isFinite(scheduledFor) || !did) {
+                return c.json({ error: 'invalid_body' }, 400)
+            }
+
+            const record:PendingDeletion = { scheduledFor, did }
+            await this.ctx.storage.put(PENDING_DELETION_KEY, record)
+
+            // If the deletion is already due, run it on the next alarm
+            // tick by setting an immediate alarm.
+            if (scheduledFor <= Date.now()) {
+                await this.ctx.storage.setAlarm(Date.now())
+            }
+
+            return c.json({ scheduledFor })
+        })
+
+        app.delete('/internal/account/deletion', async (c) => {
+            await this.ctx.storage.delete(PENDING_DELETION_KEY)
+            return c.json({ ok: true })
+        })
+
         return app
     }
 
@@ -1285,8 +1336,62 @@ export class UserDO extends DurableObject<Env> {
      * Alarm handler for periodic feed refresh
      */
     async alarm (): Promise<void> {
+        const pending = await this.ctx.storage.get<PendingDeletion>(
+            PENDING_DELETION_KEY
+        )
+        if (pending && Date.now() >= pending.scheduledFor) {
+            await this.executeAccountDeletion(pending.did)
+            return
+        }
+
         await this.scheduleNextFeedRefresh()
         await this.refreshFeedBatches()
+    }
+
+    /**
+     * Permanently delete the user's data. Wipes the per-user
+     * Durable Object storage (SQLite tables and KV-style state),
+     * removes their KV entries on the main worker, and best-effort
+     * deletes the Autumn customer record.
+     */
+    private async executeAccountDeletion (did:string):Promise<void> {
+        console.log('[DO] executeAccountDeletion', did)
+
+        // Cancel/delete the Autumn customer first so they aren't
+        // billed past this point. Best-effort: a missing customer
+        // (free tier) is not an error.
+        try {
+            const { cancelCustomer } = await import(
+                '../autumn-billing.js'
+            )
+            await cancelCustomer(this.env, did)
+        } catch (err) {
+            console.error('[DO] cancelCustomer failed', err)
+        }
+
+        // Remove the user's KV entries on the main worker namespace.
+        try {
+            await Promise.all([
+                this.env.SESSIONS.delete(`user:${did}`),
+                this.env.SESSIONS.delete(`billing:${did}`),
+                this.env.SESSIONS.delete(`billing_pending_email:${did}`),
+                this.env.SESSIONS.delete(`billing_contact_email:${did}`)
+            ])
+        } catch (err) {
+            console.error('[DO] KV cleanup failed', err)
+        }
+
+        // Drop SQLite tables for clean slate.
+        try {
+            this.sql.exec('DROP TABLE IF EXISTS items')
+            this.sql.exec('DROP TABLE IF EXISTS feeds')
+            this.sql.exec('DROP TABLE IF EXISTS dead_letter_outbox')
+        } catch (err) {
+            console.error('[DO] DROP TABLE failed', err)
+        }
+
+        // Wipe DO state (alarm, cursor, pending deletion, etc.)
+        await this.ctx.storage.deleteAll()
     }
 
     private async scheduleNextFeedRefresh ():Promise<void> {
