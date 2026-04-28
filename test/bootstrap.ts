@@ -12,6 +12,7 @@ import {
     bootstrapItemsCount,
     bootstrapError,
     bootstrapRetryAvailable,
+    bootstrapStorageWarning,
     getBootstrappedDb,
     clearBootstrappedDb
 } from '../src/client/db/bootstrap.js'
@@ -245,6 +246,61 @@ test('bootstrapLocalDb: server error leaves local-first retryable',
         t.equal(bootstrapRetryAvailable.value, true,
             'server error exposes retry')
         t.equal(getBootstrappedDb(), null, 'no db after failure')
+    }
+)
+
+test('bootstrapLocalDb: low storage waits for explicit confirmation',
+    async (t) => {
+        clearBootstrappedDb()
+        syncSubscriptions.value = true
+        bootstrapStorageWarning.value = null
+        let fetchCalls = 0
+
+        Object.defineProperty(navigator, 'storage', {
+            value: {
+                estimate: async () => ({
+                    quota: 150 * 1024 * 1024,
+                    usage: 80 * 1024 * 1024
+                }),
+                getDirectory: async () => ({
+                    getDirectoryHandle: async () => ({
+                        removeEntry: async () => undefined
+                    })
+                })
+            },
+            configurable: true
+        })
+
+        const fetchFn = (async () => {
+            fetchCalls += 1
+            return {
+                ok: true,
+                status: 200,
+                json: async () => syncPayload
+            } as Response
+        }) as typeof fetch
+
+        await bootstrapLocalDb('did:test:bootstrap-low-storage', fetchFn)
+
+        t.equal(fetchCalls, 0, 'bootstrap does not pull rows')
+        t.equal(getBootstrappedDb(), null, 'does not open a usable db')
+        t.ok(bootstrapStorageWarning.value,
+            'low-storage warning signal is set')
+        t.equal(bootstrapInProgress.value, false,
+            'inProgress is reset while waiting for confirmation')
+
+        await bootstrapLocalDb(
+            'did:test:bootstrap-low-storage-confirmed',
+            fetchFn,
+            { confirmLowStorage: async () => true }
+        )
+
+        t.equal(fetchCalls, 1, 'explicit confirmation allows bootstrap')
+        t.equal(bootstrapStorageWarning.value, null,
+            'successful bootstrap clears storage warning')
+
+        getBootstrappedDb()?.close()
+        clearBootstrappedDb()
     }
 )
 

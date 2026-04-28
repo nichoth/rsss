@@ -59,6 +59,7 @@ export {
     bootstrapItemsCount,
     bootstrapError,
     bootstrapRetryAvailable,
+    bootstrapStorageWarning,
     getBootstrappedDb,
     clearBootstrappedDb
 } from './bootstrap.js'

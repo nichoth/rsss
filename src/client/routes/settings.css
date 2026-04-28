@@ -86,6 +86,12 @@
         font-size: 1rem;
     }
 
+    .bootstrap-warning {
+        margin-top: 1rem;
+        color: var(--color-warning);
+        font-size: 1rem;
+    }
+
     .reset-local-data {
         margin-top: 1.5rem;
         padding-top: 1rem;

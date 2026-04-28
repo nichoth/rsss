@@ -20,6 +20,7 @@ import {
     bootstrapItemsCount,
     bootstrapError,
     bootstrapRetryAvailable,
+    bootstrapStorageWarning,
     disableLocalFirst,
     resetLocalFirst,
     getBootstrappedDb,
@@ -75,6 +76,14 @@ export const SettingsRoute:FunctionComponent<{
         ].join('\n'))
     }
 
+    function confirmLowStorageBootstrap (message:string):boolean {
+        return confirm([
+            message,
+            '',
+            'Continue setting up local storage anyway?'
+        ].join('\n'))
+    }
+
     async function handleSyncChange (ev:Event) {
         const checked = (ev.target as HTMLInputElement).checked
         const did = state.user.value?.did
@@ -83,7 +92,8 @@ export const SettingsRoute:FunctionComponent<{
             saveLocalFirstSettings()
             if (did) {
                 bootstrapLocalDb(did, fetch, {
-                    confirmTerminalReset: confirmTerminalBootstrapReset
+                    confirmTerminalReset: confirmTerminalBootstrapReset,
+                    confirmLowStorage: confirmLowStorageBootstrap
                 })
             }
         } else {
@@ -142,7 +152,8 @@ export const SettingsRoute:FunctionComponent<{
         const did = state.user.value?.did
         if (!did) return
         bootstrapLocalDb(did, fetch, {
-            confirmTerminalReset: confirmTerminalBootstrapReset
+            confirmTerminalReset: confirmTerminalBootstrapReset,
+            confirmLowStorage: confirmLowStorageBootstrap
         })
     }
 
@@ -328,6 +339,11 @@ export const SettingsRoute:FunctionComponent<{
             ${bError && html`
                 <p class="bootstrap-error">
                     Setup failed: ${bError}
+                </p>
+            `}
+            ${bootstrapStorageWarning.value && html`
+                <p class="bootstrap-warning">
+                    ${bootstrapStorageWarning.value}
                 </p>
             `}
             ${bootstrapRetryAvailable.value && !inProgress && html`

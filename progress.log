@@ -59,6 +59,34 @@ Thread: https://ampcode.com/threads/unknown
   - Keep 401 and 402 outbox rows untouched; those errors must throw so auth
     or billing flows can handle them without losing pending writes.
 ---
+## 2026-04-27 18:28 PDT - US-089
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added a storage quota gate before local-first
+  bootstrap writes.
+  - `bootstrapLocalDb` now checks `navigator.storage.estimate()` before
+    acquiring the local tab lock or opening SQLite.
+  - Low free space below the configurable 100 MB threshold sets
+    `bootstrapStorageWarning` and stops unless the caller explicitly
+    confirms through `confirmLowStorage`.
+  - Settings now passes the low-storage confirmation prompt and renders the
+    warning signal.
+  - Added a regression test that low storage prevents bootstrap without
+    confirmation and permits it after confirmation.
+- Files changed:
+  - `src/client/db/bootstrap.ts`
+  - `src/client/db/index.ts`
+  - `src/client/routes/settings.ts`
+  - `src/client/routes/settings.css`
+  - `test/bootstrap.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Bootstrap preflight gates should run before `acquireLocalTabLock()` and
+    `openLocalDb()` so a cancelled setup does not create a SQLite handle or
+    contend for the OPFS primary-tab lock.
+  - Settings imports bootstrap state from `src/client/db/index.ts`; new
+    bootstrap signals used by route code must be re-exported there.
+---
 
 ## 2026-04-24 - US-017
 - What was implemented: Reset/disable flow for local-first mode.
@@ -168,6 +196,10 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Bootstrap storage quota gate**: `bootstrapLocalDb` probes
+  `navigator.storage.estimate()` before acquiring the local tab lock or
+  opening SQLite. Low free space sets `bootstrapStorageWarning` and stops
+  unless the caller supplies `confirmLowStorage` and the user confirms.
 - **LWW equal timestamp tie-break**: Shared conflict checks should use
   `resolveLwwWrite(serverUpdatedAt, clientUpdatedAt)`. Server rows only win
   when their timestamp is strictly newer; equal timestamps accept the arriving
