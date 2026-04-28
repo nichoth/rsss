@@ -1,3 +1,22 @@
+## 2026-04-27 21:47 PDT - US-113
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added re-entrant online sync coverage.
+  - Added a regression test that dispatches a second `online` event while
+    the first event's `/api/sync` request is still in flight.
+  - Confirmed the second event reuses the in-flight `runSync` cycle instead
+    of issuing a duplicate sync request.
+  - Verified the existing inactive local-first online-event regression still
+    covers the `isLocalFirstActive === false` branch.
+- Files changed:
+  - `test/state-auth-storage.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - State auth effects can start an initial local-first sync as soon as
+    `state.user.value` is set; online-event tests that need to own the sync
+    window should let that startup cycle settle before installing a hanging
+    `/api/sync` fetch stub.
+---
 ## 2026-04-27 15:56 PDT - US-071
 Thread: https://ampcode.com/threads/unknown
 - What was implemented: Preserved local item state during add-feed
@@ -222,6 +241,10 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **State startup sync in tests**: Setting `state.user.value` can trigger the
+  auth effect's initial local-first `runSync`. Online-event tests that need
+  to own an in-flight sync window should let startup settle before swapping
+  in a hanging `/api/sync` fetch stub.
 - **Local write timestamp watermarks**: Local-first mutations should use a
   single SQLite-format timestamp that is strictly newer than
   `sync_meta.last_pull_at`. If the device clock is behind or equal to the

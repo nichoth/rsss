@@ -77,6 +77,16 @@ function emptySyncFetch ():typeof fetch {
     }))
 }
 
+function makeEmptySyncResponse ():Response {
+    return new Response(JSON.stringify({
+        feeds: [],
+        items: [],
+        syncedAt: '2026-01-04 00:00:00',
+        latestUpdatedAt: '2026-01-04 00:00:00',
+        isFullSync: false
+    }))
+}
+
 function setupLocalFirstForStateTest ():void {
     setTestMode(true, wasmUrl as string)
     _resetSupportedCache()
@@ -449,6 +459,86 @@ test('online event skips sync when local-first is inactive',
                 0,
                 'inactive local-first skips online sync'
             )
+
+            state.cleanup()
+        } finally {
+            State.checkAuth = originals.checkAuth
+            State.loadBillingStatus = originals.loadBillingStatus
+            State.loadFeeds = originals.loadFeeds
+            State.loadItems = originals.loadItems
+            State.loadCounts = originals.loadCounts
+            globalThis.fetch = originals.fetch
+            isLocalFirstActive.value = false
+            setSQLiteWorkerClientFactoryForTests(null)
+            _resetAdapterCache()
+            _resetSupportedCache()
+            syncSubscriptions.value = false
+            resetTabCoordinationForTests()
+        }
+    })
+
+test('online event coalesces while sync is already in flight',
+    async t => {
+        const originals = {
+            checkAuth: State.checkAuth,
+            loadBillingStatus: State.loadBillingStatus,
+            loadFeeds: State.loadFeeds,
+            loadItems: State.loadItems,
+            loadCounts: State.loadCounts,
+            fetch: globalThis.fetch
+        }
+        const did = 'did:plc:online-coalesce'
+        let syncCalls = 0
+        let resolveSync:(response:Response) => void = () => {}
+
+        setupLocalFirstForStateTest()
+        await getAdapter(did)
+        globalThis.fetch = emptySyncFetch()
+
+        State.checkAuth = async () => {}
+        State.loadBillingStatus = async () => null
+        State.loadFeeds = async () => {}
+        State.loadItems = async () => {}
+        State.loadCounts = async () => {}
+
+        try {
+            const state = State()
+            state.user.value = {
+                did,
+                handle: 'online-coalesce.test'
+            }
+            await settleOnlineHandler()
+
+            const syncStarted = new Promise<void>(resolve => {
+                globalThis.fetch = async (input, init) => {
+                    const url = input instanceof Request ?
+                        input.url :
+                        input.toString()
+                    if (!init?.method && url.includes('/api/sync')) {
+                        syncCalls++
+                        resolve()
+                        return new Promise<Response>(resolve => {
+                            resolveSync = resolve
+                        })
+                    }
+                    return originals.fetch.call(globalThis, input, init)
+                }
+            })
+            syncCalls = 0
+
+            window.dispatchEvent(new Event('online'))
+            await syncStarted
+            window.dispatchEvent(new Event('online'))
+            await settleOnlineHandler()
+
+            t.equal(
+                syncCalls,
+                1,
+                'second online event reuses the in-flight sync'
+            )
+
+            resolveSync(makeEmptySyncResponse())
+            await settleOnlineHandler()
 
             state.cleanup()
         } finally {
