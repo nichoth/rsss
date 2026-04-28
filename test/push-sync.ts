@@ -8,7 +8,8 @@ import {
 } from '../src/client/db/sqlite-init.js'
 import {
     pushSync,
-    PushSyncAuthError
+    PushSyncAuthError,
+    PushSyncBillingError
 } from '../src/client/db/push-sync.js'
 import {
     syncStatus,
@@ -448,7 +449,7 @@ test('pushSync: 5xx increments attempts and preserves row', async (t) => {
     }
 })
 
-test('pushSync: 10th failed attempt moves row to dead letters', async (t) => {
+test('pushSync: permanent failure moves row to dead letters', async (t) => {
     const db = await openLocalDb('did:test:push-deadletter')
     try {
         db.exec({
@@ -460,7 +461,7 @@ test('pushSync: 10th failed attempt moves row to dead letters', async (t) => {
             bind: [JSON.stringify({ url: 'https://ex.com/dead.xml' })]
         })
 
-        await pushSync(db, makeFetch(500))
+        await pushSync(db, makeFetch(400))
 
         const outboxRows = queryAll(db, 'SELECT * FROM outbox')
         t.equal(outboxRows.length, 0, 'outbox row promoted')
@@ -480,9 +481,82 @@ test('pushSync: 10th failed attempt moves row to dead letters', async (t) => {
         )
         t.equal(deadRows[0]?.attempts, 10, 'final attempt is recorded')
         t.ok(
-            deadRows[0]?.last_error?.includes('HTTP 500'),
+            deadRows[0]?.last_error?.includes('HTTP 400'),
             'last_error is preserved'
         )
+    } finally {
+        db.close()
+    }
+})
+
+test(
+    'pushSync: repeated 5xx does not consume dead-letter budget',
+    async (t) => {
+        const db = await openLocalDb('did:test:push-5xx-then-success')
+        try {
+            const feedId = seedFeed(db)
+            const itemId = seedItem(db, feedId)
+            db.exec({
+                sql: `INSERT INTO outbox
+                    (op, target_id, payload, client_op_id, client_updated_at)
+                    VALUES ('update_item', ?, ?, 'op-uuid-5xx-success',
+                        '2026-01-01 00:00:00')`,
+                bind: [
+                    itemId,
+                    JSON.stringify({ id: itemId, is_read: true })
+                ]
+            })
+
+            let calls = 0
+            const transientThenOk:FakeFetch = async () => {
+                calls += 1
+                const status = calls <= 10 ? 500 : 200
+                return {
+                    ok: status >= 200 && status < 300,
+                    status,
+                    json: async () => ({})
+                }
+            }
+
+            for (let i = 0; i < 11; i += 1) {
+                await pushSync(db, transientThenOk)
+            }
+
+            t.equal(queryAll(db, 'SELECT * FROM outbox').length, 0)
+            t.equal(
+                queryAll(db, 'SELECT * FROM dead_letter_outbox').length,
+                0,
+                'transient failures are not dead-lettered'
+            )
+        } finally {
+            db.close()
+        }
+    }
+)
+
+test('pushSync: 400 moves row to dead letters immediately', async (t) => {
+    const db = await openLocalDb('did:test:push-400-deadletter')
+    try {
+        db.exec({
+            sql: `INSERT INTO outbox
+                (op, target_id, payload, client_op_id, client_updated_at)
+                VALUES ('add_feed', NULL, ?, 'op-uuid-400',
+                    '2026-01-01 00:00:00')`,
+            bind: [JSON.stringify({ url: 'https://ex.com/bad.xml' })]
+        })
+
+        await pushSync(db, makeFetch(400))
+
+        t.equal(queryAll(db, 'SELECT * FROM outbox').length, 0)
+        const deadRows = queryAll<{
+            client_op_id:string
+            attempts:number
+            last_error:string|null
+        }>(db, 'SELECT * FROM dead_letter_outbox')
+        t.equal(deadRows.length, 1, 'dead-letter row inserted')
+        t.equal(deadRows[0]?.client_op_id, 'op-uuid-400')
+        t.equal(deadRows[0]?.attempts, 1)
+        t.ok(deadRows[0]?.last_error?.includes('HTTP 400'))
     } finally {
         db.close()
     }
@@ -504,7 +578,7 @@ test('pushSync: dead letters set a sync warning count', async (t) => {
             bind: [JSON.stringify({ url: 'https://ex.com/dead-status.xml' })]
         })
 
-        await pushSync(db, makeFetch(500))
+        await pushSync(db, makeFetch(400))
 
         t.equal(syncStatus.value, 'warning', 'sync status is warning')
         t.equal(syncDeadLetters.value, 1, 'dead-letter count is exposed')
@@ -530,7 +604,7 @@ test('pushSync: sequential dead letters do not collide on id', async (t) => {
                 ]
             })
 
-            await pushSync(db, makeFetch(500))
+            await pushSync(db, makeFetch(400))
         }
 
         const deadRows = queryAll<{ client_op_id:string }>(
@@ -813,6 +887,34 @@ test('pushSync: 401 throws PushSyncAuthError and preserves outbox', async (t) =>
 
         const rows = queryAll(db, 'SELECT * FROM outbox')
         t.equal(rows.length, 1, 'outbox row preserved on 401')
+    } finally {
+        db.close()
+    }
+})
+
+test('pushSync: 402 throws PushSyncBillingError and preserves outbox', async (
+    t
+) => {
+    const db = await openLocalDb('did:test:push-402')
+    try {
+        db.exec({
+            sql: `INSERT INTO outbox
+                (op, target_id, payload, client_op_id, client_updated_at)
+                VALUES ('add_feed', NULL, ?, 'op-uuid-402',
+                    '2026-01-01 00:00:00')`,
+            bind: [JSON.stringify({ url: 'https://ex.com/feed' })]
+        })
+
+        let threw = false
+        try {
+            await pushSync(db, makeFetch(402))
+        } catch (err) {
+            threw = err instanceof PushSyncBillingError
+        }
+        t.ok(threw, 'throws PushSyncBillingError')
+
+        const rows = queryAll(db, 'SELECT * FROM outbox')
+        t.equal(rows.length, 1, 'outbox row preserved on 402')
     } finally {
         db.close()
     }

@@ -7,8 +7,6 @@ import {
     isLocalFirstActive
 } from './sync-status.js'
 
-const OUTBOX_ATTEMPT_LIMIT = 10
-
 export class PushSyncAuthError extends Error {
     constructor () {
         super('pushSync: 401 unauthorized — halting drain')
@@ -111,17 +109,20 @@ async function moveOutboxRowToDeadLetters (
     }
 }
 
-async function recordFailedAttempt (
+async function recordTransientFailure (
     db:Sqlite3Db,
     row:OutboxRow,
     error:string
 ):Promise<void> {
-    if (row.attempts + 1 >= OUTBOX_ATTEMPT_LIMIT) {
-        await moveOutboxRowToDeadLetters(db, row, error)
-        return
-    }
-
     await incrementAttempt(db, row.id, error)
+}
+
+async function recordPermanentFailure (
+    db:Sqlite3Db,
+    row:OutboxRow,
+    error:string
+):Promise<void> {
+    await moveOutboxRowToDeadLetters(db, row, error)
 }
 
 async function upsertFeedFromServer (
@@ -481,13 +482,17 @@ export async function pushSync (
                 continue
             }
 
-            // 5xx or other non-success
-            await recordFailedAttempt(db, row, `HTTP ${res.status}`)
+            if (res.status >= 500) {
+                await recordTransientFailure(db, row, `HTTP ${res.status}`)
+                continue
+            }
+
+            await recordPermanentFailure(db, row, `HTTP ${res.status}`)
         } catch (err) {
             if (err instanceof PushSyncAuthError) throw err
             if (err instanceof PushSyncBillingError) throw err
             const errMsg = err instanceof Error ? err.message : String(err)
-            await recordFailedAttempt(db, row, errMsg)
+            await recordTransientFailure(db, row, errMsg)
             if (trackStatus) setSyncError(errMsg)
         }
     }
