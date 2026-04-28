@@ -64,6 +64,10 @@ function pendingEmailKey (did:string):string {
     return `billing_pending_email:${did}`
 }
 
+function contactEmailKey (did:string):string {
+    return `billing_contact_email:${did}`
+}
+
 const PENDING_EMAIL_TTL_SECONDS = 60 * 60 * 24 * 2  // 2 days
 
 async function stashPendingEmail (
@@ -78,24 +82,36 @@ async function stashPendingEmail (
     )
 }
 
-async function readPendingEmail (
+async function stashContactEmail (
+    env:Env,
+    did:string,
+    email:string
+):Promise<void> {
+    await env.SESSIONS.put(
+        contactEmailKey(did),
+        email,
+        { expirationTtl: PENDING_EMAIL_TTL_SECONDS }
+    )
+}
+
+async function readContactEmail (
     env:Env,
     did:string
 ):Promise<string|null> {
-    return env.SESSIONS.get(pendingEmailKey(did))
+    return env.SESSIONS.get(contactEmailKey(did))
 }
 
 /**
  * Resolve the user's contact email for billing notifications.
- * The checkout path stashes the email returned by Autumn when live
- * billing creates or updates the customer, so notification paths can
- * use KV instead of re-fetching the same customer record.
+ * Only Autumn-returned customer emails are eligible recipient
+ * sources. Request-body email can be stashed for customer binding,
+ * but it must not become a notification recipient.
  */
 async function resolveContactEmail (
     env:Env,
     did:string
 ):Promise<string|null> {
-    return readPendingEmail(env, did)
+    return readContactEmail(env, did)
 }
 
 function isProbablyEmail (s:unknown):s is string {
@@ -874,14 +890,15 @@ app.post('/api/billing/checkout', requireAuth, async (c) => {
         }
         await writeCachedBilling(c.env, session.did, billing)
 
-        if (email) {
+        const to = await resolveContactEmail(c.env, session.did)
+        if (to) {
             try {
                 const baseUrl = new URL(c.req.url).origin
                 await sendSubscriptionStarted(
                     c.env,
                     c.env.SESSIONS,
                     {
-                        to: email,
+                        to,
                         did: session.did,
                         planId,
                         baseUrl,
@@ -911,7 +928,7 @@ app.post('/api/billing/checkout', requireAuth, async (c) => {
             email ?? undefined
         )
         if (customer.email) {
-            await stashPendingEmail(
+            await stashContactEmail(
                 c.env,
                 session.did,
                 customer.email

@@ -237,7 +237,7 @@ test(
         const stashed = await env.SESSIONS.get(
             `billing_pending_email:${session.did}`
         )
-        t.equal(stashed, 'alice@example.com', 'stashed contact email')
+        t.equal(stashed, 'alice@example.com', 'stashed pending email')
     }
 )
 
@@ -274,10 +274,15 @@ test(
 
 test(
     'POST /api/billing/checkout (dev) records subscription_started ' +
-        'email dedupe entry when an email is supplied',
+        'email dedupe entry when contact email exists',
     async t => {
         const env = makeEnv({ NODE_ENV: 'development' })
         const { session, cookieHeader } = await makeSession(env)
+        await env.SESSIONS.put(
+            `billing_contact_email:${session.did}`,
+            'alice@example.com'
+        )
+
         await app.request(
             '/api/billing/checkout',
             {
@@ -311,6 +316,55 @@ test(
         t.ok(
             key.includes('subscription_started'),
             'dedupe key names the subscription_started event'
+        )
+    }
+)
+
+test(
+    'POST /api/billing/checkout does not send email to request body ' +
+        'address',
+    async t => {
+        const env = makeEnv({
+            NODE_ENV: 'development',
+            RESEND_API_KEY: 're_test_key'
+        })
+        const { cookieHeader } = await makeSession(env)
+
+        await withFetch(
+            () => jsonResponse({ id: 'email_unsafe' }),
+            async (calls) => {
+                await app.request(
+                    '/api/billing/checkout',
+                    {
+                        method: 'POST',
+                        headers: {
+                            'content-type': 'application/json',
+                            cookie: cookieHeader,
+                            'x-csrf-token': 'test-csrf',
+                            'sec-fetch-site': 'same-origin'
+                        },
+                        body: JSON.stringify({
+                            planId: 'local-first',
+                            email: 'attacker@example.com'
+                        })
+                    },
+                    env,
+                    executionCtx
+                )
+
+                const resendCalls = calls.filter(c =>
+                    c.url.includes('resend.com')
+                )
+                const sentToAttacker = resendCalls.some(c => {
+                    const body = c.body as { to?:unknown }
+                    return body.to === 'attacker@example.com'
+                })
+                t.equal(
+                    sentToAttacker,
+                    false,
+                    'request email is not used as notification recipient'
+                )
+            }
         )
     }
 )
@@ -353,7 +407,7 @@ test(
                         },
                         body: JSON.stringify({
                             planId: 'local-first',
-                            email: 'alice@example.com'
+                            email: 'attacker@example.com'
                         })
                     },
                     env,
@@ -413,11 +467,20 @@ test(
                     'attach body includes success URL'
                 )
 
-                const stashed = await env.SESSIONS.get(
+                const pending = await env.SESSIONS.get(
                     `billing_pending_email:${session.did}`
                 )
                 t.equal(
-                    stashed,
+                    pending,
+                    'attacker@example.com',
+                    'stashed request email for Autumn binding'
+                )
+
+                const contact = await env.SESSIONS.get(
+                    `billing_contact_email:${session.did}`
+                )
+                t.equal(
+                    contact,
                     'alice@example.com',
                     'stashed contact email from Autumn response'
                 )
@@ -582,7 +645,7 @@ test(
         const { session, cookieHeader } = await makeSession(env)
         // The welcome email path reads the contact email from KV.
         await env.SESSIONS.put(
-            `billing_pending_email:${session.did}`,
+            `billing_contact_email:${session.did}`,
             'alice@example.com'
         )
 
@@ -762,7 +825,7 @@ test(
         const { session, cookieHeader } = await makeSession(env)
         // Stash a contact email so the failed-email path has a target.
         await env.SESSIONS.put(
-            `billing_pending_email:${session.did}`,
+            `billing_contact_email:${session.did}`,
             'alice@example.com'
         )
 
@@ -808,7 +871,7 @@ test(
         const env = makeEnv()
         const { session, cookieHeader } = await makeSession(env)
         await env.SESSIONS.put(
-            `billing_pending_email:${session.did}`,
+            `billing_contact_email:${session.did}`,
             'alice@example.com'
         )
 

@@ -222,6 +222,10 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Billing email recipient source**: `billing_pending_email:*` is the
+  request-body email intended for Autumn customer binding only.
+  Notification recipients must come from `billing_contact_email:*`, which is
+  populated from Autumn-returned `customer.email`.
 - **Manual feed refresh rate limits**: `/feeds/:id/refresh` should claim the
   per-feed manual refresh slot before validation or outbound fetch. Keep the
   in-memory claim for rapid same-instance requests and the DO storage
@@ -2658,4 +2662,28 @@ Thread: https://ampcode.com/threads/unknown
   - Alarm and bulk feed refresh paths should continue to bypass the manual
     refresh limiter; the operator-facing DOS risk is the user-triggered
     per-feed endpoint.
+---
+## 2026-04-27 20:42 PDT - US-103
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Split billing form email from notification email.
+  - Added a regression that proves `POST /api/billing/checkout` does not
+    send a Resend payload to `body.email = 'attacker@example.com'`.
+  - Added a separate `billing_contact_email:*` KV key for
+    Autumn-returned customer emails used by subscription/payment
+    notifications.
+  - Kept `billing_pending_email:*` as the request-body email used for
+    Autumn binding only.
+- Files changed:
+  - `src/server/index.ts`
+  - `test/signup.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Billing notification recipients should resolve only from
+    `billing_contact_email:*`, which is populated from Autumn
+    `customer.email`; do not read `billing_pending_email:*` for outbound
+    email recipients.
+  - Dev checkout may still send subscription emails when a contact email has
+    already been verified/stashed, but request-body email alone is not
+    sufficient.
 ---
