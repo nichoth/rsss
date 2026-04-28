@@ -14,9 +14,30 @@ const TEST_SESSION = {
 const GATED_DATA_ROUTES = [
     { method: 'GET', path: '/api/sync', status: 200 },
     { method: 'GET', path: '/api/feeds', status: 200 },
+    { method: 'POST', path: '/api/feeds', status: 201 },
+    { method: 'GET', path: '/api/feeds/1', status: 200 },
+    { method: 'DELETE', path: '/api/feeds/1', status: 204 },
+    { method: 'POST', path: '/api/feeds/1/refresh', status: 201 },
+    { method: 'POST', path: '/api/feeds/refresh', status: 200 },
     { method: 'GET', path: '/api/items', status: 200 },
-    { method: 'POST', path: '/api/items/mark-all-read', status: 204 },
-    { method: 'POST', path: '/api/feeds/1/refresh', status: 201 }
+    { method: 'GET', path: '/api/items/by-route', status: 200 },
+    { method: 'GET', path: '/api/items/count', status: 200 },
+    { method: 'PATCH', path: '/api/items/1', status: 200 },
+    { method: 'POST', path: '/api/items/mark-all-read', status: 204 }
+]
+const EXPECTED_GATED_DATA_ROUTE_KEYS = [
+    'DELETE /api/feeds/1',
+    'GET /api/feeds',
+    'GET /api/feeds/1',
+    'GET /api/items',
+    'GET /api/items/by-route',
+    'GET /api/items/count',
+    'GET /api/sync',
+    'PATCH /api/items/1',
+    'POST /api/feeds',
+    'POST /api/feeds/1/refresh',
+    'POST /api/feeds/refresh',
+    'POST /api/items/mark-all-read'
 ]
 
 class MemoryKv {
@@ -63,7 +84,7 @@ function authenticatedDataRouter () {
 function makeDataEnv (
     kv:MemoryKv,
     proxied:string[],
-    statusForPath:(path:string) => number
+    statusForRoute:(routeKey:string) => number
 ) {
     return {
         USER_DO: {
@@ -73,7 +94,7 @@ function makeDataEnv (
                     const path = new URL(request.url).pathname
                     proxied.push(`${request.method} ${path}`)
                     return new Response(null, {
-                        status: statusForPath(path)
+                        status: statusForRoute(`${request.method} ${path}`)
                     })
                 }
             })
@@ -160,6 +181,14 @@ test('dataRouter applies auth before proxying to the DO', async (t) => {
     t.equal(didProxy, false)
 })
 
+test('dataRouter entitlement tests cover every data route', (t) => {
+    const covered = GATED_DATA_ROUTES.map(route => {
+        return `${route.method} ${route.path}`
+    }).sort()
+
+    t.deepEqual(covered, EXPECTED_GATED_DATA_ROUTE_KEYS)
+})
+
 test('dataRouter blocks unentitled data routes', async (t) => {
     const kv = new MemoryKv()
     const proxied:string[] = []
@@ -189,13 +218,15 @@ test('dataRouter proxies entitled data routes', async (t) => {
     const kv = new MemoryKv()
     const proxied:string[] = []
     const router = authenticatedDataRouter()
-    const expectedByPath = new Map(
-        GATED_DATA_ROUTES.map(route => [route.path, route.status])
+    const expectedByRoute = new Map(
+        GATED_DATA_ROUTES.map(route => {
+            return [`${route.method} ${route.path}`, route.status]
+        })
     )
     const env = makeDataEnv(
         kv,
         proxied,
-        path => expectedByPath.get(path) ?? 500
+        routeKey => expectedByRoute.get(routeKey) ?? 500
     )
 
     await kv.put(billingCacheKey(TEST_SESSION.did), activeBilling())

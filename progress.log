@@ -262,6 +262,9 @@ Thread: https://ampcode.com/threads/unknown
   `Request` with an explicit allowlist. Forward only `content-type`,
   `cookie`, and `x-rsss-*` headers; never pass through client auth headers
   such as `Authorization`.
+- **dataRouter route test matrix**: Entitlement proxy tests should key route
+  fixtures by `METHOD path`, not path alone, because routes such as
+  `/api/feeds` support multiple methods with different expected statuses.
 - **Logout route safety**: Browser-driven logout must stay on
   `POST /api/auth/logout` with the CSRF token echo. `GET /logout`
   intentionally returns 405 so links, prefetchers, or image loads cannot
@@ -2969,4 +2972,25 @@ Thread: https://ampcode.com/threads/unknown
     pushSync and pullSync with trackStatus disabled.
   - Typed auth and billing errors are control-flow errors for state.ts; they
     should not be converted into syncError updates inside runSync.
+---
+## 2026-04-27 22:17 PDT - US-116
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Expanded billing entitlement gate coverage.
+  - Added a route-matrix coverage assertion for every Durable Object data
+    route exposed through `dataRouter`.
+  - Expanded unauthenticated billing-gate regressions so every data route
+    returns 402 and does not reach the Durable Object when entitlement is
+    missing.
+  - Expanded entitled regressions so every data route reaches the Durable
+    Object and preserves the method-specific proxied status.
+- Files changed:
+  - `test/api-router.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `dataRouter` entitlement tests should cover the Durable Object data route
+    matrix, including direct feed/item reads and writes beyond the common
+    `/api/sync`, `/api/feeds`, and `/api/items` paths.
+  - Test proxy fixtures must use `METHOD path` keys because GET, POST, and
+    DELETE routes can share the same path while expecting different statuses.
 ---
