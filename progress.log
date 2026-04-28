@@ -223,6 +223,10 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **CORS app origin allowlist**: Server CORS must echo request origins only
+  when `origin === env.APP_ORIGIN`. Do not fall back to request origin or a
+  hardcoded production origin; missing `APP_ORIGIN` is a config error even in
+  test/dev health-check coverage.
 - **Credentialless isolation scope**: `withIsolationHeaders` should add
   COOP/COEP only to documents and JavaScript. Cross-origin image responses
   are left undecorated; the embedding document's
@@ -2531,4 +2535,24 @@ Thread: https://ampcode.com/threads/unknown
   - `withIsolationHeaders` should keep isolation headers scoped to documents
     and JavaScript; image responses rely on the embedding document's
     `Cross-Origin-Embedder-Policy: credentialless` behavior.
+---
+
+## 2026-04-27 20:13 PDT - US-098
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Tightened the server CORS allowlist and APP_ORIGIN
+  config gate.
+  - Removed the hardcoded production-origin runtime fallback.
+  - CORS now echoes only the exact `env.APP_ORIGIN` value.
+  - Health-check config validation now fails when `APP_ORIGIN` is missing.
+  - Added regressions for missing `APP_ORIGIN` and non-allowlisted origins.
+- Files changed:
+  - `src/server/index.ts`
+  - `test/api-router.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - CORS allowlist checks should depend only on `env.APP_ORIGIN`; same-origin
+    request URLs are not an implicit CORS allowlist entry.
+  - Keep missing `APP_ORIGIN` visible through `/api/health` so deploy
+    misconfiguration is caught before relying on API CORS behavior.
 ---

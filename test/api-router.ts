@@ -181,23 +181,73 @@ test('api CORS only allows the configured app origin', (t) => {
     t.equal(
         isAllowedRequestOrigin(
             'https://rsss.space',
-            'https://rsss.space/api/health'
+            'https://preview.example/api/health',
+            'https://rsss.space'
         ),
         true
     )
     t.equal(
         isAllowedRequestOrigin(
-            'https://rsss.space',
-            'https://preview.example/api/health'
+            'https://preview.example',
+            'https://preview.example/api/health',
+            'https://rsss.space'
         ),
-        true
+        false
     )
     t.equal(
         isAllowedRequestOrigin(
             'https://evil.example',
-            'https://rsss.space/api/health'
+            'https://rsss.space/api/health',
+            'https://rsss.space'
         ),
         false
+    )
+})
+
+test('api CORS does not fall back when APP_ORIGIN is missing', async (t) => {
+    const res = await app.request(
+        'https://preview.example/api/health',
+        {
+            headers: {
+                origin: 'https://rsss.space'
+            }
+        },
+        {
+            NODE_ENV: 'test',
+            SESSIONS: {
+                get: async () => null
+            },
+            SESSION_SECRET: 'test-secret'
+        }
+    )
+
+    t.equal(
+        res.headers.get('Access-Control-Allow-Origin'),
+        null
+    )
+})
+
+test('api CORS rejects non-allowlisted origins', async (t) => {
+    const res = await app.request(
+        'https://rsss.space/api/health',
+        {
+            headers: {
+                origin: 'https://evil.example'
+            }
+        },
+        {
+            NODE_ENV: 'test',
+            APP_ORIGIN: 'https://rsss.space',
+            SESSIONS: {
+                get: async () => null
+            },
+            SESSION_SECRET: 'test-secret'
+        }
+    )
+
+    t.equal(
+        res.headers.get('Access-Control-Allow-Origin'),
+        null
     )
 })
 
@@ -216,7 +266,8 @@ test('cross-origin state-changing api requests are rejected', (t) => {
             'POST',
             'https://rsss.space/api/auth/logout',
             'https://rsss.space',
-            'same-origin'
+            'same-origin',
+            'https://rsss.space'
         ),
         false
     )
@@ -276,6 +327,24 @@ test('production health check fails without Autumn secret', async (t) => {
 
     t.equal(res.status, 500)
     t.equal(body.error, 'missing_autumn_secret')
+})
+
+test('health check fails without APP_ORIGIN', async (t) => {
+    const res = await app.request(
+        'https://rsss.space/api/health',
+        {},
+        {
+            NODE_ENV: 'test',
+            SESSIONS: {
+                get: async () => null
+            },
+            SESSION_SECRET: 'test-secret'
+        }
+    )
+    const body = await res.json() as { error?:string }
+
+    t.equal(res.status, 500)
+    t.equal(body.error, 'missing_app_origin')
 })
 
 test('production health check fails without app origin', async (t) => {

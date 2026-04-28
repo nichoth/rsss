@@ -183,7 +183,6 @@ type AppContext = Context<{
     Variables:Variables;
 }>
 
-const DEFAULT_APP_ORIGIN = 'https://rsss.space'
 const STATE_CHANGING_METHODS = new Set([
     'DELETE',
     'PATCH',
@@ -198,7 +197,7 @@ function productionConfigErrors (env:Env):string[] {
         errors.push('missing_autumn_secret')
     }
 
-    if (env.NODE_ENV === 'production' && !env.APP_ORIGIN) {
+    if (!env.APP_ORIGIN) {
         errors.push('missing_app_origin')
     }
 
@@ -248,11 +247,10 @@ function setCsrfCookie (c:AppContext):void {
 
 export function isAllowedRequestOrigin (
     origin:string,
-    requestUrl:string,
-    appOrigin:string = DEFAULT_APP_ORIGIN
+    _requestUrl:string,
+    appOrigin?:string
 ):boolean {
-    const requestOrigin = new URL(requestUrl).origin
-    return origin === requestOrigin || origin === appOrigin
+    return Boolean(appOrigin) && origin === appOrigin
 }
 
 export function isCrossOriginStateChange (
@@ -260,7 +258,7 @@ export function isCrossOriginStateChange (
     requestUrl:string,
     origin:string|null|undefined,
     fetchSite:string|null|undefined,
-    appOrigin:string = DEFAULT_APP_ORIGIN
+    appOrigin?:string
 ):boolean {
     if (!isStateChangingMethod(method)) return false
     if (!origin && !fetchSite) return true
@@ -292,7 +290,7 @@ function allowedCorsOrigin (
 ):string|null {
     const appContext = c as AppContext
     if (!origin) return null
-    const appOrigin = appContext.env.APP_ORIGIN || DEFAULT_APP_ORIGIN
+    const appOrigin = appContext.env.APP_ORIGIN
     return isAllowedRequestOrigin(origin, appContext.req.url, appOrigin) ?
         origin :
         null
@@ -304,7 +302,7 @@ const rejectCrossOriginStateChanges = async (
 ) => {
     const origin = c.req.header('origin')
     const fetchSite = c.req.header('sec-fetch-site')
-    const appOrigin = c.env.APP_ORIGIN || DEFAULT_APP_ORIGIN
+    const appOrigin = c.env.APP_ORIGIN
     const path = new URL(c.req.url).pathname
 
     if (
