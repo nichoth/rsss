@@ -1,12 +1,14 @@
 import { describeLocalDbError } from './sqlite-init.js'
 import {
     PullSyncAuthError,
+    SyncBillingError,
     pullSync
 } from './pull-sync.js'
 import {
     getDeadLetterOutboxCount,
     getOutboxCount,
     PushSyncAuthError,
+    PushSyncBillingError,
     pushSync
 } from './push-sync.js'
 import {
@@ -120,7 +122,9 @@ async function runSyncCycle (
         if (isCancellation(db, err)) return
         if (
             err instanceof PullSyncAuthError ||
-            err instanceof PushSyncAuthError
+            err instanceof PushSyncAuthError ||
+            err instanceof SyncBillingError ||
+            err instanceof PushSyncBillingError
         ) {
             throw err
         }

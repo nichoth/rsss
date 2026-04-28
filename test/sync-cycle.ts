@@ -1,4 +1,5 @@
 import { test } from '@substrate-system/tapzero'
+import { effect } from '@preact/signals'
 // @ts-expect-error -- no type declarations for .wasm imports
 import wasmUrl from '@sqlite.org/sqlite-wasm/sqlite3.wasm'
 import {
@@ -6,6 +7,10 @@ import {
     setTestMode
 } from '../src/client/db/sqlite-init.js'
 import { runSync } from '../src/client/db/sync.js'
+import {
+    PullSyncAuthError,
+    SyncBillingError
+} from '../src/client/db/pull-sync.js'
 import {
     isLocalFirstActive,
     syncDeadLetters,
@@ -16,6 +21,32 @@ import {
 } from '../src/client/db/sync-status.js'
 
 setTestMode(true, wasmUrl as string)
+
+interface SyncErrorWatch {
+    count:() => number
+    stop:() => void
+}
+
+function resetTrackedSyncStatus ():void {
+    isLocalFirstActive.value = true
+    syncStatus.value = 'idle'
+    syncedAt.value = null
+    syncPending.value = 0
+    syncDeadLetters.value = 0
+    syncError.value = null
+}
+
+function watchSyncErrorWrites ():SyncErrorWatch {
+    let writes = 0
+    const stop = effect(() => {
+        if (syncError.value !== null) writes++
+    })
+
+    return {
+        count: () => writes,
+        stop
+    }
+}
 
 test('runSync pushes pending writes before pulling server state',
     async (t) => {
@@ -270,6 +301,137 @@ test('runSync coalesces concurrent callers before transactional push',
             t.equal(pullCalls, 1, 'only one pull request is sent')
         } finally {
             db.close()
+        }
+    }
+)
+
+test('runSync surfaces pull network errors through one sync error update',
+    async (t) => {
+        const db = await openLocalDb('did:test:sync-cycle-pull-network')
+
+        resetTrackedSyncStatus()
+        const errorWrites = watchSyncErrorWrites()
+
+        try {
+            try {
+                await runSync(db, async () => {
+                    throw new Error('network unavailable')
+                })
+                t.fail('runSync rejects when pull network fetch fails')
+            } catch (err) {
+                t.ok(err instanceof Error, 'pull network failure rejects')
+            }
+
+            t.equal(syncStatus.value, 'error', 'sync status is error')
+            t.equal(
+                syncError.value,
+                'network unavailable',
+                'pull network failure reaches the UI error signal'
+            )
+            t.equal(errorWrites.count(), 1, 'sets one UI error')
+        } finally {
+            errorWrites.stop()
+            isLocalFirstActive.value = false
+            db.close()
+        }
+    }
+)
+
+test('runSync surfaces push non-auth errors through one sync error update',
+    async (t) => {
+        const db = await openLocalDb('did:test:sync-cycle-push-error')
+
+        resetTrackedSyncStatus()
+        const errorWrites = watchSyncErrorWrites()
+
+        try {
+            db.exec({
+                sql: `INSERT INTO outbox
+                    (op, target_id, payload, client_op_id,
+                     client_updated_at)
+                    VALUES ('add_feed', NULL, '{', 'op-bad-payload',
+                        '2026-01-03 00:00:00')`
+            })
+
+            try {
+                await runSync(db, async () => {
+                    t.fail('invalid push payload fails before fetch')
+                    return new Response(JSON.stringify({}))
+                })
+                t.fail('runSync rejects when pushSync throws')
+            } catch (err) {
+                t.ok(err instanceof SyntaxError, 'push failure rejects')
+            }
+
+            t.equal(syncStatus.value, 'error', 'sync status is error')
+            t.ok(
+                syncError.value?.includes('JSON'),
+                'push failure reaches the UI error signal'
+            )
+            t.equal(errorWrites.count(), 1, 'sets one UI error')
+        } finally {
+            errorWrites.stop()
+            isLocalFirstActive.value = false
+            db.close()
+        }
+    }
+)
+
+test('runSync lets auth and billing errors escape without UI error',
+    async (t) => {
+        const authDb = await openLocalDb('did:test:sync-cycle-auth-error')
+        const billingDb = await openLocalDb(
+            'did:test:sync-cycle-billing-error'
+        )
+
+        resetTrackedSyncStatus()
+        const errorWrites = watchSyncErrorWrites()
+
+        try {
+            try {
+                await runSync(authDb, async () => new Response(null, {
+                    status: 401
+                }))
+                t.fail('runSync rejects on auth failure')
+            } catch (err) {
+                t.ok(
+                    err instanceof PullSyncAuthError,
+                    'auth failure keeps its typed error'
+                )
+            }
+
+            t.equal(syncError.value, null, 'auth failure sets no UI error')
+            t.equal(errorWrites.count(), 0, 'auth failure is not surfaced')
+
+            resetTrackedSyncStatus()
+
+            try {
+                await runSync(billingDb, async () => new Response(null, {
+                    status: 402
+                }))
+                t.fail('runSync rejects on billing failure')
+            } catch (err) {
+                t.ok(
+                    err instanceof SyncBillingError,
+                    'billing failure keeps its typed error'
+                )
+            }
+
+            t.equal(
+                syncError.value,
+                null,
+                'billing failure sets no UI error'
+            )
+            t.equal(
+                errorWrites.count(),
+                0,
+                'billing failure is not surfaced'
+            )
+        } finally {
+            errorWrites.stop()
+            isLocalFirstActive.value = false
+            authDb.close()
+            billingDb.close()
         }
     }
 )

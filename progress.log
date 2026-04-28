@@ -241,6 +241,10 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **runSync status ownership**: `runSync` calls `pushSync` and `pullSync`
+  with `trackStatus: false` and owns steady-state UI sync errors. Typed auth
+  and billing errors should pass through so `state.ts` can route to login or
+  refresh billing status without setting `syncError`.
 - **State startup sync in tests**: Setting `state.user.value` can trigger the
   auth effect's initial local-first `runSync`. Online-event tests that need
   to own an in-flight sync window should let startup settle before swapping
@@ -2947,4 +2951,22 @@ Thread: https://ampcode.com/threads/unknown
     consistent across bootstrap and steady-state sync.
   - Tapout browser test commands share a fixed local port; run focused
     browser suites serially instead of in parallel.
+---
+## 2026-04-27 22:06 PDT - US-115
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added runSync UI-error plumbing coverage.
+  - Added sync-cycle regressions for pull network failures, push non-auth
+    failures, and typed auth/billing pass-through behavior.
+  - Updated runSync so SyncBillingError and PushSyncBillingError escape
+    without setting the steady-state sync error signal.
+- Files changed:
+  - `src/client/db/sync.ts`
+  - `test/sync-cycle.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - runSync centralizes steady-state sync error UI updates while calling
+    pushSync and pullSync with trackStatus disabled.
+  - Typed auth and billing errors are control-flow errors for state.ts; they
+    should not be converted into syncError updates inside runSync.
 ---
