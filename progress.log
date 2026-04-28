@@ -20,6 +20,7 @@ Thread: https://ampcode.com/threads/unknown
     CASCADE`, never delete an optimistic feed row before preserving or
     reattaching its local items.
 ---
+
 ## 2026-04-27 17:40 PDT - US-084
 Thread: https://ampcode.com/threads/unknown
 - What was implemented: Gated the online sync handler on active local-first.
@@ -222,6 +223,11 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Credentialless isolation scope**: `withIsolationHeaders` should add
+  COOP/COEP only to documents and JavaScript. Cross-origin image responses
+  are left undecorated; the embedding document's
+  `Cross-Origin-Embedder-Policy: credentialless` is what makes browser
+  image subresource requests omit auth cookies.
 - **CSRF double-submit requests**: State-changing client requests must echo
   the readable `csrf_token` cookie in the `X-CSRF-Token` header. The main
   `State` API client and `remoteAdapter` both install this through ky
@@ -2501,4 +2507,28 @@ Thread: https://ampcode.com/threads/unknown
   - Any Node integration test that manually sets an authenticated session
     cookie for POST/PATCH/PUT/DELETE must also include the matching
     `X-CSRF-Token` header and same-origin fetch context.
+---
+
+## 2026-04-27 20:08 PDT - US-097
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Documented and tested COEP credentialless behavior.
+  - Added an inline comment to `withIsolationHeaders` explaining that
+    `credentialless` keeps cross-origin isolation for embeds while browser
+    cross-origin image subresource requests omit auth cookies.
+  - Added a static regression test for the credentialless comment and a
+    header test that image responses are not decorated with document
+    isolation headers.
+  - Wired the static header regression into focused and full test runners.
+- Files changed:
+  - `src/server/isolation-headers.ts`
+  - `test/isolation-headers-static.mjs`
+  - `test/server-headers.ts`
+  - `test/run-header-tests.mjs`
+  - `test/run-all-tests.mjs`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `withIsolationHeaders` should keep isolation headers scoped to documents
+    and JavaScript; image responses rely on the embedding document's
+    `Cross-Origin-Embedder-Policy: credentialless` behavior.
 ---

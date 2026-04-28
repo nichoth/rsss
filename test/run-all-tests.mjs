@@ -14,6 +14,7 @@ const commands = [
     'node test/local-first-docs.mjs',
     'node test/vite-build-inputs.mjs',
     'node test/vite-isolation-headers.mjs',
+    'node test/isolation-headers-static.mjs',
     [
         'esbuild ./test/index.ts --bundle',
         '--alias:cloudflare:workers=./test/cloudflare-workers-stub.ts',
