@@ -21,6 +21,7 @@ import {
     resetTabCoordinationForTests,
     setLocalTabBlocked
 } from '../src/client/db/tab-coordination.js'
+import { isLocalFirstActive } from '../src/client/db/sync-status.js'
 import { syncSubscriptions } from '../src/client/local-first-settings.js'
 import { billingStatus } from '../src/client/billing-status.js'
 import { State, type AppState } from '../src/client/state.js'
@@ -390,6 +391,74 @@ test('online sync refreshes lists, counts, and the route item',
             State.loadCounts = originals.loadCounts
             State.loadItemByRoute = originals.loadItemByRoute
             globalThis.fetch = originals.fetch
+            setSQLiteWorkerClientFactoryForTests(null)
+            _resetAdapterCache()
+            _resetSupportedCache()
+            syncSubscriptions.value = false
+            resetTabCoordinationForTests()
+        }
+    })
+
+test('online event skips sync when local-first is inactive',
+    async t => {
+        const originals = {
+            checkAuth: State.checkAuth,
+            loadBillingStatus: State.loadBillingStatus,
+            loadFeeds: State.loadFeeds,
+            loadItems: State.loadItems,
+            loadCounts: State.loadCounts,
+            fetch: globalThis.fetch
+        }
+        const did = 'did:plc:online-inactive'
+        let syncCalls = 0
+
+        setupLocalFirstForStateTest()
+        await getAdapter(did)
+        globalThis.fetch = async (input, init) => {
+            const url = input instanceof Request ?
+                input.url :
+                input.toString()
+            if (!init?.method && url.includes('/api/sync')) {
+                syncCalls++
+                return emptySyncFetch()(input, init)
+            }
+            return originals.fetch.call(globalThis, input, init)
+        }
+
+        State.checkAuth = async () => {}
+        State.loadBillingStatus = async () => null
+        State.loadFeeds = async () => {}
+        State.loadItems = async () => {}
+        State.loadCounts = async () => {}
+
+        try {
+            const state = State()
+            state.user.value = {
+                did,
+                handle: 'online-inactive.test'
+            }
+            await settleOnlineHandler()
+            syncCalls = 0
+            isLocalFirstActive.value = false
+
+            window.dispatchEvent(new Event('online'))
+            await settleOnlineHandler()
+
+            t.equal(
+                syncCalls,
+                0,
+                'inactive local-first skips online sync'
+            )
+
+            state.cleanup()
+        } finally {
+            State.checkAuth = originals.checkAuth
+            State.loadBillingStatus = originals.loadBillingStatus
+            State.loadFeeds = originals.loadFeeds
+            State.loadItems = originals.loadItems
+            State.loadCounts = originals.loadCounts
+            globalThis.fetch = originals.fetch
+            isLocalFirstActive.value = false
             setSQLiteWorkerClientFactoryForTests(null)
             _resetAdapterCache()
             _resetSupportedCache()

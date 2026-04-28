@@ -20,6 +20,24 @@ Thread: https://ampcode.com/threads/unknown
     CASCADE`, never delete an optimistic feed row before preserving or
     reattaching its local items.
 ---
+## 2026-04-27 17:40 PDT - US-084
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Gated the online sync handler on active local-first.
+  - Added a regression test that keeps a cached local DB available, marks
+    local-first inactive, dispatches `online`, and asserts no `/api/sync`
+    request is made.
+  - Updated `handleOnline` to return before DB lookup and sync when
+    `isLocalFirstActive.value` is false.
+- Files changed:
+  - `src/client/state.ts`
+  - `test/state-auth-storage.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Online-event tests should cover the cached-DB-but-inactive state, not
+    only `syncSubscriptions.value = false`; `getLocalDb` can still expose a
+    handle while state-level sync is being torn down.
+---
 
 ## 2026-04-24 - US-017
 - What was implemented: Reset/disable flow for local-first mode.
@@ -129,6 +147,10 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **State-level sync active gate**: Window `online` handlers should check
+  `isLocalFirstActive.value` before looking up a cached DB or calling
+  `runSync`. A cached local DB can briefly outlive the active UI state during
+  disable/reset flows.
 - **runSync concurrency**: App-level sync triggers should call `runSync`,
   not `pushSync`/`pullSync` directly. `runSync` owns the per-DB in-flight
   promise mutex so auth effects, online events, and manual triggers coalesce

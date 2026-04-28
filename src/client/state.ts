@@ -358,6 +358,7 @@ export function State ():AppState {
 
     const handleOnline = () => {
         updateOnlineStatus()
+        if (!isLocalFirstActive.value) return
         const did = state.user.value?.did
         const db = getLocalDb(did)
         if (db) {
