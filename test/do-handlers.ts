@@ -91,9 +91,17 @@ function createDoHarness () {
     const sql = createSql()
     const refreshed:number[] = []
     const waitUntilPromises:Promise<unknown>[] = []
+    const storage = new Map<string, unknown>()
     const userDo = Object.create(UserDO.prototype) as {
         sql:ReturnType<typeof createSql>
-        ctx:{ waitUntil:(promise:Promise<unknown>) => void }
+        ctx:{
+            storage:{
+                get:<T>(key:string) => Promise<T|undefined>
+                put:(key:string, value:unknown) => Promise<void>
+                delete:(key:string) => Promise<void>
+            }
+            waitUntil:(promise:Promise<unknown>) => void
+        }
         fetchFeed:(feed:FeedRow) => Promise<void>
         createRouter:() => { request:(path:string, init?:RequestInit) =>
             Promise<Response> }
@@ -101,6 +109,17 @@ function createDoHarness () {
 
     userDo.sql = sql
     userDo.ctx = {
+        storage: {
+            async get<T> (key:string) {
+                return storage.get(key) as T|undefined
+            },
+            async put (key:string, value:unknown) {
+                storage.set(key, value)
+            },
+            async delete (key:string) {
+                storage.delete(key)
+            }
+        },
         waitUntil (promise) {
             waitUntilPromises.push(promise)
         }
@@ -113,6 +132,7 @@ function createDoHarness () {
         app: userDo.createRouter(),
         sql,
         refreshed,
+        storage,
         waitUntilPromises
     }
 }
@@ -160,6 +180,20 @@ test('UserDO feed handlers list create and refresh feeds', async t => {
     t.equal(refreshResponse.status, 200, 'refresh returns 200')
     t.equal(refreshBody.success, true, 'refresh reports success')
     t.deepEqual(refreshed, [3, 3], 'created feed is refreshed')
+})
+
+test('UserDO manual feed refresh is rate limited per feed', async t => {
+    const { app, refreshed, storage } = createDoHarness()
+    const responses = await Promise.all(Array.from({ length: 100 }, () => {
+        return app.request('/feeds/1/refresh', { method: 'POST' })
+    }))
+    const body = await responses[0].json() as { success:boolean }
+
+    t.equal(responses[0].status, 200, 'first refresh returns 200')
+    t.equal(body.success, true, 'first refresh reports success')
+    t.equal(refreshed.length, 1, 'rapid refreshes fetch the feed once')
+    t.equal(refreshed[0], 1, 'the requested feed is refreshed')
+    t.equal(storage.size, 1, 'manual refresh timestamp is stored')
 })
 
 test(

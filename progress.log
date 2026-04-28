@@ -222,6 +222,11 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Manual feed refresh rate limits**: `/feeds/:id/refresh` should claim the
+  per-feed manual refresh slot before validation or outbound fetch. Keep the
+  in-memory claim for rapid same-instance requests and the DO storage
+  `last_manual_refresh_at` record for hibernation persistence; alarm and
+  bulk refresh paths stay outside this manual limit.
 - **LWW client timestamps**: Durable Object mutating routes must pass
   `client_updated_at` through `lwwClientUpdatedAt()` before any
   `resolveLwwWrite()` call or SQL `updated_at > ?` comparison. That helper
@@ -2629,4 +2634,28 @@ Thread: https://ampcode.com/threads/unknown
     `updated_at` values.
   - `mark-all-read` does not call `resolveLwwWrite()`; it performs SQL
     `updated_at > ?` checks and must receive the clamped timestamp too.
+---
+
+## 2026-04-27 20:36 PDT - US-102
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added a per-feed manual refresh rate limit.
+  - `POST /feeds/:id/refresh` now claims a 60-second per-feed refresh slot
+    before validation or outbound feed fetch.
+  - The limiter stores `last_manual_refresh_at` in Durable Object storage and
+    also keeps an in-memory claim to collapse rapid same-instance requests.
+  - Rate-limited manual refreshes return 429 with `Retry-After`.
+  - Added a regression test proving 100 rapid manual refresh requests trigger
+    only one outbound `fetchFeed`.
+- Files changed:
+  - `src/server/durable-objects/index.ts`
+  - `test/do-handlers.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Manual refresh limiting needs both persisted DO storage state and a
+    synchronous in-memory claim because rapid requests can reach the first
+    awaited storage read before persistence completes.
+  - Alarm and bulk feed refresh paths should continue to bypass the manual
+    refresh limiter; the operator-facing DOS risk is the user-triggered
+    per-feed endpoint.
 ---

@@ -71,6 +71,8 @@ const FEED_XML_PARSER = new XMLParser({
 })
 const FEED_REFRESH_CONCURRENCY = 8
 const FEED_REFRESH_INTERVAL_MS = 10 * 60 * 1000
+const MANUAL_REFRESH_LIMIT_MS = 60 * 1000
+const MANUAL_REFRESH_STORAGE_PREFIX = 'manual_refresh:'
 const ALARM_REFRESH_CURSOR_KEY = 'alarm_refresh_cursor'
 const MIGRATION_STATE_KEY = 'schema_migration'
 const USER_DO_MIGRATION_VERSION = 2
@@ -109,6 +111,14 @@ interface MigrationState {
 
 interface AlarmRefreshCursor {
     last_feed_id?:number
+}
+
+interface ManualRefreshState {
+    last_manual_refresh_at?:number
+}
+
+interface ManualRefreshLimit {
+    retryAfterSeconds:number
 }
 
 type SyncRowKind = 'feed' | 'item'
@@ -227,6 +237,27 @@ function lwwClientUpdatedAt (value:string|undefined):string|undefined {
     return result.clientUpdatedAt
 }
 
+function manualRefreshStorageKey (feedId:number):string {
+    return `${MANUAL_REFRESH_STORAGE_PREFIX}${feedId}`
+}
+
+function isRecentManualRefresh (
+    refreshedAt:number|undefined,
+    now:number
+):boolean {
+    return typeof refreshedAt === 'number' &&
+        Number.isFinite(refreshedAt) &&
+        now - refreshedAt < MANUAL_REFRESH_LIMIT_MS
+}
+
+function manualRefreshRetryAfterSeconds (
+    refreshedAt:number,
+    now:number
+):number {
+    const remainingMs = MANUAL_REFRESH_LIMIT_MS - (now - refreshedAt)
+    return Math.max(1, Math.ceil(remainingMs / 1000))
+}
+
 /**
  * Store feeds and items for a single user.
  * Each user gets their own DO with its own SQLite database.
@@ -239,6 +270,7 @@ function lwwClientUpdatedAt (value:string|undefined):string|undefined {
 export class UserDO extends DurableObject<Env> {
     private app: Hono
     private sql: SqlStorage
+    private manualRefreshClaims?:Map<number, number>
 
     constructor (ctx: DurableObjectState, env: Env) {
         super(ctx, env)
@@ -510,6 +542,18 @@ export class UserDO extends DurableObject<Env> {
 
             if (!feed) {
                 return c.json({ error: 'Feed not found' }, 404)
+            }
+
+            const limit = await this.claimManualFeedRefresh(feed.id)
+            if (limit) {
+                const response = c.json({
+                    error: 'Feed refresh rate limited'
+                }, 429)
+                response.headers.set(
+                    'Retry-After',
+                    String(limit.retryAfterSeconds)
+                )
+                return response
             }
 
             try {
@@ -1188,6 +1232,53 @@ export class UserDO extends DurableObject<Env> {
      */
     async fetch (request: Request): Promise<Response> {
         return this.app.fetch(request)
+    }
+
+    private getManualRefreshClaims ():Map<number, number> {
+        if (!this.manualRefreshClaims) {
+            this.manualRefreshClaims = new Map()
+        }
+
+        return this.manualRefreshClaims
+    }
+
+    private async claimManualFeedRefresh (
+        feedId:number,
+        now = Date.now()
+    ):Promise<ManualRefreshLimit|null> {
+        const claims = this.getManualRefreshClaims()
+        const claimedAt = claims.get(feedId)
+
+        if (isRecentManualRefresh(claimedAt, now)) {
+            return {
+                retryAfterSeconds: manualRefreshRetryAfterSeconds(
+                    claimedAt as number,
+                    now
+                )
+            }
+        }
+
+        claims.set(feedId, now)
+
+        const key = manualRefreshStorageKey(feedId)
+        const stored = await this.ctx.storage.get<ManualRefreshState>(key)
+        const storedAt = stored?.last_manual_refresh_at
+
+        if (isRecentManualRefresh(storedAt, now)) {
+            claims.set(feedId, storedAt as number)
+            return {
+                retryAfterSeconds: manualRefreshRetryAfterSeconds(
+                    storedAt as number,
+                    now
+                )
+            }
+        }
+
+        await this.ctx.storage.put(key, {
+            last_manual_refresh_at: now
+        })
+
+        return null
     }
 
     /**
