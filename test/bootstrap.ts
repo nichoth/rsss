@@ -1,7 +1,13 @@
 import { test } from '@substrate-system/tapzero'
+import sqlite3Module from '@sqlite.org/sqlite-wasm'
 // @ts-expect-error -- no type declarations for .wasm imports
 import wasmUrl from '@sqlite.org/sqlite-wasm/sqlite3.wasm'
+import { SCHEMA_SQL, DEAD_LETTER_OUTBOX_SQL } from
+    '../src/shared/schema.js'
+import { OUTBOX_SQL, SYNC_META_SQL } from
+    '../src/client/db/local-schema.js'
 import {
+    getOpfsFilename,
     setSQLiteWorkerClientFactoryForTests,
     setTestMode
 } from '../src/client/db/sqlite-init.js'
@@ -41,6 +47,126 @@ import {
 import type { Sqlite3Db } from '../src/client/db/sqlite-init.js'
 import type { SQLiteWorkerClient } from
     '../src/client/db/sqlite-worker-client.js'
+import type {
+    SqliteWorkerBindValue,
+    SqliteWorkerOpenOptions
+} from '../src/client/db/sqlite-worker-protocol.js'
+
+type SqliteModule = (
+    opts:{ locateFile:() => string }
+) => Promise<{
+    oo1:{ DB:new (filename:string) => PersistentDb }
+}>
+
+type PersistentDbExecArg =
+    string |
+    {
+        sql:string
+        bind?:SqliteWorkerBindValue[]
+        rowMode?:'object'
+        resultRows?:Record<string, unknown>[]
+    }
+
+interface PersistentDb {
+    exec:(arg:PersistentDbExecArg) => void
+    close:() => void
+}
+
+let sqlitePromise:ReturnType<SqliteModule>|null = null
+
+function getSqlite ():ReturnType<SqliteModule> {
+    if (!sqlitePromise) {
+        const init = sqlite3Module as unknown as SqliteModule
+        sqlitePromise = init({ locateFile: () => wasmUrl as string })
+    }
+    return sqlitePromise
+}
+
+async function createPersistentDb ():Promise<PersistentDb> {
+    const sqlite = await getSqlite()
+    const db = new sqlite.oo1.DB(':memory:')
+    applySchema(db)
+    return db
+}
+
+function applySchema (db:PersistentDb):void {
+    db.exec('PRAGMA foreign_keys = ON;')
+    db.exec(SCHEMA_SQL)
+    db.exec(OUTBOX_SQL)
+    db.exec(DEAD_LETTER_OUTBOX_SQL)
+    db.exec(SYNC_META_SQL)
+}
+
+class PersistentSQLiteClient {
+    db:PersistentDb|null = null
+    filename:string|null = null
+    private files:Map<string, PersistentDb>
+
+    constructor (files:Map<string, PersistentDb>) {
+        this.files = files
+    }
+
+    async probe ():Promise<void> {}
+
+    async open (opts:SqliteWorkerOpenOptions):Promise<void> {
+        const filename = opts.filename || (
+            opts.did ? getOpfsFilename(opts.did) : ''
+        )
+        if (!filename) throw new Error('test worker requires a filename')
+
+        let db = this.files.get(filename)
+        if (!db) {
+            db = await createPersistentDb()
+            this.files.set(filename, db)
+        } else {
+            applySchema(db)
+        }
+
+        this.filename = filename
+        this.db = db
+    }
+
+    async exec (
+        sql:string,
+        bind?:SqliteWorkerBindValue[]
+    ):Promise<void> {
+        const db = this.getDb()
+        if (!bind || bind.length === 0) {
+            db.exec(sql)
+            return
+        }
+        db.exec({ sql, bind })
+    }
+
+    async query<T extends Record<string, unknown>> (
+        sql:string,
+        bind?:SqliteWorkerBindValue[]
+    ):Promise<T[]> {
+        const rows:Record<string, unknown>[] = []
+        this.getDb().exec({
+            sql,
+            bind: bind && bind.length > 0 ? bind : undefined,
+            rowMode: 'object',
+            resultRows: rows
+        })
+        return rows as T[]
+    }
+
+    async close ():Promise<void> {
+        this.db = null
+        this.filename = null
+    }
+
+    dispose ():void {
+        this.db = null
+        this.filename = null
+    }
+
+    private getDb ():PersistentDb {
+        if (!this.db) throw new Error('persistent test DB is not open')
+        return this.db
+    }
+}
 
 setTestMode(true, wasmUrl as string)
 
@@ -86,6 +212,65 @@ function setupSupportedLocalFirst ():void {
         value: true,
         configurable: true
     })
+}
+
+function setupPersistentLocalFirst (
+    files:Map<string, PersistentDb>,
+    removed:string[] = []
+):void {
+    _resetSupportedCache()
+    _resetAdapterCache()
+    resetTabCoordinationForTests()
+    syncSubscriptions.value = true
+    billingStatus.value = {
+        entitled: true,
+        planId: 'local-first',
+        status: 'active',
+        refreshedAt: Date.now(),
+        useLive: false
+    }
+    setTestMode(false)
+    setSQLiteWorkerClientFactoryForTests(() => (
+        new PersistentSQLiteClient(files) as unknown as SQLiteWorkerClient
+    ))
+    Object.defineProperty(navigator, 'storage', {
+        value: {
+            getDirectory: async () => ({
+                getDirectoryHandle: async () => ({
+                    removeEntry: async (name:string) => {
+                        removed.push(name)
+                        files.delete(name)
+                    }
+                })
+            })
+        },
+        configurable: true
+    })
+    Object.defineProperty(navigator, 'locks', {
+        value: undefined,
+        configurable: true
+    })
+    Object.defineProperty(globalThis, 'crossOriginIsolated', {
+        value: true,
+        configurable: true
+    })
+    Object.defineProperty(globalThis, 'FileSystemSyncAccessHandle', {
+        value: function FileSystemSyncAccessHandle () {},
+        configurable: true
+    })
+    Object.defineProperty(navigator, 'onLine', {
+        value: true,
+        configurable: true
+    })
+}
+
+function teardownPersistentLocalFirst ():void {
+    setSQLiteWorkerClientFactoryForTests(null)
+    setTestMode(true, wasmUrl as string)
+    clearBootstrappedDb()
+    _resetAdapterCache()
+    _resetSupportedCache()
+    resetTabCoordinationForTests()
 }
 
 function makeFetch (body:unknown, status = 200):typeof fetch {
@@ -172,6 +357,21 @@ function seedOutbox (db:Sqlite3Db):void {
                 '2026-01-03 00:00:00')`,
         bind: [JSON.stringify({ id: 10, is_read: true })]
     })
+}
+
+function persistentQueryAll<T> (
+    db:PersistentDb,
+    sql:string,
+    bind?:unknown[]
+):T[] {
+    const rows:T[] = []
+    db.exec({
+        sql,
+        bind: bind as SqliteWorkerBindValue[]|undefined,
+        rowMode: 'object',
+        resultRows: rows as Record<string, unknown>[]
+    })
+    return rows
 }
 
 async function catchError (fn:() => Promise<void>):Promise<unknown> {
@@ -364,6 +564,188 @@ test('bootstrapLocalDb: transient fetch failure keeps local-first retryable',
 
         getBootstrappedDb()?.close()
         clearBootstrappedDb()
+    }
+)
+
+test('bootstrapLocalDb: interrupted bootstrap can be toggled and retried',
+    async (t) => {
+        clearBootstrappedDb()
+        const files = new Map<string, PersistentDb>()
+        setupPersistentLocalFirst(files)
+        const did = 'did:test:bootstrap-toggle-retry'
+        let calls = 0
+
+        const fetchFn = (async () => {
+            calls += 1
+            if (calls === 1) {
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async () => ({
+                        feeds: syncPayload.feeds,
+                        items: [syncPayload.items[0]],
+                        hasMore: true,
+                        nextCursor: '1',
+                        syncedAt: '2024-01-01T00:00:00Z',
+                        latestUpdatedAt: '2024-01-01T00:00:00Z',
+                        isFullSync: true
+                    })
+                } as Response
+            }
+            if (calls === 2) throw new TypeError('Failed to fetch')
+            return {
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    feeds: [],
+                    items: [syncPayload.items[1]],
+                    hasMore: false,
+                    nextCursor: null,
+                    syncedAt: '2024-01-01T00:00:00Z',
+                    latestUpdatedAt: '2024-01-01T00:00:00Z',
+                    isFullSync: true
+                })
+            } as Response
+        }) as typeof fetch
+
+        try {
+            await bootstrapLocalDb(did, fetchFn)
+
+            t.equal(syncSubscriptions.value, true,
+                'transient interruption does not auto-disable')
+            t.equal(bootstrapRetryAvailable.value, true,
+                'interruption leaves setup retryable')
+            t.equal(getBootstrappedDb(), null,
+                'interrupted db is not promoted')
+
+            syncSubscriptions.value = false
+            syncSubscriptions.value = true
+            await bootstrapLocalDb(did, fetchFn)
+
+            const db = getBootstrappedDb()
+            t.ok(db, 're-toggle retry promotes the local db')
+
+            const fileDb = files.get(getOpfsFilename(did))
+            t.ok(fileDb, 'persistent OPFS file is still present')
+            if (fileDb) {
+                const rows = persistentQueryAll<{ count:number }>(
+                    fileDb,
+                    'SELECT COUNT(*) AS count FROM items'
+                )
+                t.equal(rows[0]?.count, 2,
+                    'retry resumes and stores all bootstrap items')
+            }
+        } finally {
+            teardownPersistentLocalFirst()
+        }
+    }
+)
+
+test('bootstrapLocalDb: terminal retry removes interrupted OPFS file',
+    async (t) => {
+        clearBootstrappedDb()
+        const files = new Map<string, PersistentDb>()
+        const removed:string[] = []
+        setupPersistentLocalFirst(files, removed)
+        const did = 'did:test:bootstrap-terminal-after-interrupt'
+        const filename = getOpfsFilename(did)
+        let calls = 0
+
+        const fetchFn = (async () => {
+            calls += 1
+            if (calls === 1) {
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async () => ({
+                        feeds: syncPayload.feeds,
+                        items: [syncPayload.items[0]],
+                        hasMore: true,
+                        nextCursor: '1',
+                        syncedAt: '2024-01-01T00:00:00Z',
+                        latestUpdatedAt: '2024-01-01T00:00:00Z',
+                        isFullSync: true
+                    })
+                } as Response
+            }
+            if (calls === 2) throw new TypeError('Failed to fetch')
+            return {
+                ok: false,
+                status: 400,
+                json: async () => ({ error: 'bad request' })
+            } as Response
+        }) as typeof fetch
+
+        try {
+            await bootstrapLocalDb(did, fetchFn)
+
+            t.ok(files.has(filename),
+                'precondition: interrupted OPFS file remains for retry')
+            t.equal(syncSubscriptions.value, true,
+                'precondition: transient failure keeps local-first enabled')
+
+            await bootstrapLocalDb(did, fetchFn, {
+                confirmTerminalReset: async () => true
+            })
+
+            t.equal(syncSubscriptions.value, false,
+                'terminal retry disables local-first after confirmation')
+            t.ok(removed.includes(filename),
+                'terminal retry removes the interrupted file')
+            t.equal(files.has(filename), false,
+                'interrupted OPFS file is not left behind')
+        } finally {
+            teardownPersistentLocalFirst()
+        }
+    }
+)
+
+test('bootstrapLocalDb: leftover outbox rows do not block bootstrap',
+    async (t) => {
+        clearBootstrappedDb()
+        const files = new Map<string, PersistentDb>()
+        setupPersistentLocalFirst(files)
+        const did = 'did:test:bootstrap-leftover-outbox'
+        const filename = getOpfsFilename(did)
+
+        try {
+            const existingDb = await createPersistentDb()
+            existingDb.exec({
+                sql: `INSERT INTO outbox
+                    (op, target_id, payload, client_op_id,
+                     client_updated_at)
+                    VALUES ('update_item', 1, ?,
+                        'op-leftover-bootstrap',
+                        '2026-01-03 00:00:00')`,
+                bind: [JSON.stringify({ id: 1, is_read: true })]
+            })
+            files.set(filename, existingDb)
+
+            await bootstrapLocalDb(did, makeFetch(syncPayload))
+
+            t.equal(bootstrapError.value, null,
+                'bootstrap completes without surfacing an error')
+            t.ok(getBootstrappedDb(), 'bootstrap promotes the local db')
+
+            const fileDb = files.get(filename)
+            t.ok(fileDb, 'persistent DB still exists')
+            if (fileDb) {
+                const outbox = persistentQueryAll<{ count:number }>(
+                    fileDb,
+                    'SELECT COUNT(*) AS count FROM outbox'
+                )
+                const feeds = persistentQueryAll<{ count:number }>(
+                    fileDb,
+                    'SELECT COUNT(*) AS count FROM feeds'
+                )
+                t.equal(outbox[0]?.count, 1,
+                    'leftover outbox row is preserved')
+                t.equal(feeds[0]?.count, 1,
+                    'bootstrap still writes unprotected feed rows')
+            }
+        } finally {
+            teardownPersistentLocalFirst()
+        }
     }
 )
 

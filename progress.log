@@ -2762,3 +2762,24 @@ Thread: https://ampcode.com/threads/unknown
   - Browser `tapout` commands use a fixed port, so list focused browser
     suites serially in `test/run-all-tests.mjs`.
 ---
+## 2026-04-27 21:14 PDT - US-107
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added bootstrap interruption and resumption
+  regression tests.
+  - Added persistent worker-backed SQLite test coverage for a paged
+    bootstrap interrupted by a network failure, then retried after the user
+    re-toggles local-first.
+  - Added terminal retry coverage proving an interrupted OPFS file is removed
+    after confirmed terminal bootstrap failure.
+  - Added leftover outbox coverage proving pre-existing outbox rows do not
+    block bootstrap completion.
+- Files changed:
+  - `test/bootstrap.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Bootstrap recovery tests that need OPFS persistence should use a
+    persistent worker-backed fake instead of test-mode `:memory:` DBs, then
+    restore `setTestMode(true, wasmUrl)` and reset adapter/tab caches in
+    teardown.
+---
