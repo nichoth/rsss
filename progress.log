@@ -129,6 +129,10 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **runSync concurrency**: App-level sync triggers should call `runSync`,
+  not `pushSync`/`pullSync` directly. `runSync` owns the per-DB in-flight
+  promise mutex so auth effects, online events, and manual triggers coalesce
+  into one HTTP sync cycle.
 - **Dev-login defense in depth**: `/api/auth/dev-login` must require
   `NODE_ENV === 'development'`, a loopback request hostname, and an explicit
   `SESSION_SECRET`. Server-side regression coverage for this route lives in
@@ -387,6 +391,7 @@ Thread: https://ampcode.com/threads/unknown
   `src/client/debug-storage.ts` for app DEBUG localStorage handling. Dev and
   staging should seed the default only when missing; production should remove
   only the app-seeded default value.
+
 - **OPFS persistence browser coverage**: Tapout browser tests do not provide
   a real cross-origin-isolated OPFS environment. Use
   `setSQLiteWorkerClientFactoryForTests` with a persistent worker-backed fake
@@ -2116,4 +2121,26 @@ Thread: https://ampcode.com/threads/unknown
   - If a pull page skips a row, in-memory pagination may continue for the
     current cycle, but persisted `pull_cursor` should not move beyond the
     skipped page.
+---
+
+## 2026-04-27 17:31 PDT - US-083
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Serialized concurrent `runSync` invocations.
+  - Added a per-DB promise mutex so overlapping callers share one in-flight
+    sync cycle.
+  - Added a regression test that starts two sync cycles while the first push
+    is paused and verifies only one push and one pull request are made.
+  - Added `test/sync-cycle.ts` to the aggregate browser test bundle.
+- Files changed:
+  - `src/client/db/sync.ts`
+  - `test/sync-cycle.ts`
+  - `test/index.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - App-level sync orchestration belongs in `runSync`; direct calls to
+    `pushSync` and `pullSync` skip shared status handling and the in-flight
+    promise mutex.
+  - Focused browser tests can use `npx esbuild ... | npx tapout` when the
+    local binaries are not on the shell `PATH`.
 ---

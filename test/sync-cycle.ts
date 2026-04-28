@@ -83,6 +83,91 @@ test('runSync pushes pending writes before pulling server state',
     }
 )
 
+test('runSync coalesces concurrent callers into one HTTP cycle',
+    async (t) => {
+        const db = await openLocalDb('did:test:sync-cycle-concurrent')
+        let pushCalls = 0
+        let pullCalls = 0
+        let releaseFirstPush:() => void = () => {}
+        let firstPushStarted:() => void = () => {}
+        const firstPush = new Promise<void>((resolve) => {
+            firstPushStarted = resolve
+        })
+        const releasePush = new Promise<void>((resolve) => {
+            releaseFirstPush = resolve
+        })
+
+        try {
+            db.exec({
+                sql: `INSERT INTO feeds
+                    (id, url, title, created_at, updated_at)
+                    VALUES (1, 'https://example.com/feed', 'Feed',
+                        '2026-01-01 00:00:00',
+                        '2026-01-01 00:00:00')`
+            })
+            db.exec({
+                sql: `INSERT INTO items
+                    (id, feed_id, guid, title, link, is_read, is_starred,
+                     created_at, updated_at)
+                    VALUES (10, 1, 'guid-10', 'Item',
+                        'https://example.com/item-10', 1, 0,
+                        '2026-01-01 00:00:00',
+                        '2026-01-03 00:00:00')`
+            })
+            db.exec({
+                sql: `INSERT INTO outbox
+                    (op, target_id, payload, client_op_id,
+                     client_updated_at)
+                    VALUES ('update_item', 10, ?, 'op-concurrent',
+                        '2026-01-03 00:00:00')`,
+                bind: [JSON.stringify({ id: 10, is_read: true })]
+            })
+
+            const fetchFn:typeof fetch = async (_url, init) => {
+                if (init?.method) {
+                    pushCalls += 1
+                    if (pushCalls === 1) {
+                        firstPushStarted()
+                        await releasePush
+                    }
+                    return {
+                        ok: true,
+                        status: 200,
+                        json: async () => ({})
+                    } as Response
+                }
+
+                pullCalls += 1
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async () => ({
+                        feeds: [],
+                        items: [],
+                        syncedAt: '2026-01-04 00:00:00',
+                        latestUpdatedAt: '2026-01-04 00:00:00',
+                        isFullSync: false
+                    })
+                } as Response
+            }
+
+            const first = runSync(db, fetchFn)
+            const second = runSync(db, fetchFn)
+
+            await firstPush
+            await new Promise(resolve => setTimeout(resolve, 0))
+            releaseFirstPush()
+
+            await Promise.all([first, second])
+
+            t.equal(pushCalls, 1, 'only one push request is sent')
+            t.equal(pullCalls, 1, 'only one pull request is sent')
+        } finally {
+            db.close()
+        }
+    }
+)
+
 test('runSync marks sync done once after push and pull finish',
     async (t) => {
         const db = await openLocalDb('did:test:sync-cycle-status')
