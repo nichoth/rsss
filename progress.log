@@ -301,9 +301,10 @@ Thread: https://ampcode.com/threads/unknown
 - **Tapout browser tests**: Tapout uses a fixed local port, so focused
   browser test commands must run serially rather than in parallel.
 - **Forbidden browser headers in tests**: Chromium-based tapout tests cannot
-  set forbidden request headers such as `Origin` or `Sec-Fetch-Site`.
-  Keep security decisions in pure helpers when those headers need focused
-  regression coverage.
+  set forbidden request headers such as `Cookie`, `Origin`, or
+  `Sec-Fetch-Site`. Keep security decisions in pure helpers, and use a small
+  Hono wrapper that sets variables directly when middleware tests need
+  authenticated request context.
 - **Bounded feed reads**: `fetchFeedText` requires `response.body` and reads
   through a stream with the byte cap. Do not fall back to `response.text()`.
 - **Schema split pattern**: The shared schema exports `TABLES_SQL`, `INDEXES_SQL`, `TRIGGERS_SQL`, and `SCHEMA_SQL` (combined). The DO must apply them in order: tables → server migrations → indexes/triggers. Client (OPFS) can use `SCHEMA_SQL` directly on a fresh DB.
@@ -1959,4 +1960,25 @@ Thread: https://ampcode.com/threads/unknown
   - Tests that stub `globalThis.fetch` while opening SQLite need to pass
     non-API asset requests through to the original bound `fetch`, otherwise
     sqlite-wasm receives JSON instead of WASM bytes.
+---
+
+## 2026-04-27 17:02 PDT - US-077
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added entitlement gating for data API routes.
+  - Added `requireEntitlement` after `requireAuth` on `dataRouter`.
+  - The middleware resolves cached/live billing and returns 402 before
+    proxying when the authenticated user is not entitled.
+  - Added API-router regressions for unentitled 402 responses and entitled
+    requests continuing through to the Durable Object proxy.
+- Files changed:
+  - `src/server/index.ts`
+  - `test/api-router.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Browser-bundled tapout tests cannot set a `Cookie` request header; use
+    a small Hono wrapper that sets `session` when focused middleware tests
+    need authenticated `dataRouter` requests.
+  - `dataRouter` is the right place to enforce subscription entitlement for
+    all proxied data endpoints before Durable Object routing.
 ---

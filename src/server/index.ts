@@ -573,6 +573,31 @@ const requireAuth = async (c:Context<{
     await next()
 }
 
+const requireEntitlement = async (c:Context<{
+    Bindings:Env;
+    Variables:Variables
+}>, next:Next) => {
+    const session = c.get('session')
+
+    if (!session) {
+        return c.json({ error: 'Unauthorized' }, 401)
+    }
+
+    try {
+        const billing = await resolveBilling(c.env, session.did)
+        if (!isEntitled(billing)) {
+            return c.json({ error: 'Payment required' }, 402)
+        }
+    } catch (err) {
+        console.error('data entitlement error:', err)
+        return c.json({
+            error: 'billing_unavailable'
+        }, 503)
+    }
+
+    await next()
+}
+
 /**
  * Constant-time comparison for admin token verification.
  * Avoids early exit on mismatch to prevent timing leaks.
@@ -1017,6 +1042,7 @@ export const dataRouter = new Hono<{
 }>()
 
 dataRouter.use('*', requireAuth)
+dataRouter.use('*', requireEntitlement)
 
 /**
  * Proxy requests to user's Durable Object.
