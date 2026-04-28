@@ -129,6 +129,10 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Billing dev shortcut fail-closed**: The no-Autumn billing shortcut is
+  allowed only when `NODE_ENV === 'development'`. Tests that exercise that
+  shortcut should set `NODE_ENV` explicitly; production or test envs without
+  live Autumn config should return `503 billing_unavailable`.
 - **Cached local DB ownership**: `getLocalDb(did)` must only return the
   cached SQLite handle while `getTabCoordinationState() === 'primary'`.
   A blocked tab can still have an old cached adapter/DB from an earlier
@@ -1981,4 +1985,24 @@ Thread: https://ampcode.com/threads/unknown
     need authenticated `dataRouter` requests.
   - `dataRouter` is the right place to enforce subscription entitlement for
     all proxied data endpoints before Durable Object routing.
+---
+
+## 2026-04-27 17:06 PDT - US-078
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Gated the no-Autumn billing shortcut to development.
+  - Added a server helper that allows the direct-entitlement checkout path
+    only when `NODE_ENV === 'development'` and live Autumn is unavailable.
+  - Production checkout and checkout-return requests without live Autumn
+    config now fail closed with `503 billing_unavailable`.
+  - Added regression tests for production failure and made existing dev
+    shortcut tests set `NODE_ENV` explicitly.
+- Files changed:
+  - `src/server/index.ts`
+  - `test/signup.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Tests that depend on the no-Autumn billing shortcut should use
+    `makeEnv({ NODE_ENV: 'development' })`; the default test env is not
+    entitled by shortcut anymore.
 ---

@@ -135,6 +135,10 @@ function isEntitled (b:CachedBilling|null):boolean {
     return b.status === 'active' || b.status === 'scheduled'
 }
 
+function canUseDevBillingShortcut (env:Env):boolean {
+    return env.NODE_ENV === 'development' && !billingUseLive(env)
+}
+
 /**
  * Resolve current entitlement, refreshing from Autumn when there's
  * no cached value. Local dev (no Autumn key) treats the cached value
@@ -753,6 +757,12 @@ app.post('/api/billing/checkout', requireAuth, async (c) => {
     // the success email here exercises the full Resend path
     // without a real card.
     if (!billingUseLive(c.env)) {
+        if (!canUseDevBillingShortcut(c.env)) {
+            return c.json({
+                error: 'billing_unavailable'
+            }, 503)
+        }
+
         const billing:CachedBilling = {
             planId,
             status: 'active',
@@ -849,6 +859,12 @@ app.post(
         // Dev mode: there is no Autumn round-trip, just confirm
         // whatever's already cached.
         if (!billingUseLive(c.env)) {
+            if (!canUseDevBillingShortcut(c.env)) {
+                return c.json({
+                    error: 'billing_unavailable'
+                }, 503)
+            }
+
             const cached = await readCachedBilling(
                 c.env,
                 session.did

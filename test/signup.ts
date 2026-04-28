@@ -68,7 +68,7 @@ test('POST /api/billing/checkout rejects invalid planId', async t => {
 test(
     'POST /api/billing/checkout (dev) entitles user without payment',
     async t => {
-        const env = makeEnv()
+        const env = makeEnv({ NODE_ENV: 'development' })
         const { session, cookieHeader } = await makeSession(env)
         const res = await app.request(
             '/api/billing/checkout',
@@ -116,10 +116,39 @@ test(
 )
 
 test(
+    'POST /api/billing/checkout returns 503 in production without ' +
+        'Autumn config',
+    async t => {
+        const env = makeEnv({ NODE_ENV: 'production' })
+        const { cookieHeader } = await makeSession(env)
+        const res = await app.request(
+            '/api/billing/checkout',
+            {
+                method: 'POST',
+                headers: {
+                    'content-type': 'application/json',
+                    cookie: cookieHeader
+                },
+                body: JSON.stringify({ planId: 'local-first' })
+            },
+            env,
+            executionCtx
+        )
+        const body = await res.json() as { error?:string }
+        t.equal(res.status, 503, 'returns 503')
+        t.equal(
+            body.error,
+            'billing_unavailable',
+            'returns billing_unavailable'
+        )
+    }
+)
+
+test(
     'POST /api/billing/checkout (dev) records subscription_started ' +
         'email dedupe entry when an email is supplied',
     async t => {
-        const env = makeEnv()
+        const env = makeEnv({ NODE_ENV: 'development' })
         const { session, cookieHeader } = await makeSession(env)
         await app.request(
             '/api/billing/checkout',
@@ -313,7 +342,7 @@ test(
     'POST /api/billing/checkout/return (dev) returns 402 if not yet ' +
         'entitled',
     async t => {
-        const env = makeEnv()
+        const env = makeEnv({ NODE_ENV: 'development' })
         const { cookieHeader } = await makeSession(env)
         const res = await app.request(
             '/api/billing/checkout/return',
@@ -339,10 +368,39 @@ test(
 )
 
 test(
+    'POST /api/billing/checkout/return returns 503 in production ' +
+        'without Autumn config',
+    async t => {
+        const env = makeEnv({ NODE_ENV: 'production' })
+        const { cookieHeader } = await makeSession(env)
+        const res = await app.request(
+            '/api/billing/checkout/return',
+            {
+                method: 'POST',
+                headers: {
+                    'content-type': 'application/json',
+                    cookie: cookieHeader
+                },
+                body: JSON.stringify({ planId: 'local-first' })
+            },
+            env,
+            executionCtx
+        )
+        const body = await res.json() as { error?:string }
+        t.equal(res.status, 503, 'returns 503')
+        t.equal(
+            body.error,
+            'billing_unavailable',
+            'returns billing_unavailable'
+        )
+    }
+)
+
+test(
     'POST /api/billing/checkout/return (dev) returns entitled when ' +
         'cached billing exists',
     async t => {
-        const env = makeEnv()
+        const env = makeEnv({ NODE_ENV: 'development' })
         const { session, cookieHeader } = await makeSession(env)
         // Prime cached billing as if checkout already ran.
         await env.SESSIONS.put(
@@ -509,7 +567,7 @@ test(
 test(
     'GET /api/billing/status reflects entitlement after dev checkout',
     async t => {
-        const env = makeEnv()
+        const env = makeEnv({ NODE_ENV: 'development' })
         const { cookieHeader } = await makeSession(env)
         await app.request(
             '/api/billing/checkout',
