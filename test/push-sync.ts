@@ -95,6 +95,29 @@ function seedItem (db:Sqlite3Db, feedId:number):number {
     return row!.id
 }
 
+async function withMockedNow (
+    iso:string,
+    fn:() => Promise<void>
+):Promise<void> {
+    const RealDate = Date
+    const fixedMs = RealDate.parse(iso)
+    class MockDate extends RealDate {
+        constructor () {
+            super(fixedMs)
+        }
+
+        static now ():number {
+            return fixedMs
+        }
+    }
+    globalThis.Date = MockDate as DateConstructor
+    try {
+        await fn()
+    } finally {
+        globalThis.Date = RealDate
+    }
+}
+
 // ── happy path ────────────────────────────────────────────────────────────────
 
 test('pushSync: happy path deletes outbox row on 2xx', async (t) => {
@@ -141,6 +164,92 @@ test('pushSync: happy path deletes outbox row on 2xx', async (t) => {
         db.close()
     }
 })
+
+test(
+    'pushSync: same-tick updateItem writes final state to server',
+    async (t) => {
+        const db = await openLocalDb('did:test:push-same-tick-update')
+        try {
+            const feedId = seedFeed(db)
+            const itemId = seedItem(db, feedId)
+            const adapter = createLocalAdapter(db)
+            const sameTick = '2032-03-04 05:06:07'
+            const serverItem = {
+                id: itemId,
+                feed_id: feedId,
+                guid: 'guid-1',
+                title: 'Item 1',
+                link: 'https://example.com/1',
+                description: null,
+                content: null,
+                author: null,
+                pub_date: null,
+                is_read: 0,
+                is_starred: 0,
+                created_at: '2026-01-01 00:00:00',
+                updated_at: sameTick
+            }
+            let requests = 0
+
+            await withMockedNow('2032-03-04T05:06:07.000Z', async () => {
+                await adapter.updateItem(itemId, { is_read: true })
+                await adapter.updateItem(itemId, { is_starred: true })
+            })
+
+            const fakeServer:FakeFetch = async (_url, init) => {
+                requests += 1
+                const body = JSON.parse(
+                    init?.body as string
+                ) as Record<string, unknown>
+
+                t.equal(
+                    body.client_updated_at,
+                    sameTick,
+                    'server sees the equal client timestamp'
+                )
+
+                if (serverItem.updated_at > body.client_updated_at!) {
+                    return {
+                        ok: false,
+                        status: 409,
+                        json: async () => ({ item: serverItem })
+                    }
+                }
+
+                if (body.is_read !== undefined) {
+                    serverItem.is_read = body.is_read ? 1 : 0
+                }
+                if (body.is_starred !== undefined) {
+                    serverItem.is_starred = body.is_starred ? 1 : 0
+                }
+                serverItem.updated_at = body.client_updated_at as string
+
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async () => ({ item: serverItem })
+                }
+            }
+
+            await pushSync(db, fakeServer)
+
+            t.equal(requests, 1, 'coalesced updates send one request')
+            t.equal(serverItem.is_read, 1, 'server has final read state')
+            t.equal(
+                serverItem.is_starred,
+                1,
+                'server has final starred state'
+            )
+            t.equal(
+                queryAll(db, 'SELECT * FROM outbox').length,
+                0,
+                'outbox row drains after equal timestamp write'
+            )
+        } finally {
+            db.close()
+        }
+    }
+)
 
 test('pushSync: add_feed 2xx replaces optimistic feed ID', async (t) => {
     const db = await openLocalDb('did:test:push-add-feed-id')

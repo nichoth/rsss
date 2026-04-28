@@ -9,6 +9,7 @@ import {
     DEAD_LETTER_OUTBOX_SQL
 } from '../../shared/schema.js'
 import { itemRouteCandidates } from '../../shared/item-route.js'
+import { resolveLwwWrite } from '../../shared/lww.js'
 import {
     FeedFetchError,
     fetchFeedText,
@@ -337,7 +338,12 @@ export class UserDO extends DurableObject<Env> {
                             return c.json({ feed: existingFeed })
                         }
                         const serverTs = existingFeed.updated_at as string|null
-                        if (serverTs && serverTs > body.client_updated_at) {
+                        if (
+                            resolveLwwWrite(
+                                serverTs,
+                                body.client_updated_at
+                            ) === 'conflict'
+                        ) {
                             return c.json({ feed: existingFeed }, 409)
                         }
                     }
@@ -421,7 +427,10 @@ export class UserDO extends DurableObject<Env> {
 
             if (body.client_updated_at !== undefined) {
                 const serverTs = feed.updated_at as string | null
-                if (serverTs && serverTs > body.client_updated_at) {
+                if (
+                    resolveLwwWrite(serverTs, body.client_updated_at) ===
+                    'conflict'
+                ) {
                     return c.json({ feed }, 409)
                 }
             }
@@ -590,7 +599,10 @@ export class UserDO extends DurableObject<Env> {
 
             if (body.client_updated_at !== undefined) {
                 const serverTs = item.updated_at as string | null
-                if (serverTs && serverTs > body.client_updated_at) {
+                if (
+                    resolveLwwWrite(serverTs, body.client_updated_at) ===
+                    'conflict'
+                ) {
                     return c.json({ item }, 409)
                 }
             }

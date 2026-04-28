@@ -1,4 +1,8 @@
 import { test } from '@substrate-system/tapzero'
+import {
+    LWW_EQUAL_TIMESTAMP_RULE,
+    resolveLwwWrite
+} from '../src/shared/lww.js'
 
 /**
  * Simulates the LWW (last-write-wins) check performed by server endpoints.
@@ -8,11 +12,8 @@ function lwwCheck (
     serverUpdatedAt:string|null,
     clientUpdatedAt:string|undefined
 ):'ok'|'conflict' {
-    if (clientUpdatedAt === undefined) return 'ok'
-    if (serverUpdatedAt && serverUpdatedAt > clientUpdatedAt) {
-        return 'conflict'
-    }
-    return 'ok'
+    return resolveLwwWrite(serverUpdatedAt, clientUpdatedAt)
+        === 'conflict' ? 'conflict' : 'ok'
 }
 
 // Simulate PATCH /items/:id
@@ -120,6 +121,11 @@ test('LWW PATCH item - same timestamp accepted (not strictly newer)', t => {
         client_updated_at: ts
     })
     t.equal(res.status, 200, 'equal timestamps should not conflict')
+    t.equal(
+        LWW_EQUAL_TIMESTAMP_RULE,
+        'client-wins-equal-timestamp',
+        'equal timestamp tie-break rule is documented'
+    )
 })
 
 // ========== DELETE /feeds/:id ==========

@@ -147,6 +147,11 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **LWW equal timestamp tie-break**: Shared conflict checks should use
+  `resolveLwwWrite(serverUpdatedAt, clientUpdatedAt)`. Server rows only win
+  when their timestamp is strictly newer; equal timestamps accept the arriving
+  client write. Local same-item `updateItem` rows are coalesced before push,
+  so same-tick toggles send one final payload.
 - **Add-feed dependent outbox rewrites**: When an optimistic `add_feed`
   reconciles to a canonical server id, update dependent pending operations
   that reference the optimistic feed id. `pushSync` snapshots outbox rows at
@@ -2189,4 +2194,29 @@ Thread: https://ampcode.com/threads/unknown
   - `pushSync` reads the outbox once at drain start, so same-cycle outbox
     rewrites must update both persisted rows and the queued `OutboxRow`
     objects already being iterated.
+---
+
+## 2026-04-27 17:49 PDT - US-086
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Stabilized equal-timestamp update-item resolution.
+  - Added a shared `resolveLwwWrite` helper documenting that equal
+    timestamps accept the arriving client write.
+  - Wired Durable Object feed/item LWW checks through the shared helper.
+  - Added a same-tick `updateItem` push regression that verifies final
+    coalesced state lands on the server with an equal timestamp.
+  - Documented the sync conflict rule in `DOCS/README.md`.
+- Files changed:
+  - `src/shared/lww.ts`
+  - `src/server/durable-objects/index.ts`
+  - `test/server-lww.ts`
+  - `test/push-sync.ts`
+  - `DOCS/README.md`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Equal timestamps are an intentional client-wins tie-break, not a
+    conflict. Use `resolveLwwWrite` instead of repeating string comparison
+    checks in server LWW paths.
+  - Same-item local `updateItem` calls are coalesced into one outbox row, so
+    same-tick update regressions should assert the final pushed payload.
 ---

@@ -27,6 +27,15 @@ treated as a single tab feature because OPFS-SAH access handles are exclusive;
 a second tab reads from the remote adapter instead of contending for the
 local SQLite handle.
 
+### Sync Conflict Resolution
+
+Server writes use last-write-wins checks through the shared
+`resolveLwwWrite` helper. A server row only rejects a client write when
+`server.updated_at > client_updated_at`. Equal timestamps are accepted, so
+the arriving client operation wins the tie. For local `updateItem` writes,
+the client coalesces same-item outbox rows before push-sync, so multiple
+updates in one tick send one final payload to the Durable Object.
+
 ---
 
 ## PWA
