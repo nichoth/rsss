@@ -87,6 +87,32 @@ Thread: https://ampcode.com/threads/unknown
   - Settings imports bootstrap state from `src/client/db/index.ts`; new
     bootstrap signals used by route code must be re-exported there.
 ---
+## 2026-04-27 18:56 PDT - US-092
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Hardened feed-fetch SSRF defenses.
+  - Expanded feed URL validation to reject RFC1918, link-local,
+    unique-local, unspecified, loopback, and IPv4-mapped private addresses.
+  - Added canonical IP checks that catch browser-normalized numeric loopback
+    encodings such as decimal, octal, and hex host forms.
+  - Changed feed fetching to use DNS-over-HTTPS pre-resolution before the
+    production fetch, `redirect: 'manual'`, a 3 redirect cap, and validation
+    of every redirect target.
+  - Added focused regressions for blocked IP ranges, numeric encodings,
+    private DNS answers, and a redirect to a private IP.
+- Files changed:
+  - `src/server/feed-fetch.ts`
+  - `test/feed-fetch-security.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `new URL()` canonicalizes some numeric IPv4 encodings to dotted decimal;
+    keep validation on the canonical hostname before fetch.
+  - Feed fetch tests can pass a `resolveHostname` stub to cover DNS
+    pre-resolution without making real network requests.
+  - Production feed fetch uses DNS-over-HTTPS pre-resolution only on the
+    default fetch path; tests with injected fetches should provide their own
+    resolver when they need DNS behavior.
+---
 
 ## 2026-04-24 - US-017
 - What was implemented: Reset/disable flow for local-first mode.
@@ -442,6 +468,10 @@ Thread: https://ampcode.com/threads/unknown
 - **Server feed fetch security**: Feed fetches should go through
   `src/server/feed-fetch.ts` so URL validation, fetch timeout, and the
   5MB response cap stay centralized.
+- **Feed fetch SSRF hardening**: `fetchFeedText` owns DNS pre-resolution,
+  manual redirect following, and redirect target revalidation. Keep new feed
+  network paths on this helper so private IPs, numeric IP encodings, and
+  private redirect targets are blocked consistently.
 - **OPFS tab coordination**: Local-first OPFS ownership is coordinated in
   `src/client/db/tab-coordination.ts` with BroadcastChannel `rsss-tab`.
   Check this coordinator before opening SQLite so second tabs fall back to
