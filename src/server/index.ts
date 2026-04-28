@@ -198,6 +198,10 @@ function productionConfigErrors (env:Env):string[] {
         errors.push('missing_autumn_secret')
     }
 
+    if (env.NODE_ENV === 'production' && !env.APP_ORIGIN) {
+        errors.push('missing_app_origin')
+    }
+
     return errors
 }
 
@@ -210,6 +214,36 @@ function isLoopbackHostname (hostname:string):boolean {
 
 function shouldUseSecureSessionCookie (requestUrl:string):boolean {
     return !isLoopbackHostname(new URL(requestUrl).hostname)
+}
+
+function isStateChangingMethod (method:string):boolean {
+    return STATE_CHANGING_METHODS.has(method)
+}
+
+function isCsrfExemptPath (path:string):boolean {
+    return path === '/api/auth/login' ||
+        path === '/api/auth/callback' ||
+        path === '/api/auth/dev-login'
+}
+
+function generateCsrfToken ():string {
+    const bytes = new Uint8Array(32)
+    crypto.getRandomValues(bytes)
+    const binary = String.fromCharCode(...bytes)
+    return btoa(binary)
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '')
+}
+
+function setCsrfCookie (c:AppContext):void {
+    setCookie(c, 'csrf_token', generateCsrfToken(), {
+        httpOnly: false,
+        secure: shouldUseSecureSessionCookie(c.req.url),
+        sameSite: 'Lax',
+        path: '/',
+        maxAge: 30 * 24 * 60 * 60
+    })
 }
 
 export function isAllowedRequestOrigin (
@@ -228,7 +262,8 @@ export function isCrossOriginStateChange (
     fetchSite:string|null|undefined,
     appOrigin:string = DEFAULT_APP_ORIGIN
 ):boolean {
-    if (!STATE_CHANGING_METHODS.has(method)) return false
+    if (!isStateChangingMethod(method)) return false
+    if (!origin && !fetchSite) return true
     if (origin && !isAllowedRequestOrigin(
         origin,
         requestUrl,
@@ -238,6 +273,17 @@ export function isCrossOriginStateChange (
     }
     return fetchSite === 'cross-site'
         || (!origin && fetchSite === 'same-site')
+}
+
+export function hasValidCsrfToken (
+    cookieHeader:string|null|undefined,
+    headerToken:string|null|undefined
+):boolean {
+    const cookieToken = cookieHeader?.split(';')
+        .map(part => part.trim())
+        .find(part => part.startsWith('csrf_token='))
+        ?.slice('csrf_token='.length)
+    return Boolean(cookieToken && headerToken && cookieToken === headerToken)
 }
 
 function allowedCorsOrigin (
@@ -259,15 +305,30 @@ const rejectCrossOriginStateChanges = async (
     const origin = c.req.header('origin')
     const fetchSite = c.req.header('sec-fetch-site')
     const appOrigin = c.env.APP_ORIGIN || DEFAULT_APP_ORIGIN
+    const path = new URL(c.req.url).pathname
 
-    if (isCrossOriginStateChange(
-        c.req.method,
-        c.req.url,
-        origin,
-        fetchSite,
-        appOrigin
-    )) {
+    if (
+        !isCsrfExemptPath(path) &&
+        isCrossOriginStateChange(
+            c.req.method,
+            c.req.url,
+            origin,
+            fetchSite,
+            appOrigin
+        )
+    ) {
         return c.json({ error: 'Cross-origin request rejected' }, 403)
+    }
+
+    if (
+        isStateChangingMethod(c.req.method) &&
+        !isCsrfExemptPath(path) &&
+        !hasValidCsrfToken(
+            c.req.header('cookie'),
+            c.req.header('x-csrf-token')
+        )
+    ) {
+        return c.json({ error: 'CSRF token mismatch' }, 403)
     }
 
     await next()
@@ -549,6 +610,7 @@ app.post('/api/auth/callback', async (c) => {
             path: '/',
             maxAge: 30 * 24 * 60 * 60 // 30 days
         })
+        setCsrfCookie(c)
 
         return c.json({
             success: true,
@@ -577,6 +639,7 @@ app.post('/api/auth/logout', async (c) => {
         )
     }
     deleteCookie(c, 'session', { path: '/' })
+    deleteCookie(c, 'csrf_token', { path: '/' })
     return c.json({ success: true })
 })
 
@@ -736,6 +799,7 @@ app.post('/api/auth/dev-login', async (c) => {
         path: '/',
         maxAge: 30 * 24 * 60 * 60
     })
+    setCsrfCookie(c)
 
     return c.json({ success: true, session })
 })

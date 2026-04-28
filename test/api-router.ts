@@ -2,6 +2,7 @@ import { test } from '@substrate-system/tapzero'
 import { Hono } from 'hono'
 import app, {
     dataRouter,
+    hasValidCsrfToken,
     isAllowedRequestOrigin,
     isCrossOriginStateChange
 } from '../src/server/index.js'
@@ -230,23 +231,33 @@ test('cross-origin state-changing api requests are rejected', (t) => {
     )
 })
 
-test('same-origin state-changing api requests continue to work', async (t) => {
-    const res = await app.request(
-        'https://rsss.space/api/auth/logout',
-        {
-            method: 'POST'
-        },
-        {
-            SESSIONS: {
-                get: async () => null
-            },
-            SESSION_SECRET: 'test-secret'
-        }
+test('state-changing api requests without csrf context are rejected', (t) => {
+    t.equal(
+        isCrossOriginStateChange(
+            'POST',
+            'https://rsss.space/api/auth/logout',
+            null,
+            null
+        ),
+        true
     )
-    const body = await res.json() as { success?:boolean }
+})
 
-    t.equal(res.status, 200)
-    t.equal(body.success, true)
+test('matching csrf cookie and header tokens are accepted', (t) => {
+    t.equal(
+        hasValidCsrfToken(
+            'session=abc; csrf_token=test-csrf',
+            'test-csrf'
+        ),
+        true
+    )
+})
+
+test('state-changing api requests require a csrf token echo', (t) => {
+    t.equal(
+        hasValidCsrfToken('csrf_token=test-csrf', null),
+        false
+    )
 })
 
 test('production health check fails without Autumn secret', async (t) => {
@@ -265,4 +276,23 @@ test('production health check fails without Autumn secret', async (t) => {
 
     t.equal(res.status, 500)
     t.equal(body.error, 'missing_autumn_secret')
+})
+
+test('production health check fails without app origin', async (t) => {
+    const res = await app.request(
+        'https://rsss.space/api/health',
+        {},
+        {
+            NODE_ENV: 'production',
+            AUTUMN_SECRET_KEY: 'am_test_secret',
+            SESSIONS: {
+                get: async () => null
+            },
+            SESSION_SECRET: 'test-secret'
+        }
+    )
+    const body = await res.json() as { error?:string }
+
+    t.equal(res.status, 500)
+    t.equal(body.error, 'missing_app_origin')
 })

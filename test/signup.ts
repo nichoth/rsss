@@ -129,6 +129,10 @@ test(
             false,
             'does not set Secure for loopback hosts'
         )
+        t.ok(
+            cookie?.includes('csrf_token='),
+            'sets a readable csrf token cookie'
+        )
     }
 )
 
@@ -138,7 +142,12 @@ test('POST /api/billing/checkout requires authentication', async t => {
         '/api/billing/checkout',
         {
             method: 'POST',
-            headers: { 'content-type': 'application/json' },
+            headers: {
+                'content-type': 'application/json',
+                cookie: 'csrf_token=test-csrf',
+                'x-csrf-token': 'test-csrf',
+                'sec-fetch-site': 'same-origin'
+            },
             body: JSON.stringify({ planId: 'local-first' })
         },
         env,
@@ -158,7 +167,9 @@ test('POST /api/billing/checkout rejects invalid planId', async t => {
             method: 'POST',
             headers: {
                 'content-type': 'application/json',
-                cookie: cookieHeader
+                cookie: cookieHeader,
+                'x-csrf-token': 'test-csrf',
+                'sec-fetch-site': 'same-origin'
             },
             body: JSON.stringify({ planId: 'enterprise' })
         },
@@ -189,7 +200,9 @@ test(
                 method: 'POST',
                 headers: {
                     'content-type': 'application/json',
-                    cookie: cookieHeader
+                    cookie: cookieHeader,
+                    'x-csrf-token': 'test-csrf',
+                    'sec-fetch-site': 'same-origin'
                 },
                 body: JSON.stringify({
                     planId: 'local-first',
@@ -240,7 +253,9 @@ test(
                 method: 'POST',
                 headers: {
                     'content-type': 'application/json',
-                    cookie: cookieHeader
+                    cookie: cookieHeader,
+                    'x-csrf-token': 'test-csrf',
+                    'sec-fetch-site': 'same-origin'
                 },
                 body: JSON.stringify({ planId: 'local-first' })
             },
@@ -269,7 +284,9 @@ test(
                 method: 'POST',
                 headers: {
                     'content-type': 'application/json',
-                    cookie: cookieHeader
+                    cookie: cookieHeader,
+                    'x-csrf-token': 'test-csrf',
+                    'sec-fetch-site': 'same-origin'
                 },
                 body: JSON.stringify({
                     planId: 'local-first',
@@ -330,7 +347,9 @@ test(
                         method: 'POST',
                         headers: {
                             'content-type': 'application/json',
-                            cookie: cookieHeader
+                            cookie: cookieHeader,
+                            'x-csrf-token': 'test-csrf',
+                            'sec-fetch-site': 'same-origin'
                         },
                         body: JSON.stringify({
                             planId: 'local-first',
@@ -424,7 +443,9 @@ test(
                         method: 'POST',
                         headers: {
                             'content-type': 'application/json',
-                            cookie: cookieHeader
+                            cookie: cookieHeader,
+                            'x-csrf-token': 'test-csrf',
+                            'sec-fetch-site': 'same-origin'
                         },
                         body: JSON.stringify({
                             planId: 'local-first'
@@ -463,7 +484,9 @@ test(
                 method: 'POST',
                 headers: {
                     'content-type': 'application/json',
-                    cookie: cookieHeader
+                    cookie: cookieHeader,
+                    'x-csrf-token': 'test-csrf',
+                    'sec-fetch-site': 'same-origin'
                 },
                 body: JSON.stringify({ planId: 'local-first' })
             },
@@ -492,7 +515,9 @@ test(
                 method: 'POST',
                 headers: {
                     'content-type': 'application/json',
-                    cookie: cookieHeader
+                    cookie: cookieHeader,
+                    'x-csrf-token': 'test-csrf',
+                    'sec-fetch-site': 'same-origin'
                 },
                 body: JSON.stringify({ planId: 'local-first' })
             },
@@ -530,7 +555,9 @@ test(
                 method: 'POST',
                 headers: {
                     'content-type': 'application/json',
-                    cookie: cookieHeader
+                    cookie: cookieHeader,
+                    'x-csrf-token': 'test-csrf',
+                    'sec-fetch-site': 'same-origin'
                 },
                 body: JSON.stringify({ planId: 'local-first' })
             },
@@ -577,7 +604,9 @@ test(
                         method: 'POST',
                         headers: {
                             'content-type': 'application/json',
-                            cookie: cookieHeader
+                            cookie: cookieHeader,
+                            'x-csrf-token': 'test-csrf',
+                            'sec-fetch-site': 'same-origin'
                         },
                         body: JSON.stringify({
                             planId: 'local-first'
@@ -652,7 +681,9 @@ test(
                         method: 'POST',
                         headers: {
                             'content-type': 'application/json',
-                            cookie: cookieHeader
+                            cookie: cookieHeader,
+                            'x-csrf-token': 'test-csrf',
+                            'sec-fetch-site': 'same-origin'
                         },
                         body: JSON.stringify({
                             planId: 'local-first'
@@ -688,7 +719,9 @@ test(
                 method: 'POST',
                 headers: {
                     'content-type': 'application/json',
-                    cookie: cookieHeader
+                    cookie: cookieHeader,
+                    'x-csrf-token': 'test-csrf',
+                    'sec-fetch-site': 'same-origin'
                 },
                 body: JSON.stringify({
                     planId: 'local-first',
@@ -700,7 +733,13 @@ test(
         )
         const statusRes = await app.request(
             '/api/billing/status',
-            { headers: { cookie: cookieHeader } },
+            {
+                headers: {
+                    cookie: cookieHeader,
+                    'x-csrf-token': 'test-csrf',
+                    'sec-fetch-site': 'same-origin'
+                }
+            },
             env,
             executionCtx
         )
@@ -733,7 +772,9 @@ test(
                 method: 'POST',
                 headers: {
                     'content-type': 'application/json',
-                    cookie: cookieHeader
+                    cookie: cookieHeader,
+                    'x-csrf-token': 'test-csrf',
+                    'sec-fetch-site': 'same-origin'
                 },
                 body: JSON.stringify({ planId: 'local-first' })
             },
@@ -777,7 +818,9 @@ test(
                 method: 'POST',
                 headers: {
                     'content-type': 'application/json',
-                    cookie: cookieHeader
+                    cookie: cookieHeader,
+                    'x-csrf-token': 'test-csrf',
+                    'sec-fetch-site': 'same-origin'
                 },
                 body: JSON.stringify({ planId: 'local-first' })
             },
@@ -796,7 +839,9 @@ test(
                 method: 'POST',
                 headers: {
                     'content-type': 'application/json',
-                    cookie: cookieHeader
+                    cookie: cookieHeader,
+                    'x-csrf-token': 'test-csrf',
+                    'sec-fetch-site': 'same-origin'
                 },
                 body: JSON.stringify({ planId: 'local-first' })
             },
@@ -832,7 +877,9 @@ test(
                 method: 'POST',
                 headers: {
                     'content-type': 'application/json',
-                    cookie: cookieHeader
+                    cookie: cookieHeader,
+                    'x-csrf-token': 'test-csrf',
+                    'sec-fetch-site': 'same-origin'
                 },
                 body: JSON.stringify({ planId: 'local-first' })
             },

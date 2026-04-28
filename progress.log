@@ -222,6 +222,11 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **CSRF double-submit requests**: State-changing client requests must echo
+  the readable `csrf_token` cookie in the `X-CSRF-Token` header. The main
+  `State` API client and `remoteAdapter` both install this through ky
+  `beforeRequest` hooks; Node server tests that set `Cookie` manually must
+  include the matching header and a same-origin fetch context.
 - **Feed item insert errors**: `fetchFeed` should ignore only SQLite unique
   constraint insert failures. Any other item insert error must be logged and
   written to the feed row's `last_error`/`last_status` so broken feeds do not
@@ -2468,4 +2473,32 @@ Thread: https://ampcode.com/threads/unknown
     SQLite errors.
   - Focused feed parser tests that import `UserDO` need the
     `cloudflare:workers` test alias when bundling with esbuild.
+---
+## 2026-04-27 20:05 PDT - US-096
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Strengthened CSRF handling for state-changing routes.
+  - State-changing methods now reject requests with neither `Origin` nor
+    `Sec-Fetch-Site` before route handling.
+  - Session creation sets a readable `csrf_token` cookie, logout clears it,
+    and non-exempt state-changing routes require a matching
+    `X-CSRF-Token` header.
+  - Client ky API calls in `State` and `remoteAdapter` echo the token
+    automatically from `document.cookie`.
+  - Production health now reports missing `APP_ORIGIN` as a config error.
+- Files changed:
+  - `src/server/index.ts`
+  - `src/client/state.ts`
+  - `src/client/db/remote-adapter.ts`
+  - `test/api-router.ts`
+  - `test/signup.ts`
+  - `test/signup-helpers.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Browser-based `app.request` tests cannot reliably set forbidden
+    `Cookie`/`Origin` headers; use pure helper tests or Node server tests
+    for cookie round trips.
+  - Any Node integration test that manually sets an authenticated session
+    cookie for POST/PATCH/PUT/DELETE must also include the matching
+    `X-CSRF-Token` header and same-origin fetch context.
 ---
