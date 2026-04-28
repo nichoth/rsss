@@ -257,6 +257,7 @@ export async function pullSync (
     let cursor = await getPullCursor(db)
     const keepContent = storeContent.value
     const pendingRefs = await getPendingOutboxRefs(db)
+    let skippedRows = false
     let done = false
 
     while (!done) {
@@ -296,14 +297,20 @@ export async function pullSync (
         try {
             let feedCount = 0
             for (const feed of data.feeds) {
-                if (shouldSkipFeed(feed, pendingRefs)) continue
+                if (shouldSkipFeed(feed, pendingRefs)) {
+                    skippedRows = true
+                    continue
+                }
                 await upsertFeed(db, feed)
                 feedCount++
                 opts.onFeedUpserted?.(feedCount)
             }
             let itemCount = 0
             for (const item of data.items) {
-                if (shouldSkipItem(item, pendingRefs)) continue
+                if (shouldSkipItem(item, pendingRefs)) {
+                    skippedRows = true
+                    continue
+                }
                 await upsertItem(db, item, keepContent)
                 itemCount++
                 opts.onItemUpserted?.(itemCount)
@@ -311,9 +318,13 @@ export async function pullSync (
 
             if (data.hasMore) {
                 cursor = data.nextCursor ?? null
-                await setPullCursor(db, cursor)
+                if (!skippedRows) await setPullCursor(db, cursor)
             } else {
-                await setLastPullAt(db, data.latestUpdatedAt)
+                if (skippedRows) {
+                    await setPullCursor(db, null)
+                } else {
+                    await setLastPullAt(db, data.latestUpdatedAt)
+                }
                 cursor = null
                 done = true
             }

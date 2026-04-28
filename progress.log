@@ -180,6 +180,11 @@ Thread: https://ampcode.com/threads/unknown
   each committed page and clears it only when the final page advances
   `last_pull_at`. Bootstrap progress should use page callbacks rather than
   per-row callbacks.
+- **Skipped pull rows block cursor advancement**: When `pullSync` skips
+  rows protected by pending outbox operations, it must leave
+  `last_pull_at` unchanged and avoid persisting later cursors. The server
+  filters with `updated_at > since`, so advancing past a skipped row can
+  make that row unreachable after the outbox clears.
 - **Local-first a11y/CSS regression checks**:
   `test/local-first-a11y-static.mjs` owns static checks for the local-first
   settings and sync status surface, including live status semantics,
@@ -2088,4 +2093,27 @@ Thread: https://ampcode.com/threads/unknown
     environment and request hostname before issuing session cookies.
   - Missing secrets can be tested by deleting the property from the
     `makeEnv()` result before calling `app.request()`.
+---
+
+## 2026-04-27 17:27 PDT - US-082
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Forced skipped pull rows to be fetched again after
+  their protecting outbox row clears.
+  - Added a regression where an `update_item` outbox row causes pull-sync
+    to skip a newer server item, push-sync drains the outbox, and the next
+    pull lands the server item.
+  - Changed `pullSync` to treat skipped rows as cursor-unsafe, leaving
+    `last_pull_at` unchanged and clearing persisted `pull_cursor` at the
+    end of the cycle.
+- Files changed:
+  - `src/client/db/pull-sync.ts`
+  - `test/pull-sync.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - A skipped row must keep the sync cursor behind it because the server
+    incremental filter is strict `updated_at > since`.
+  - If a pull page skips a row, in-memory pagination may continue for the
+    current cycle, but persisted `pull_cursor` should not move beyond the
+    skipped page.
 ---
