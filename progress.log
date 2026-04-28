@@ -222,6 +222,10 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Feed item insert errors**: `fetchFeed` should ignore only SQLite unique
+  constraint insert failures. Any other item insert error must be logged and
+  written to the feed row's `last_error`/`last_status` so broken feeds do not
+  look permanently idle.
 - **Durable Object alarm resume cursor**: `UserDO.alarm()` schedules the
   next alarm before feed work, refreshes feeds in id-ordered batches, and
   stores `alarm_refresh_cursor.last_feed_id` in DO storage only after a
@@ -2445,4 +2449,23 @@ Thread: https://ampcode.com/threads/unknown
     failed batches are retried instead of skipped.
   - Alarm tests that fake `SELECT * FROM feeds` need to respect cursor and
     `LIMIT` params now that alarm refresh loops over batches.
+---
+## 2026-04-27 19:17 PDT - US-095
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Stopped swallowing non-duplicate item insert errors.
+  - Added a regression for a simulated `SQLITE_TOOBIG` item insert failure
+    during feed refresh.
+  - `fetchFeed` now ignores only SQLite unique constraint insert failures;
+    other insert failures are logged and recorded on the feed row.
+- Files changed:
+  - `src/server/durable-objects/index.ts`
+  - `test/feed-parser.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Item insert failures can happen after feed metadata is already updated;
+    keep feed-level error recording inside the insert loop for non-duplicate
+    SQLite errors.
+  - Focused feed parser tests that import `UserDO` need the
+    `cloudflare:workers` test alias when bundling with esbuild.
 ---

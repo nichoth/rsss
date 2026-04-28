@@ -229,3 +229,107 @@ test('fetchFeed records feed too large when parsed rows are truncated',
             'feed row records the truncation warning'
         )
     })
+
+test('fetchFeed records non-duplicate item insert failures', async t => {
+    const userDo = Object.create(UserDO.prototype) as {
+        sql:{
+            exec:(query:string, ...params:unknown[]) => {
+                toArray:() => []
+            }
+        }
+        fetchFeed:(feed:{
+            id:number
+            url:string
+            title:string|null
+            description:string|null
+            site_url:string|null
+            last_fetched:string|null
+            last_error:string|null
+            last_status:number|null
+            created_at:string
+            updated_at:string
+        }) => Promise<void>
+    }
+    const originalFetch = globalThis.fetch
+    const originalError = console.error
+    let insertAttempts = 0
+    let feedErrorUpdate:null | {
+        error:unknown
+        status:unknown
+        id:unknown
+    } = null
+    let loggedError = false
+
+    userDo.sql = {
+        exec (query:string, ...params:unknown[]) {
+            if (query.includes('UPDATE feeds SET') &&
+                query.includes('last_error = NULL')) {
+                return { toArray: () => [] }
+            }
+
+            if (query.includes('INSERT OR IGNORE INTO items')) {
+                insertAttempts++
+                throw new Error('SQLITE_TOOBIG: string or blob too big')
+            }
+
+            if (query.includes('last_error = ?') &&
+                query.includes('last_status = ?')) {
+                feedErrorUpdate = {
+                    error: params[0],
+                    status: params[1],
+                    id: params[2]
+                }
+                return { toArray: () => [] }
+            }
+
+            throw new Error(`Unexpected SQL: ${query}`)
+        }
+    }
+
+    console.error = (...args:unknown[]) => {
+        loggedError = args.some(arg => {
+            return String(arg).includes('SQLITE_TOOBIG')
+        })
+    }
+    globalThis.fetch = async (url) => {
+        const urlText = String(url)
+
+        if (urlText.startsWith('https://cloudflare-dns.com/')) {
+            return new Response(JSON.stringify({
+                Answer: [{ data: '93.184.216.34' }]
+            }))
+        }
+
+        return new Response(rssFeed(itemXml(1)))
+    }
+
+    try {
+        await userDo.fetchFeed({
+            id: 4,
+            url: 'https://example.com/feed.xml',
+            title: null,
+            description: null,
+            site_url: null,
+            last_fetched: null,
+            last_error: null,
+            last_status: null,
+            created_at: '2026-04-27 00:00:00',
+            updated_at: '2026-04-27 00:00:00'
+        })
+    } finally {
+        globalThis.fetch = originalFetch
+        console.error = originalError
+    }
+
+    t.equal(insertAttempts, 1, 'item insert was attempted')
+    t.equal(loggedError, true, 'insert failure is logged')
+    t.deepEqual(
+        feedErrorUpdate,
+        {
+            error: 'SQLITE_TOOBIG: string or blob too big',
+            status: 500,
+            id: 4
+        },
+        'feed row records the insert failure'
+    )
+})

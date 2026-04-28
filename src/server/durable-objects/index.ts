@@ -89,6 +89,17 @@ const ITEM_SYNC_COLUMNS = `
     feeds.title AS feed_title
 `
 
+function errorMessage (err:unknown):string {
+    return err instanceof Error ? err.message : String(err)
+}
+
+function isDuplicateInsertError (err:unknown):boolean {
+    const message = errorMessage(err).toLowerCase()
+
+    return message.includes('sqlite_constraint_unique') ||
+        message.includes('unique constraint failed')
+}
+
 interface MigrationState {
     migration_v?:number
 }
@@ -857,8 +868,25 @@ export class UserDO extends DurableObject<Env> {
                         item.author,
                         item.pubDate
                     )
-                } catch (_err) {
-                    // Ignore duplicate key errors
+                } catch (err) {
+                    if (isDuplicateInsertError(err)) continue
+
+                    const message = errorMessage(err)
+
+                    console.error(
+                        `Error inserting feed item for ${feed.url}:`,
+                        err
+                    )
+                    this.sql.exec(
+                        `UPDATE feeds SET
+                            last_error = ?,
+                            last_status = ?
+                        WHERE id = ?`,
+                        message,
+                        500,
+                        feed.id
+                    )
+                    return
                 }
             }
 
@@ -880,7 +908,7 @@ export class UserDO extends DurableObject<Env> {
                     last_error = ?,
                     last_status = ?
                 WHERE id = ?`,
-                err instanceof Error ? err.message : String(err),
+                errorMessage(err),
                 err instanceof FeedFetchError ? err.status : 500,
                 feed.id
             )
