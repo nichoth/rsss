@@ -196,6 +196,10 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Deferred local-first enable**: `setSyncSubscriptions(true)` returns
+  `pending` while `billingStatus.value === null` and applies automatically
+  if an entitled billing status arrives. Callers that start bootstrap should
+  only do so when the result is `applied`.
 - **Disable/reset sync cancellation**: Destructive local-first flows should
   call `beginLocalFirstDisable(db)` before closing/removing local data and
   `endLocalFirstDisable(db)` only after the removal window is over.
@@ -2333,4 +2337,29 @@ Thread: https://ampcode.com/threads/unknown
   - Focused bootstrap tests run through `npm run test:bootstrap`; direct
     `npx vitest test/bootstrap.ts` is not the project runner and fails
     during Cloudflare/Vite startup.
+---
+## 2026-04-27 18:46 PDT - US-091
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Deferred local-first enable while billing loads.
+  - Added pending sync-subscription intent state for the
+    `billingStatus.value === null` window.
+  - Settings now keeps the local-first toggle usable while billing is
+    loading and delays bootstrap until the pending enable is applied.
+  - Added model and browser-rendered Settings regressions for toggling
+    local-first before billing status resolves.
+- Files changed:
+  - `src/client/local-first-settings.ts`
+  - `src/client/routes/settings.ts`
+  - `test/local-first-settings.ts`
+  - `test/settings-route.ts`
+  - `test/index.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `setSyncSubscriptions(true)` can now return `pending` while billing is
+    unresolved. Callers that start bootstrap should only do so when the
+    result is `applied`.
+  - Browser-rendered route regressions that import CSS should use
+    `--loader:.css=text` for focused `esbuild` runs, matching the full
+    browser test bundle.
 ---
