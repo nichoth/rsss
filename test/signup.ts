@@ -19,6 +19,64 @@ import {
 
 const AUTUMN_KEY = 'am_test_secret_key'
 
+function hasCookieAttribute (
+    setCookie:string|null,
+    attribute:string
+):boolean {
+    return (setCookie || '')
+        .split(';')
+        .some(part => part.trim().toLowerCase() === attribute)
+}
+
+test(
+    'POST /api/auth/dev-login sets Secure for HTTPS session cookies',
+    async t => {
+        const env = makeEnv({ NODE_ENV: 'development' })
+        const res = await app.request(
+            'https://rsss.space/api/auth/dev-login',
+            {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({})
+            },
+            env,
+            executionCtx
+        )
+        const cookie = res.headers.get('set-cookie')
+
+        t.equal(res.status, 200, 'returns 200')
+        t.ok(
+            hasCookieAttribute(cookie, 'secure'),
+            'sets Secure for non-loopback hosts'
+        )
+    }
+)
+
+test(
+    'POST /api/auth/dev-login omits Secure for loopback cookies',
+    async t => {
+        const env = makeEnv({ NODE_ENV: 'development' })
+        const res = await app.request(
+            'http://127.0.0.1/api/auth/dev-login',
+            {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({})
+            },
+            env,
+            executionCtx
+        )
+        const cookie = res.headers.get('set-cookie')
+
+        t.equal(res.status, 200, 'returns 200')
+        t.equal(
+            hasCookieAttribute(cookie, 'secure'),
+            false,
+            'does not set Secure for loopback hosts'
+        )
+    }
+)
+
 test('POST /api/billing/checkout requires authentication', async t => {
     const env = makeEnv()
     const res = await app.request(

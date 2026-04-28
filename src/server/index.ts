@@ -191,6 +191,17 @@ const STATE_CHANGING_METHODS = new Set([
     'PUT'
 ])
 
+function isLoopbackHostname (hostname:string):boolean {
+    return hostname === 'localhost' ||
+        hostname === '127.0.0.1' ||
+        hostname === '::1' ||
+        hostname === '[::1]'
+}
+
+function shouldUseSecureSessionCookie (requestUrl:string):boolean {
+    return !isLoopbackHostname(new URL(requestUrl).hostname)
+}
+
 export function isAllowedRequestOrigin (
     origin:string,
     requestUrl:string,
@@ -314,10 +325,7 @@ function resolveOAuthClient (
     envClientId?:string
 ):{ clientId:string; redirectUri:string } {
     const url = new URL(requestUrl)
-    const isLoopback = (
-        url.hostname === 'localhost' ||
-        url.hostname === '127.0.0.1'
-    )
+    const isLoopback = isLoopbackHostname(url.hostname)
 
     if (envClientId || !isLoopback) {
         const baseUrl = url.origin
@@ -515,7 +523,7 @@ app.post('/api/auth/callback', async (c) => {
 
         setCookie(c, 'session', sessionCookie, {
             httpOnly: true,
-            secure: c.env.NODE_ENV === 'production',
+            secure: shouldUseSecureSessionCookie(c.req.url),
             sameSite: 'Lax',
             path: '/',
             maxAge: 30 * 24 * 60 * 60 // 30 days
@@ -692,7 +700,7 @@ app.post('/api/auth/dev-login', async (c) => {
 
     setCookie(c, 'session', sessionCookie, {
         httpOnly: true,
-        secure: false,
+        secure: shouldUseSecureSessionCookie(c.req.url),
         sameSite: 'Lax',
         path: '/',
         maxAge: 30 * 24 * 60 * 60
