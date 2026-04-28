@@ -54,6 +54,8 @@ const CHECKOUT_EMAIL_KEY = 'rsss_checkout_email'
 export const DEFAULT_PAGE_SIZE = 20
 const SYNC_AUTH_EXPIRED = 'Your session expired. Please log in again.'
 
+let eventSource:EventSource|null = null
+
 function hasArticleBody (item:Item):boolean {
     return Boolean(item.content || item.description)
 }
@@ -401,6 +403,7 @@ export function State ():AppState {
     state.cleanup = () => {
         window.removeEventListener('online', handleOnline)
         window.removeEventListener('offline', handleOffline)
+        State.closeEventStream()
     }
 
     State.checkAuth(state)
@@ -450,6 +453,36 @@ State.refreshAfterSync = async function (
         state.routeItem.value = item
         state.routeItemLoading.value = false
     })
+}
+
+/**
+ * Subscribe to server-sent events from the user's Durable Object.
+ * The DO broadcasts `feed-updated` after each feed fetch completes
+ * (initial add, manual refresh, alarm-driven refresh). On those
+ * events we re-read state from the server.
+ */
+State.openEventStream = function (state:AppState):void {
+    if (eventSource) return
+
+    const source = new EventSource('/api/events', {
+        withCredentials: true
+    })
+    eventSource = source
+
+    source.addEventListener('feed-updated', () => {
+        debug('SSE feed-updated')
+        State.refreshAfterSync(state)
+    })
+
+    source.addEventListener('error', (ev) => {
+        debug('SSE error (auto-reconnect)', ev)
+    })
+}
+
+State.closeEventStream = function ():void {
+    if (!eventSource) return
+    eventSource.close()
+    eventSource = null
 }
 
 /**
@@ -581,14 +614,18 @@ State.checkAuth = async function (
                     avatar: data.avatar
                 }
                 state.user.value = user
+                State.openEventStream(state)
             } else {
                 state.user.value = null
+                State.closeEventStream()
             }
         } else {
             state.user.value = null
+            State.closeEventStream()
         }
     } catch {
         state.user.value = null
+        State.closeEventStream()
     } finally {
         state.authLoading.value = false
     }
@@ -917,6 +954,7 @@ State.logout = async function (
             'Logout may not have completed. Please clear cookies' +
                 ' if you continue to see your account.'
     })
+    State.closeEventStream()
     resetBilling()
     state._setRoute('/login')
 }

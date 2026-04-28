@@ -37,7 +37,8 @@
     "preversion": "npm run lint",
     "version": "auto-changelog --template keepachangelog --breaking-pattern 'BREAKING CHANGE' && git add CHANGELOG.md",
     "postversion": "git push --follow-tags",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "db:reset": "rm -rf .wrangler/state"
   },
   "dependencies": {
     "@preact/signals": "^2.5.1",

@@ -12,7 +12,12 @@ const TEST_SESSION = {
     handle: 'reader.example'
 }
 const GATED_DATA_ROUTES = [
-    { method: 'GET', path: '/api/sync', status: 200 },
+    { method: 'GET', path: '/api/sync', status: 200 }
+]
+const EXPECTED_GATED_DATA_ROUTE_KEYS = [
+    'GET /api/sync'
+]
+const OPEN_DATA_ROUTES = [
     { method: 'GET', path: '/api/feeds', status: 200 },
     { method: 'POST', path: '/api/feeds', status: 201 },
     { method: 'GET', path: '/api/feeds/1', status: 200 },
@@ -24,20 +29,6 @@ const GATED_DATA_ROUTES = [
     { method: 'GET', path: '/api/items/count', status: 200 },
     { method: 'PATCH', path: '/api/items/1', status: 200 },
     { method: 'POST', path: '/api/items/mark-all-read', status: 204 }
-]
-const EXPECTED_GATED_DATA_ROUTE_KEYS = [
-    'DELETE /api/feeds/1',
-    'GET /api/feeds',
-    'GET /api/feeds/1',
-    'GET /api/items',
-    'GET /api/items/by-route',
-    'GET /api/items/count',
-    'GET /api/sync',
-    'PATCH /api/items/1',
-    'POST /api/feeds',
-    'POST /api/feeds/1/refresh',
-    'POST /api/feeds/refresh',
-    'POST /api/items/mark-all-read'
 ]
 
 class MemoryKv {
@@ -214,12 +205,54 @@ test('dataRouter blocks unentitled data routes', async (t) => {
     t.deepEqual(proxied, [], 'unentitled requests do not reach the DO')
 })
 
-test('dataRouter proxies entitled data routes', async (t) => {
+test('dataRouter allows unentitled access to server-first routes', async (t) => {
     const kv = new MemoryKv()
     const proxied:string[] = []
     const router = authenticatedDataRouter()
     const expectedByRoute = new Map(
-        GATED_DATA_ROUTES.map(route => {
+        OPEN_DATA_ROUTES.map(route => {
+            return [`${route.method} ${route.path}`, route.status]
+        })
+    )
+    const env = makeDataEnv(
+        kv,
+        proxied,
+        routeKey => expectedByRoute.get(routeKey) ?? 500
+    )
+
+    for (const route of OPEN_DATA_ROUTES) {
+        const res = await router.request(
+            `https://rsss.space${route.path}`,
+            {
+                method: route.method
+            },
+            env
+        )
+
+        t.equal(
+            res.status,
+            route.status,
+            `${route.method} ${route.path} is reachable without entitlement`
+        )
+    }
+
+    t.deepEqual(
+        proxied,
+        OPEN_DATA_ROUTES.map(route => {
+            const doPath = route.path.replace(/^\/api/, '') || '/'
+            return `${route.method} ${doPath}`
+        }),
+        'unentitled requests reach the matching DO route for free routes'
+    )
+})
+
+test('dataRouter proxies entitled data routes', async (t) => {
+    const kv = new MemoryKv()
+    const proxied:string[] = []
+    const router = authenticatedDataRouter()
+    const allRoutes = [...GATED_DATA_ROUTES, ...OPEN_DATA_ROUTES]
+    const expectedByRoute = new Map(
+        allRoutes.map(route => {
             return [`${route.method} ${route.path}`, route.status]
         })
     )
@@ -231,7 +264,7 @@ test('dataRouter proxies entitled data routes', async (t) => {
 
     await kv.put(billingCacheKey(TEST_SESSION.did), activeBilling())
 
-    for (const route of GATED_DATA_ROUTES) {
+    for (const route of allRoutes) {
         const res = await router.request(
             `https://rsss.space${route.path}`,
             {
@@ -249,10 +282,46 @@ test('dataRouter proxies entitled data routes', async (t) => {
 
     t.deepEqual(
         proxied,
-        GATED_DATA_ROUTES.map(route => {
-            return `${route.method} ${route.path}`
+        allRoutes.map(route => {
+            const doPath = route.path.replace(/^\/api/, '') || '/'
+            return `${route.method} ${doPath}`
         }),
         'entitled requests reach the matching DO route'
+    )
+})
+
+test('dataRouter forwards /api/feeds to the DO /feeds route', async (t) => {
+    const kv = new MemoryKv()
+    const router = authenticatedDataRouter()
+    const doApp = new Hono()
+    doApp.post('/feeds', (c) => c.json({ ok: true }, 201))
+    doApp.notFound((c) => c.json({ error: 'do_not_found' }, 404))
+
+    const env = {
+        USER_DO: {
+            idFromName: () => 'id',
+            get: () => ({
+                fetch: (request:Request) => doApp.fetch(request)
+            })
+        },
+        SESSIONS: kv as unknown as KVNamespace,
+        NODE_ENV: 'test'
+    }
+
+    const res = await router.request(
+        'https://rsss.space/api/feeds',
+        {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ url: 'https://example.com/feed.xml' })
+        },
+        env
+    )
+
+    t.equal(
+        res.status,
+        201,
+        'POST /api/feeds reaches the DO /feeds handler (no 404)'
     )
 })
 

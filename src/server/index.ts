@@ -1295,7 +1295,14 @@ export const dataRouter = new Hono<{
 }>()
 
 dataRouter.use('*', requireAuth)
-dataRouter.use('*', requireEntitlement)
+
+/**
+ * Local-first sync infrastructure (`/api/sync`) is paid-only.
+ * Server-first storage (feeds, items) is free; non-paying users
+ * hit the user's Durable Object directly.
+ */
+dataRouter.use('/sync', requireEntitlement)
+dataRouter.use('/sync/*', requireEntitlement)
 
 function buildDoProxyHeaders (headers:Headers):Headers {
     const forwarded = new Headers()
@@ -1323,10 +1330,12 @@ dataRouter.all('*', async (c) => {
     const session = c.get('session')!
     const stub = getUserDO(c.env, session.did)
 
-    // Build the request URL for the DO
+    // Build the request URL for the DO. The dataRouter is mounted at
+    // /api via app.route, but Hono does not strip the mount prefix
+    // from c.req.url, so we strip it here before forwarding.
     const url = new URL(c.req.url)
-    const doPath = url.pathname
-    const doUrl = new URL(doPath || '/', 'http://do')
+    const doPath = url.pathname.replace(/^\/api/, '') || '/'
+    const doUrl = new URL(doPath, 'http://do')
     doUrl.search = url.search
 
     console.log(

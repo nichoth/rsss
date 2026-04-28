@@ -280,6 +280,12 @@ export class UserDO extends DurableObject<Env> {
     private app: Hono
     private sql: SqlStorage
     private manualRefreshClaims?:Map<number, number>
+    private subscribers = new Set<
+        ReadableStreamDefaultController<Uint8Array>
+    >()
+
+    private encoder = new TextEncoder()
+    private keepaliveInterval:ReturnType<typeof setInterval>|null = null
 
     constructor (ctx: DurableObjectState, env: Env) {
         super(ctx, env)
@@ -379,6 +385,39 @@ export class UserDO extends DurableObject<Env> {
         // Health check
         app.get('/health', (c) => {
             return c.json({ status: 'ok', service: 'do' })
+        })
+
+        // Server-sent events stream. Broadcasts state-change
+        // notifications (e.g. feed-updated) to all open clients
+        // for this user.
+        app.get('/events', () => {
+            let owned:ReadableStreamDefaultController<Uint8Array>|null
+                = null
+            const stream = new ReadableStream<Uint8Array>({
+                start: (controller) => {
+                    owned = controller
+                    controller.enqueue(
+                        this.encoder.encode(': connected\n\n')
+                    )
+                    this.subscribers.add(controller)
+                    this.ensureKeepalive()
+                },
+                cancel: () => {
+                    if (owned) {
+                        this.subscribers.delete(owned)
+                        owned = null
+                    }
+                    this.maybeStopKeepalive()
+                }
+            })
+
+            return new Response(stream, {
+                headers: {
+                    'Content-Type': 'text/event-stream',
+                    'Cache-Control': 'no-cache, no-transform',
+                    'X-Accel-Buffering': 'no'
+                }
+            })
         })
 
         // List all feeds
@@ -932,6 +971,54 @@ export class UserDO extends DurableObject<Env> {
     }
 
     /**
+     * Send an SSE event to all connected subscribers for this user.
+     */
+    private broadcast (event:string, data:unknown):void {
+        if (this.subscribers.size === 0) return
+
+        const payload = `event: ${event}\n` +
+            `data: ${JSON.stringify(data)}\n\n`
+        const bytes = this.encoder.encode(payload)
+
+        for (const controller of this.subscribers) {
+            try {
+                controller.enqueue(bytes)
+            } catch {
+                this.subscribers.delete(controller)
+            }
+        }
+        this.maybeStopKeepalive()
+    }
+
+    private ensureKeepalive ():void {
+        if (this.keepaliveInterval) return
+        this.keepaliveInterval = setInterval(() => {
+            if (this.subscribers.size === 0) {
+                this.maybeStopKeepalive()
+                return
+            }
+            const bytes = this.encoder.encode(':keepalive\n\n')
+            for (const controller of this.subscribers) {
+                try {
+                    controller.enqueue(bytes)
+                } catch {
+                    this.subscribers.delete(controller)
+                }
+            }
+        }, 20_000)
+    }
+
+    private maybeStopKeepalive ():void {
+        if (
+            this.keepaliveInterval &&
+            this.subscribers.size === 0
+        ) {
+            clearInterval(this.keepaliveInterval)
+            this.keepaliveInterval = null
+        }
+    }
+
+    /**
      * Fetch and parse an RSS/Atom feed
      */
     private async fetchFeed (feed: Feed): Promise<void> {
@@ -1034,6 +1121,8 @@ export class UserDO extends DurableObject<Env> {
                 err instanceof FeedFetchError ? err.status : 500,
                 feed.id
             )
+        } finally {
+            this.broadcast('feed-updated', { feedId: feed.id })
         }
     }
 
