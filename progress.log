@@ -196,6 +196,11 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Disable/reset sync cancellation**: Destructive local-first flows should
+  call `beginLocalFirstDisable(db)` before closing/removing local data and
+  `endLocalFirstDisable(db)` only after the removal window is over.
+  `runSync` treats that window as cancellation, aborts in-flight fetches,
+  and suppresses sync-status error writes.
 - **Bootstrap storage quota gate**: `bootstrapLocalDb` probes
   `navigator.storage.estimate()` before acquiring the local tab lock or
   opening SQLite. Low free space sets `bootstrapStorageWarning` and stops
@@ -2303,4 +2308,29 @@ Thread: https://ampcode.com/threads/unknown
     would cause new server items in the same feed to be skipped.
   - Static sync-invariant checks live in `test/sync-invariant-static.mjs`
     and are wired into `test/run-all-tests.mjs`.
+---
+## 2026-04-27 18:33 PDT - US-090
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Made local-first disable cancel-safe for in-flight
+  sync.
+  - Added a regression that starts a hanging pull request, disables
+    local-first, and verifies the request aborts without setting a sync UI
+    error while OPFS removal runs exactly once.
+  - Added per-DB sync cancellation state and abort controllers around
+    `runSync` fetches.
+  - Wired disable/reset flows to mark the destructive local-data removal
+    window before closing the SQLite handle and removing OPFS data.
+- Files changed:
+  - `src/client/db/sync.ts`
+  - `src/client/db/index.ts`
+  - `test/bootstrap.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Disable/reset flows should abort any active `runSync` before closing
+    the cached DB or removing the OPFS file, then suppress cancellation as
+    a normal outcome instead of surfacing it through sync status.
+  - Focused bootstrap tests run through `npm run test:bootstrap`; direct
+    `npx vitest test/bootstrap.ts` is not the project runner and fails
+    during Cloudflare/Vite startup.
 ---

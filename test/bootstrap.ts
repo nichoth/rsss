@@ -32,6 +32,12 @@ import {
 import {
     resetTabCoordinationForTests
 } from '../src/client/db/tab-coordination.js'
+import { runSync } from '../src/client/db/sync.js'
+import {
+    isLocalFirstActive,
+    syncError,
+    syncStatus
+} from '../src/client/db/sync-status.js'
 import type { Sqlite3Db } from '../src/client/db/sqlite-init.js'
 import type { SQLiteWorkerClient } from
     '../src/client/db/sqlite-worker-client.js'
@@ -544,6 +550,87 @@ test('disableLocalFirst: aborts when pending writes cannot sync',
             'local db cache remains available')
 
         db.close()
+        clearBootstrappedDb()
+        _resetAdapterCache()
+    }
+)
+
+test('disableLocalFirst: cancels in-flight sync without UI error',
+    async (t) => {
+        clearBootstrappedDb()
+        setupSupportedLocalFirst()
+        const removed:string[] = []
+
+        Object.defineProperty(navigator, 'storage', {
+            value: {
+                getDirectory: async () => ({
+                    getDirectoryHandle: async () => ({
+                        removeEntry: async (name:string) => {
+                            removed.push(name)
+                        }
+                    })
+                })
+            },
+            configurable: true
+        })
+
+        await getAdapter('did:test:disable-cancel-safe')
+        const db = getLocalDb('did:test:disable-cancel-safe')
+        t.ok(db, 'local db is cached')
+        if (!db) return
+
+        isLocalFirstActive.value = true
+        syncStatus.value = 'idle'
+        syncError.value = null
+
+        let pullStarted:() => void = () => {}
+        let pullAborted:() => void = () => {}
+        const started = new Promise<void>((resolve) => {
+            pullStarted = resolve
+        })
+        const aborted = new Promise<void>((resolve) => {
+            pullAborted = resolve
+        })
+
+        const hangingFetch = (async (
+            _url:RequestInfo|URL,
+            init?:RequestInit
+        ) => {
+            if (init?.method) {
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async () => ({})
+                } as Response
+            }
+
+            pullStarted()
+            await new Promise((_resolve, reject) => {
+                init?.signal?.addEventListener('abort', () => {
+                    pullAborted()
+                    reject(new DOMException('Aborted', 'AbortError'))
+                }, { once: true })
+            })
+            throw new Error('unreachable')
+        }) as typeof fetch
+
+        const syncPromise = runSync(db, hangingFetch)
+        await started
+        await disableLocalFirst('did:test:disable-cancel-safe')
+        await aborted
+        await syncPromise
+
+        t.equal(syncError.value, null, 'sync error is not set')
+        t.notEqual(syncStatus.value, 'error', 'status does not flash error')
+        t.equal(removed.length, 1, 'OPFS file is removed exactly once')
+        t.equal(
+            removed[0],
+            'rsss-did_test_disable_cancel_safe.db',
+            'removes the expected OPFS file'
+        )
+        t.equal(syncSubscriptions.value, false, 'local-first is disabled')
+
+        isLocalFirstActive.value = false
         clearBootstrappedDb()
         _resetAdapterCache()
     }
