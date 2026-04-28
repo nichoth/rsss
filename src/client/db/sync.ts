@@ -21,6 +21,7 @@ const inFlightSyncs = new WeakMap<Sqlite3Db, Promise<void>>()
 /**
  * Run one local-first sync cycle. Push goes first so optimistic writes
  * reach the server before pull can merge newer remote rows.
+ * Invariant: getPendingOutboxRefs is called after pushSync resolves.
  */
 export async function runSync (
     db:Sqlite3Db,

@@ -256,6 +256,7 @@ export async function pullSync (
     const lastPullAt = await getLastPullAt(db)
     let cursor = await getPullCursor(db)
     const keepContent = storeContent.value
+    // Invariant: getPendingOutboxRefs is called after pushSync resolves.
     const pendingRefs = await getPendingOutboxRefs(db)
     let skippedRows = false
     let done = false

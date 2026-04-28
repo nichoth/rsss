@@ -391,6 +391,8 @@ Thread: https://ampcode.com/threads/unknown
 - **Local-first sync cycle order**: Use `src/client/db/sync-cycle.ts` for
   app-triggered sync cycles. It runs `pushSync` before `pullSync` so pending
   optimistic writes reach the server before remote rows are merged locally.
+  Keep `getPendingOutboxRefs` on the pull side after `pushSync` resolves,
+  otherwise stale `mark_all_read` refs can hide newly pulled server items.
 - **Pending outbox pull protection**: `pullSync` skips server rows covered by
   pending outbox operations (`update_item`, `mark_all_read`, `add_feed`,
   `delete_feed`) so stale pulls cannot overwrite local optimistic writes.
@@ -2219,4 +2221,29 @@ Thread: https://ampcode.com/threads/unknown
     checks in server LWW paths.
   - Same-item local `updateItem` calls are coalesced into one outbox row, so
     same-tick update regressions should assert the final pushed payload.
+---
+## 2026-04-27 18:00 PDT - US-087
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Documented and tested the mark-all-read
+  push-then-pull invariant.
+  - Added invariant comments in `sync.ts` and `pull-sync.ts` stating that
+    `getPendingOutboxRefs` is called after `pushSync` resolves.
+  - Added a sync-cycle regression for offline `mark_all_read`, a server-side
+    new item, then online push and pull; the new item remains visible.
+  - Added a static regression that keeps the invariant comments present.
+- Files changed:
+  - `src/client/db/sync.ts`
+  - `src/client/db/pull-sync.ts`
+  - `test/sync-cycle.ts`
+  - `test/sync-invariant-static.mjs`
+  - `test/run-all-tests.mjs`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `runSync` must call `pushSync` before `pullSync` so
+    `getPendingOutboxRefs` reads the post-drain outbox state. This is
+    especially important for `mark_all_read`, because a stale pending ref
+    would cause new server items in the same feed to be skipped.
+  - Static sync-invariant checks live in `test/sync-invariant-static.mjs`
+    and are wired into `test/run-all-tests.mjs`.
 ---
