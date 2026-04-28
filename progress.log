@@ -219,10 +219,13 @@ Thread: https://ampcode.com/threads/unknown
   - `bootstrapLocalDb` lives in its own module (`bootstrap.ts`) to avoid circular imports between `index.ts` (which imports it) and the settings/state layers.
   - `getBootstrappedDb()` / `clearBootstrappedDb()` let `getAdapter()` reuse the DB opened during bootstrap without re-opening it.
   - `pullSync` progress callbacks fire inside the transaction loop — useful for live UI but note the DB is mid-transaction when callbacks fire.
----
 
 ## Codebase Patterns
 
+- **Cookie-header server tests**: Tests that need to send a `Cookie`
+  request header through the real Hono app must run in Node. Chromium-based
+  `tapout` tests strip that header, so use a Node-bundled test like
+  `test/session-record.ts` or the signup server suite.
 - **CORS app origin allowlist**: Server CORS must echo request origins only
   when `origin === env.APP_ORIGIN`. Do not fall back to request origin or a
   hardcoded production origin; missing `APP_ORIGIN` is a config error even in
@@ -2555,4 +2558,27 @@ Thread: https://ampcode.com/threads/unknown
     request URLs are not an implicit CORS allowlist entry.
   - Keep missing `APP_ORIGIN` visible through `/api/health` so deploy
     misconfiguration is caught before relying on API CORS behavior.
+---
+## 2026-04-27 20:21 PDT - US-099
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Validated session records loaded from KV.
+  - Added runtime guards for the parsed stored session shape before
+    `verifySessionCookie` returns an OAuth session.
+  - Invalid stored session records are deleted from KV.
+  - The session middleware now clears the browser session cookie when a
+    presented cookie fails verification.
+  - Added a Node-side regression for a malformed `session:<sid>` record
+    asserting a 401, KV deletion, and a cleared cookie.
+- Files changed:
+  - `src/server/auth/oauth.ts`
+  - `src/server/index.ts`
+  - `test/session-record.ts`
+  - `test/run-all-tests.mjs`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Cookie-header tests for the real Hono app must run in Node because
+    Chromium `tapout` tests strip the request `Cookie` header.
+  - Parsed KV values should be treated as `unknown` until runtime guards
+    validate nested auth fields.
 ---

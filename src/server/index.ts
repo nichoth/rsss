@@ -359,6 +359,9 @@ app.use('*', async (c, next) => {
             c.env.SESSIONS
         )
         c.set('session', session)
+        if (!session) {
+            deleteCookie(c, 'session', { path: '/' })
+        }
     } else {
         c.set('session', null)
     }
