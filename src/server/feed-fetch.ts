@@ -38,6 +38,10 @@ export async function validateFeedUrl (feedUrl:string):Promise<string> {
         throw new FeedFetchError('Feed URL host is not allowed')
     }
 
+    if (url.pathname.length > 1 && url.pathname.endsWith('/')) {
+        url.pathname = url.pathname.replace(/\/+$/, '')
+    }
+
     return url.toString()
 }
 

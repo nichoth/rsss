@@ -185,6 +185,39 @@ test(
     }
 )
 
+test('UserDO add feed deduplicates canonical URL variants', async t => {
+    const { app, sql, waitUntilPromises } = createDoHarness()
+
+    const createResponse = await app.request('/feeds', {
+        method: 'POST',
+        body: JSON.stringify({
+            url: 'https://Example.COM/feed/'
+        })
+    })
+    const createBody = await createResponse.json() as { feed:FeedRow }
+
+    const duplicateResponse = await app.request('/feeds', {
+        method: 'POST',
+        body: JSON.stringify({
+            url: 'https://example.com/feed'
+        })
+    })
+
+    t.equal(createResponse.status, 201, 'variant creates the feed')
+    t.equal(
+        createBody.feed.url,
+        'https://example.com/feed',
+        'created feed stores canonical URL'
+    )
+    t.equal(duplicateResponse.status, 409, 'canonical duplicate conflicts')
+    t.equal(sql.feeds.length, 3, 'no duplicate feed row is inserted')
+    t.equal(
+        waitUntilPromises.length,
+        1,
+        'only the created feed schedules a refresh'
+    )
+})
+
 test(
     'UserDO delete feed treats client_op_id missing row as idempotent',
     async t => {

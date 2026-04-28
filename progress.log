@@ -222,6 +222,10 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Feed URL canonicalization**: Feed URL writes and dedupe lookups should use
+  `validateFeedUrl()` and store its returned value. It lowercases URL parts
+  through `URL` and strips trailing slashes from non-root paths so add-feed
+  retries and user duplicates compare against the same canonical string.
 - **Cookie-header server tests**: Tests that need to send a `Cookie`
   request header through the real Hono app must run in Node. Chromium-based
   `tapout` tests strip that header, so use a Node-bundled test like
@@ -2581,4 +2585,21 @@ Thread: https://ampcode.com/threads/unknown
     Chromium `tapout` tests strip the request `Cookie` header.
   - Parsed KV values should be treated as `unknown` until runtime guards
     validate nested auth fields.
+---
+## 2026-04-27 20:26 PDT - US-100
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Normalized feed URLs before add-feed dedupe.
+  - `validateFeedUrl()` now strips trailing slashes from non-root paths
+    after URL parsing and blocked-host validation.
+  - Added a Durable Object handler regression for
+    `https://Example.COM/feed/` and `https://example.com/feed` resolving to
+    the same stored feed row.
+- Files changed:
+  - `src/server/feed-fetch.ts`
+  - `test/do-handlers.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Store and compare the value returned by `validateFeedUrl()` for feed
+    URLs; callers should not preserve the raw request URL for dedupe paths.
 ---
