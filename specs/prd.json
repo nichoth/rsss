@@ -1663,7 +1663,7 @@
         "Typecheck passes"
       ],
       "priority": 108,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

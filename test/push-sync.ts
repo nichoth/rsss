@@ -7,6 +7,7 @@ import {
     setTestMode
 } from '../src/client/db/sqlite-init.js'
 import {
+    DEAD_LETTER_ATTEMPT_LIMIT,
     pushSync,
     PushSyncAuthError,
     PushSyncBillingError
@@ -452,13 +453,18 @@ test('pushSync: 5xx increments attempts and preserves row', async (t) => {
 test('pushSync: permanent failure moves row to dead letters', async (t) => {
     const db = await openLocalDb('did:test:push-deadletter')
     try {
+        const attemptsBeforeFinalFailure = DEAD_LETTER_ATTEMPT_LIMIT - 1
+
         db.exec({
             sql: `INSERT INTO outbox
                 (op, target_id, payload, client_op_id,
                  client_updated_at, attempts)
                 VALUES ('add_feed', NULL, ?, 'op-uuid-dead',
-                    '2026-01-01 00:00:00', 9)`,
-            bind: [JSON.stringify({ url: 'https://ex.com/dead.xml' })]
+                    '2026-01-01 00:00:00', ?)`,
+            bind: [
+                JSON.stringify({ url: 'https://ex.com/dead.xml' }),
+                attemptsBeforeFinalFailure
+            ]
         })
 
         await pushSync(db, makeFetch(400))
@@ -479,10 +485,50 @@ test('pushSync: permanent failure moves row to dead letters', async (t) => {
             'op-uuid-dead',
             'client_op_id is preserved'
         )
-        t.equal(deadRows[0]?.attempts, 10, 'final attempt is recorded')
+        t.equal(
+            deadRows[0]?.attempts,
+            DEAD_LETTER_ATTEMPT_LIMIT,
+            'final attempt is recorded'
+        )
         t.ok(
             deadRows[0]?.last_error?.includes('HTTP 400'),
             'last_error is preserved'
+        )
+    } finally {
+        db.close()
+    }
+})
+
+test('pushSync: dead-letter rows are not retried', async (t) => {
+    const db = await openLocalDb('did:test:push-deadletter-not-retried')
+    try {
+        db.exec({
+            sql: `INSERT INTO dead_letter_outbox
+                (op, target_id, payload, client_op_id,
+                 client_updated_at, attempts, last_error)
+                VALUES ('add_feed', NULL, ?, 'op-uuid-already-dead',
+                    '2026-01-01 00:00:00', ?, 'HTTP 400')`,
+            bind: [
+                JSON.stringify({ url: 'https://ex.com/already-dead.xml' }),
+                DEAD_LETTER_ATTEMPT_LIMIT
+            ]
+        })
+
+        let calls = 0
+        await pushSync(db, async () => {
+            calls += 1
+            return {
+                ok: true,
+                status: 200,
+                json: async () => ({})
+            }
+        })
+
+        t.equal(calls, 0, 'dead-letter row is not sent')
+        t.equal(
+            queryAll(db, 'SELECT * FROM dead_letter_outbox').length,
+            1,
+            'dead-letter row remains for manual recovery'
         )
     } finally {
         db.close()

@@ -222,6 +222,10 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Dead-letter attempt limit**: Tests that seed near-threshold outbox rows
+  should import `DEAD_LETTER_ATTEMPT_LIMIT` from `push-sync.ts` instead of
+  hardcoding `9` or `10`, so retry-cap regressions track the configured
+  limit.
 - **Worker-to-DO proxy headers**: `dataRouter` must build a fresh DO
   `Request` with an explicit allowlist. Forward only `content-type`,
   `cookie`, and `x-rsss-*` headers; never pass through client auth headers
@@ -2782,4 +2786,25 @@ Thread: https://ampcode.com/threads/unknown
     persistent worker-backed fake instead of test-mode `:memory:` DBs, then
     restore `setTestMode(true, wasmUrl)` and reset adapter/tab caches in
     teardown.
+---
+
+## 2026-04-27 21:18 PDT - US-108
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added dead-letter outbox regression coverage.
+  - Exported `DEAD_LETTER_ATTEMPT_LIMIT` from `push-sync.ts`.
+  - Updated the dead-letter promotion test to use the shared attempt limit.
+  - Added coverage that existing `dead_letter_outbox` rows are not retried.
+  - Added sync-cycle coverage that final sync status includes dead-letter
+    count after `runSync`.
+- Files changed:
+  - `src/client/db/push-sync.ts`
+  - `test/push-sync.ts`
+  - `test/sync-cycle.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Dead-letter retry-cap tests should import the shared attempt limit rather
+    than duplicating literal threshold values.
+  - Browser tapout tests use a fixed port; run focused tapout commands
+    serially when invoking multiple suites.
 ---

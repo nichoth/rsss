@@ -7,6 +7,8 @@ import {
     isLocalFirstActive
 } from './sync-status.js'
 
+export const DEAD_LETTER_ATTEMPT_LIMIT = 10
+
 export class PushSyncAuthError extends Error {
     constructor () {
         super('pushSync: 401 unauthorized — halting drain')

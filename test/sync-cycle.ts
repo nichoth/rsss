@@ -360,6 +360,50 @@ test('runSync marks sync done once after push and pull finish',
     }
 )
 
+test('runSync includes dead-letter count in final sync status',
+    async (t) => {
+        const db = await openLocalDb('did:test:sync-cycle-dead-letters')
+
+        isLocalFirstActive.value = true
+        syncStatus.value = 'idle'
+        syncedAt.value = null
+        syncPending.value = 0
+        syncDeadLetters.value = 0
+        syncError.value = null
+
+        try {
+            db.exec({
+                sql: `INSERT INTO dead_letter_outbox
+                    (op, target_id, payload, client_op_id,
+                     client_updated_at, attempts, last_error)
+                    VALUES ('add_feed', NULL, ?, 'op-cycle-dead',
+                        '2026-01-01 00:00:00', 10, 'HTTP 400')`,
+                bind: [JSON.stringify({ url: 'https://example.com/dead' })]
+            })
+
+            await runSync(db, async () => ({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    feeds: [],
+                    items: [],
+                    syncedAt: '2026-01-04 00:00:00',
+                    latestUpdatedAt: '2026-01-04 00:00:00',
+                    isFullSync: false
+                })
+            } as Response))
+
+            t.equal(syncStatus.value, 'warning', 'status shows warning')
+            t.equal(syncDeadLetters.value, 1, 'dead-letter count is kept')
+            t.equal(syncPending.value, 0, 'pending count is still zero')
+            t.ok(syncedAt.value, 'syncedAt updates at the end')
+        } finally {
+            isLocalFirstActive.value = false
+            db.close()
+        }
+    }
+)
+
 test('runSync refreshes pending count after push when pull fails',
     async (t) => {
         const db = await openLocalDb('did:test:sync-cycle-pull-error')
