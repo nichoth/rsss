@@ -31,6 +31,45 @@ async function insertOutbox (
     })
 }
 
+async function upsertUpdateItemOutbox (
+    db:Sqlite3Db,
+    id:number,
+    payload:Record<string, unknown>,
+    clientUpdatedAt:string
+):Promise<void> {
+    const row = await queryOneDb<{ id:number; payload:string }>(
+        db,
+        `SELECT id, payload FROM outbox
+         WHERE op = 'update_item' AND target_id = ?
+         ORDER BY id ASC
+         LIMIT 1`,
+        [id]
+    )
+
+    if (!row) {
+        await insertOutbox(db, 'update_item', id, payload, clientUpdatedAt)
+        return
+    }
+
+    let previous:Record<string, unknown> = {}
+    try {
+        previous = JSON.parse(row.payload) as Record<string, unknown>
+    } catch {
+        previous = {}
+    }
+
+    await execDb(db, {
+        sql: `UPDATE outbox
+              SET payload = ?, client_updated_at = ?
+              WHERE id = ?`,
+        bind: [
+            JSON.stringify({ ...previous, ...payload }),
+            clientUpdatedAt,
+            row.id
+        ]
+    })
+}
+
 export function createLocalAdapter (db:Sqlite3Db):DbAdapter {
     return {
         async getFeeds ():Promise<Feed[]> {
@@ -197,8 +236,8 @@ export function createLocalAdapter (db:Sqlite3Db):DbAdapter {
             if (fields.length === 0) return
 
             const now = formatSqliteTs(new Date())
-            fields.push("updated_at = datetime('now')")
-            params.push(id)
+            fields.push('updated_at = ?')
+            params.push(now, id)
 
             await execDb(db, 'BEGIN')
             try {
@@ -206,10 +245,26 @@ export function createLocalAdapter (db:Sqlite3Db):DbAdapter {
                     sql: `UPDATE items SET ${fields.join(', ')} WHERE id = ?`,
                     bind: params
                 })
-                await insertOutbox(db, 'update_item', id, {
-                    id,
-                    ...updates
-                }, now)
+
+                const item = await queryOneDb<{
+                    is_read:number
+                    is_starred:number
+                }>(
+                    db,
+                    'SELECT is_read, is_starred FROM items WHERE id = ?',
+                    [id]
+                )
+                if (!item) throw new Error('updateItem: item not found')
+
+                const payload:Record<string, unknown> = { id }
+                if (updates.is_read !== undefined) {
+                    payload.is_read = item.is_read === 1
+                }
+                if (updates.is_starred !== undefined) {
+                    payload.is_starred = item.is_starred === 1
+                }
+
+                await upsertUpdateItemOutbox(db, id, payload, now)
                 await execDb(db, 'COMMIT')
             } catch (err) {
                 await execDb(db, 'ROLLBACK')
@@ -224,14 +279,15 @@ export function createLocalAdapter (db:Sqlite3Db):DbAdapter {
                 if (feedId !== undefined) {
                     await execDb(db, {
                         sql: 'UPDATE items SET is_read = 1,' +
-                            " updated_at = datetime('now')" +
+                            ' updated_at = ?' +
                             ' WHERE feed_id = ? AND is_read = 0',
-                        bind: [feedId]
+                        bind: [now, feedId]
                     })
                 } else {
                     await execDb(db, {
                         sql: 'UPDATE items SET is_read = 1,' +
-                            " updated_at = datetime('now') WHERE is_read = 0"
+                            ' updated_at = ? WHERE is_read = 0',
+                        bind: [now]
                     })
                 }
                 await insertOutbox(

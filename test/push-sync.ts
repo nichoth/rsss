@@ -95,6 +95,29 @@ function seedItem (db:Sqlite3Db, feedId:number):number {
     return row!.id
 }
 
+async function withMockedNow (
+    iso:string,
+    fn:() => Promise<void>
+):Promise<void> {
+    const RealDate = Date
+    const fixedMs = RealDate.parse(iso)
+    class MockDate extends RealDate {
+        constructor () {
+            super(fixedMs)
+        }
+
+        static now ():number {
+            return fixedMs
+        }
+    }
+    globalThis.Date = MockDate as DateConstructor
+    try {
+        await fn()
+    } finally {
+        globalThis.Date = RealDate
+    }
+}
+
 // ── happy path ────────────────────────────────────────────────────────────────
 
 test('pushSync: happy path deletes outbox row on 2xx', async (t) => {
@@ -142,6 +165,92 @@ test('pushSync: happy path deletes outbox row on 2xx', async (t) => {
     }
 })
 
+test(
+    'pushSync: same-tick updateItem writes final state to server',
+    async (t) => {
+        const db = await openLocalDb('did:test:push-same-tick-update')
+        try {
+            const feedId = seedFeed(db)
+            const itemId = seedItem(db, feedId)
+            const adapter = createLocalAdapter(db)
+            const sameTick = '2032-03-04 05:06:07'
+            const serverItem = {
+                id: itemId,
+                feed_id: feedId,
+                guid: 'guid-1',
+                title: 'Item 1',
+                link: 'https://example.com/1',
+                description: null,
+                content: null,
+                author: null,
+                pub_date: null,
+                is_read: 0,
+                is_starred: 0,
+                created_at: '2026-01-01 00:00:00',
+                updated_at: sameTick
+            }
+            let requests = 0
+
+            await withMockedNow('2032-03-04T05:06:07.000Z', async () => {
+                await adapter.updateItem(itemId, { is_read: true })
+                await adapter.updateItem(itemId, { is_starred: true })
+            })
+
+            const fakeServer:FakeFetch = async (_url, init) => {
+                requests += 1
+                const body = JSON.parse(
+                    init?.body as string
+                ) as Record<string, unknown>
+
+                t.equal(
+                    body.client_updated_at,
+                    sameTick,
+                    'server sees the equal client timestamp'
+                )
+
+                if (serverItem.updated_at > body.client_updated_at!) {
+                    return {
+                        ok: false,
+                        status: 409,
+                        json: async () => ({ item: serverItem })
+                    }
+                }
+
+                if (body.is_read !== undefined) {
+                    serverItem.is_read = body.is_read ? 1 : 0
+                }
+                if (body.is_starred !== undefined) {
+                    serverItem.is_starred = body.is_starred ? 1 : 0
+                }
+                serverItem.updated_at = body.client_updated_at as string
+
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async () => ({ item: serverItem })
+                }
+            }
+
+            await pushSync(db, fakeServer)
+
+            t.equal(requests, 1, 'coalesced updates send one request')
+            t.equal(serverItem.is_read, 1, 'server has final read state')
+            t.equal(
+                serverItem.is_starred,
+                1,
+                'server has final starred state'
+            )
+            t.equal(
+                queryAll(db, 'SELECT * FROM outbox').length,
+                0,
+                'outbox row drains after equal timestamp write'
+            )
+        } finally {
+            db.close()
+        }
+    }
+)
+
 test('pushSync: add_feed 2xx replaces optimistic feed ID', async (t) => {
     const db = await openLocalDb('did:test:push-add-feed-id')
     try {
@@ -181,6 +290,135 @@ test('pushSync: add_feed 2xx replaces optimistic feed ID', async (t) => {
         db.close()
     }
 })
+
+test(
+    'pushSync: add_feed rewrite lets pending delete use server ID',
+    async (t) => {
+        const db = await openLocalDb('did:test:push-add-delete-feed')
+        try {
+            const adapter = createLocalAdapter(db)
+            const optimisticFeed = await adapter.addFeed(
+                'https://example.com/delete-me.xml'
+            )
+            await adapter.deleteFeed(optimisticFeed.id)
+
+            const serverFeed = {
+                id: optimisticFeed.id + 100,
+                url: 'https://example.com/delete-me.xml',
+                title: 'Deleted Feed',
+                description: null,
+                site_url: 'https://example.com',
+                last_fetched: '2026-01-03 00:00:00',
+                created_at: '2026-01-03 00:00:00',
+                updated_at: '2026-01-03 00:00:00'
+            }
+            const urls:string[] = []
+            const fetchFn:FakeFetch = async (url) => {
+                urls.push(url)
+                if (url === '/api/feeds') {
+                    return {
+                        ok: true,
+                        status: 201,
+                        json: async () => ({ feed: serverFeed })
+                    }
+                }
+                return {
+                    ok: url === `/api/feeds/${serverFeed.id}`,
+                    status: url === `/api/feeds/${serverFeed.id}` ? 204 : 404,
+                    json: async () => ({})
+                }
+            }
+
+            await pushSync(db, fetchFn)
+
+            t.deepEqual(urls, [
+                '/api/feeds',
+                `/api/feeds/${serverFeed.id}`
+            ], 'delete request uses canonical server id')
+
+            const feeds = queryAll(db, 'SELECT * FROM feeds')
+            t.equal(feeds.length, 0, 'no local feed is recreated')
+
+            const outboxRows = queryAll(db, 'SELECT * FROM outbox')
+            t.equal(outboxRows.length, 0, 'both outbox rows are drained')
+        } finally {
+            db.close()
+        }
+    }
+)
+
+test(
+    'pushSync: add_feed reconcile preserves attached item state',
+    async (t) => {
+        const db = await openLocalDb('did:test:push-add-feed-items')
+        try {
+            const adapter = createLocalAdapter(db)
+            const optimisticFeed = await adapter.addFeed(
+                'https://example.com/offline.xml'
+            )
+
+            db.exec({
+                sql: `INSERT INTO items
+                    (feed_id, guid, title, link, is_read, is_starred,
+                     created_at, updated_at)
+                    VALUES
+                        (?, 'offline-1', 'Offline 1',
+                         'https://example.com/offline/1', 1, 0,
+                         '2026-01-01 00:00:00', '2026-01-02 00:00:00'),
+                        (?, 'offline-2', 'Offline 2',
+                         'https://example.com/offline/2', 1, 0,
+                         '2026-01-01 00:00:00', '2026-01-02 00:00:00'),
+                        (?, 'offline-3', 'Offline 3',
+                         'https://example.com/offline/3', 0, 1,
+                         '2026-01-01 00:00:00', '2026-01-02 00:00:00')`,
+                bind: [
+                    optimisticFeed.id,
+                    optimisticFeed.id,
+                    optimisticFeed.id
+                ]
+            })
+
+            const serverFeed = {
+                id: optimisticFeed.id + 100,
+                url: 'https://example.com/offline.xml',
+                title: 'Offline Feed',
+                description: null,
+                site_url: 'https://example.com',
+                last_fetched: '2026-01-03 00:00:00',
+                created_at: '2026-01-03 00:00:00',
+                updated_at: '2026-01-03 00:00:00'
+            }
+
+            await pushSync(db, makeFetch(201, { feed: serverFeed }))
+
+            const items = queryAll<{
+                guid:string
+                feed_id:number
+                is_read:number
+                is_starred:number
+            }>(
+                db,
+                `SELECT guid, feed_id, is_read, is_starred
+                 FROM items
+                 WHERE feed_id = ?
+                 ORDER BY guid ASC`,
+                [serverFeed.id]
+            )
+
+            t.equal(items.length, 3, 'all attached items survive reconcile')
+            t.equal(
+                items[0]?.feed_id,
+                serverFeed.id,
+                'items use server feed id'
+            )
+            t.equal(items[0]?.is_read, 1, 'first read flag survives')
+            t.equal(items[1]?.is_read, 1, 'second read flag survives')
+            t.equal(items[2]?.is_starred, 1, 'starred flag survives')
+        } finally {
+            db.close()
+        }
+    }
+)
 
 // ── 5xx retry ─────────────────────────────────────────────────────────────────
 

@@ -11,6 +11,7 @@ import {
     bootstrapFeedsCount,
     bootstrapItemsCount,
     bootstrapError,
+    bootstrapRetryAvailable,
     getBootstrappedDb,
     clearBootstrappedDb
 } from '../src/client/db/bootstrap.js'
@@ -60,6 +61,10 @@ function setupSupportedLocalFirst ():void {
                 })
             })
         },
+        configurable: true
+    })
+    Object.defineProperty(navigator, 'locks', {
+        value: undefined,
         configurable: true
     })
     Object.defineProperty(globalThis, 'crossOriginIsolated', {
@@ -223,24 +228,87 @@ test('bootstrapLocalDb: bootstrap is idempotent (re-run adds no dupes)',
     }
 )
 
-test('bootstrapLocalDb: server error reverts syncSubscriptions', async (t) => {
-    clearBootstrappedDb()
-    syncSubscriptions.value = true
-    bootstrapError.value = null
+test('bootstrapLocalDb: server error leaves local-first retryable',
+    async (t) => {
+        clearBootstrappedDb()
+        syncSubscriptions.value = true
+        bootstrapError.value = null
 
-    const fetchFn = makeFetch({ error: 'internal' }, 500)
-    await bootstrapLocalDb('did:test:bootstrap3', fetchFn)
+        const fetchFn = makeFetch({ error: 'internal' }, 500)
+        await bootstrapLocalDb('did:test:bootstrap3', fetchFn)
 
-    t.equal(bootstrapInProgress.value, false, 'inProgress false after error')
-    t.ok(bootstrapError.value !== null, 'error signal set')
-    t.equal(syncSubscriptions.value, false,
-        'syncSubscriptions reverted to false')
-    t.equal(getBootstrappedDb(), null, 'no db after failure')
-})
+        t.equal(bootstrapInProgress.value, false,
+            'inProgress false after error')
+        t.ok(bootstrapError.value !== null, 'error signal set')
+        t.equal(syncSubscriptions.value, true,
+            'syncSubscriptions stays true for retry')
+        t.equal(bootstrapRetryAvailable.value, true,
+            'server error exposes retry')
+        t.equal(getBootstrappedDb(), null, 'no db after failure')
+    }
+)
+
+test('bootstrapLocalDb: transient fetch failure keeps local-first retryable',
+    async (t) => {
+        clearBootstrappedDb()
+        syncSubscriptions.value = true
+        bootstrapError.value = null
+        bootstrapRetryAvailable.value = false
+        const removed:string[] = []
+        let calls = 0
+
+        Object.defineProperty(navigator, 'storage', {
+            value: {
+                getDirectory: async () => ({
+                    getDirectoryHandle: async () => ({
+                        removeEntry: async (name:string) => {
+                            removed.push(name)
+                        }
+                    })
+                })
+            },
+            configurable: true
+        })
+
+        const fetchFn = (async () => {
+            calls += 1
+            if (calls === 1) {
+                throw new TypeError('Failed to fetch')
+            }
+            return {
+                ok: true,
+                status: 200,
+                json: async () => syncPayload
+            } as Response
+        }) as typeof fetch
+
+        await bootstrapLocalDb('did:test:bootstrap-transient', fetchFn)
+
+        t.equal(syncSubscriptions.value, true,
+            'transient failure leaves local-first enabled')
+        t.equal(removed.length, 0,
+            'transient failure leaves OPFS data in place')
+        t.equal(bootstrapRetryAvailable.value, true,
+            'transient failure exposes retry')
+        t.equal(getBootstrappedDb(), null, 'no db after failed attempt')
+
+        await bootstrapLocalDb('did:test:bootstrap-transient', fetchFn)
+
+        t.equal(calls, 2, 'retry calls fetch again')
+        t.equal(bootstrapError.value, null, 'retry clears bootstrap error')
+        t.equal(bootstrapRetryAvailable.value, false,
+            'successful retry clears retry state')
+        t.ok(getBootstrappedDb(), 'retry bootstraps the local db')
+
+        getBootstrappedDb()?.close()
+        clearBootstrappedDb()
+    }
+)
 
 test('bootstrapLocalDb: failed bootstrap clears state and partial data',
     async (t) => {
         clearBootstrappedDb()
+        setupSupportedLocalFirst()
         syncSubscriptions.value = true
         bootstrapError.value = null
         const removed:string[] = []
@@ -277,7 +345,8 @@ test('bootstrapLocalDb: failed bootstrap clears state and partial data',
         syncSubscriptions.value = true
         await bootstrapLocalDb(
             'did:test:bootstrap-fails',
-            makeFetch({ error: 'internal' }, 500)
+            makeFetch({ error: 'bad request' }, 400),
+            { confirmTerminalReset: async () => true }
         )
 
         t.equal(getBootstrappedDb(), null, 'clears bootstrapped db on failure')
@@ -304,6 +373,13 @@ test('resetLocalFirst closes worker db before removing OPFS data',
         _resetAdapterCache()
         resetTabCoordinationForTests()
         syncSubscriptions.value = true
+        billingStatus.value = {
+            entitled: true,
+            planId: 'local-first',
+            status: 'active',
+            refreshedAt: Date.now(),
+            useLive: false
+        }
         const events:string[] = []
 
         Object.defineProperty(navigator, 'storage', {

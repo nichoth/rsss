@@ -19,6 +19,119 @@ import {
 
 const AUTUMN_KEY = 'am_test_secret_key'
 
+function hasCookieAttribute (
+    setCookie:string|null,
+    attribute:string
+):boolean {
+    return (setCookie || '')
+        .split(';')
+        .some(part => part.trim().toLowerCase() === attribute)
+}
+
+test(
+    'POST /api/auth/dev-login rejects non-loopback hosts',
+    async t => {
+        const env = makeEnv({ NODE_ENV: 'development' })
+        const res = await app.request(
+            'https://rsss.space/api/auth/dev-login',
+            {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({})
+            },
+            env,
+            executionCtx
+        )
+        const body = await res.json() as { error?:string }
+
+        t.equal(res.status, 403, 'returns 403')
+        t.equal(
+            body.error,
+            'Not allowed on non-loopback host',
+            'rejects public hosts even in development'
+        )
+    }
+)
+
+test(
+    'POST /api/auth/dev-login requires SESSION_SECRET',
+    async t => {
+        const env = makeEnv({ NODE_ENV: 'development' })
+        delete (env as Partial<typeof env>).SESSION_SECRET
+
+        const res = await app.request(
+            'http://127.0.0.1/api/auth/dev-login',
+            {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({})
+            },
+            env,
+            executionCtx
+        )
+        const body = await res.json() as { error?:string }
+
+        t.equal(res.status, 500, 'returns 500')
+        t.equal(
+            body.error,
+            'SESSION_SECRET is not configured',
+            'does not fall back to a hardcoded secret'
+        )
+    }
+)
+
+test(
+    'POST /api/auth/dev-login treats unset NODE_ENV as production',
+    async t => {
+        const env = makeEnv()
+        delete (env as Partial<typeof env>).NODE_ENV
+
+        const res = await app.request(
+            'http://127.0.0.1/api/auth/dev-login',
+            {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({})
+            },
+            env,
+            executionCtx
+        )
+        const body = await res.json() as { error?:string }
+
+        t.equal(res.status, 403, 'returns 403')
+        t.equal(
+            body.error,
+            'Not allowed in production',
+            'unset NODE_ENV is not treated as development'
+        )
+    }
+)
+
+test(
+    'POST /api/auth/dev-login omits Secure for loopback cookies',
+    async t => {
+        const env = makeEnv({ NODE_ENV: 'development' })
+        const res = await app.request(
+            'http://127.0.0.1/api/auth/dev-login',
+            {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({})
+            },
+            env,
+            executionCtx
+        )
+        const cookie = res.headers.get('set-cookie')
+
+        t.equal(res.status, 200, 'returns 200')
+        t.equal(
+            hasCookieAttribute(cookie, 'secure'),
+            false,
+            'does not set Secure for loopback hosts'
+        )
+    }
+)
+
 test('POST /api/billing/checkout requires authentication', async t => {
     const env = makeEnv()
     const res = await app.request(
@@ -68,7 +181,7 @@ test('POST /api/billing/checkout rejects invalid planId', async t => {
 test(
     'POST /api/billing/checkout (dev) entitles user without payment',
     async t => {
-        const env = makeEnv()
+        const env = makeEnv({ NODE_ENV: 'development' })
         const { session, cookieHeader } = await makeSession(env)
         const res = await app.request(
             '/api/billing/checkout',
@@ -116,10 +229,39 @@ test(
 )
 
 test(
+    'POST /api/billing/checkout returns 503 in production without ' +
+        'Autumn config',
+    async t => {
+        const env = makeEnv({ NODE_ENV: 'production' })
+        const { cookieHeader } = await makeSession(env)
+        const res = await app.request(
+            '/api/billing/checkout',
+            {
+                method: 'POST',
+                headers: {
+                    'content-type': 'application/json',
+                    cookie: cookieHeader
+                },
+                body: JSON.stringify({ planId: 'local-first' })
+            },
+            env,
+            executionCtx
+        )
+        const body = await res.json() as { error?:string }
+        t.equal(res.status, 503, 'returns 503')
+        t.equal(
+            body.error,
+            'billing_unavailable',
+            'returns billing_unavailable'
+        )
+    }
+)
+
+test(
     'POST /api/billing/checkout (dev) records subscription_started ' +
         'email dedupe entry when an email is supplied',
     async t => {
-        const env = makeEnv()
+        const env = makeEnv({ NODE_ENV: 'development' })
         const { session, cookieHeader } = await makeSession(env)
         await app.request(
             '/api/billing/checkout',
@@ -313,7 +455,7 @@ test(
     'POST /api/billing/checkout/return (dev) returns 402 if not yet ' +
         'entitled',
     async t => {
-        const env = makeEnv()
+        const env = makeEnv({ NODE_ENV: 'development' })
         const { cookieHeader } = await makeSession(env)
         const res = await app.request(
             '/api/billing/checkout/return',
@@ -339,10 +481,39 @@ test(
 )
 
 test(
+    'POST /api/billing/checkout/return returns 503 in production ' +
+        'without Autumn config',
+    async t => {
+        const env = makeEnv({ NODE_ENV: 'production' })
+        const { cookieHeader } = await makeSession(env)
+        const res = await app.request(
+            '/api/billing/checkout/return',
+            {
+                method: 'POST',
+                headers: {
+                    'content-type': 'application/json',
+                    cookie: cookieHeader
+                },
+                body: JSON.stringify({ planId: 'local-first' })
+            },
+            env,
+            executionCtx
+        )
+        const body = await res.json() as { error?:string }
+        t.equal(res.status, 503, 'returns 503')
+        t.equal(
+            body.error,
+            'billing_unavailable',
+            'returns billing_unavailable'
+        )
+    }
+)
+
+test(
     'POST /api/billing/checkout/return (dev) returns entitled when ' +
         'cached billing exists',
     async t => {
-        const env = makeEnv()
+        const env = makeEnv({ NODE_ENV: 'development' })
         const { session, cookieHeader } = await makeSession(env)
         // Prime cached billing as if checkout already ran.
         await env.SESSIONS.put(
@@ -509,7 +680,7 @@ test(
 test(
     'GET /api/billing/status reflects entitlement after dev checkout',
     async t => {
-        const env = makeEnv()
+        const env = makeEnv({ NODE_ENV: 'development' })
         const { cookieHeader } = await makeSession(env)
         await app.request(
             '/api/billing/checkout',

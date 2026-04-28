@@ -2,6 +2,7 @@ import { test } from '@substrate-system/tapzero'
 
 // Import test modules
 import './sync.js'
+import './sync-cycle.js'
 import './db-adapter.js'
 import './server-lww.js'
 import './feed-fetch-security.js'

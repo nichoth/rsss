@@ -9,6 +9,7 @@ import {
 import { purgeStoredContent } from
     '../src/client/db/content-storage.js'
 import * as pullSyncModule from '../src/client/db/pull-sync.js'
+import { pushSync } from '../src/client/db/push-sync.js'
 import { storeContent } from '../src/client/local-first-settings.js'
 import type { Sqlite3Db } from '../src/client/db/sqlite-init.js'
 
@@ -56,6 +57,18 @@ function makeFetch (body:unknown, status = 200):typeof fetch {
     }
 }
 
+function makePagedItem (id:number):Record<string, unknown> {
+    const updatedAt = `2026-01-01 00:${String(id).padStart(4, '0')}:00`
+    return {
+        ...ITEM,
+        id,
+        guid: `guid-${id}`,
+        title: `Item ${id}`,
+        link: `https://example.com/item-${id}`,
+        updated_at: updatedAt
+    }
+}
+
 function queryOne<T> (db:Sqlite3Db, sql:string, bind?:unknown[]):T|undefined {
     const rows:T[] = []
     db.exec({
@@ -65,6 +78,17 @@ function queryOne<T> (db:Sqlite3Db, sql:string, bind?:unknown[]):T|undefined {
         resultRows: rows as Record<string, SqlValue>[]
     })
     return rows[0]
+}
+
+function queryAll<T> (db:Sqlite3Db, sql:string, bind?:unknown[]):T[] {
+    const rows:T[] = []
+    db.exec({
+        sql,
+        bind: bind as Parameters<typeof db.exec>[0]['bind'],
+        rowMode: 'object',
+        resultRows: rows as Record<string, SqlValue>[]
+    })
+    return rows
 }
 
 test('full sync upserts feeds and items', async (t) => {
@@ -312,6 +336,179 @@ test('pullSync skips items with pending outbox updates', async (t) => {
             item?.updated_at,
             '2026-01-03 00:00:00',
             'local updated_at preserved'
+        )
+    } finally {
+        db.close()
+    }
+})
+
+test('skipped pending item is pulled after outbox clears', async (t) => {
+    storeContent.value = true
+    const db = await openLocalDb('did:test:pull-after-outbox-clear')
+    try {
+        db.exec({
+            sql: `INSERT INTO feeds
+                (id, url, title, created_at, updated_at)
+                VALUES (1, 'https://example.com/feed', 'Feed',
+                    '2026-01-01 00:00:00',
+                    '2026-01-01 00:00:00')`
+        })
+        db.exec({
+            sql: `INSERT INTO items
+                (id, feed_id, guid, title, link, is_read, is_starred,
+                 created_at, updated_at)
+                VALUES (10, 1, 'guid-10', 'Local optimistic',
+                    'https://example.com/item-10', 1, 0,
+                    '2026-01-01 00:00:00',
+                    '2026-01-03 00:00:00')`
+        })
+        db.exec({
+            sql: `UPDATE sync_meta
+                  SET last_pull_at = '2026-01-02 00:00:00'
+                  WHERE id = 1`
+        })
+        db.exec({
+            sql: `INSERT INTO outbox
+                (op, target_id, payload, client_op_id, client_updated_at)
+                VALUES ('update_item', 10, ?, 'op-clears-after-skip',
+                    '2026-01-03 00:00:00')`,
+            bind: [JSON.stringify({ id: 10, is_read: true })]
+        })
+
+        const serverItem = {
+            ...ITEM,
+            title: 'Server reparsed',
+            description: 'updated summary',
+            is_read: 1,
+            updated_at: '2026-01-04 00:00:00'
+        }
+        const incrementalFetch:typeof fetch = async (url) => {
+            const parsed = new URL(url.toString(), 'https://rsss.test')
+            const since = parsed.searchParams.get('since')
+            const items = since && serverItem.updated_at > since
+                ? [serverItem]
+                : []
+
+            return {
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    feeds: [],
+                    items,
+                    syncedAt: '2026-01-05 00:00:00',
+                    latestUpdatedAt: '2026-01-04 00:00:00',
+                    isFullSync: false
+                })
+            } as Response
+        }
+
+        await pullSync(db, incrementalFetch)
+
+        const skipped = queryOne<{ title:string }>(
+            db, 'SELECT title FROM items WHERE id = 10'
+        )
+        t.equal(
+            skipped?.title,
+            'Local optimistic',
+            'pending outbox row protects local state'
+        )
+
+        await pushSync(db, async () => ({
+            ok: true,
+            status: 200,
+            json: async () => ({})
+        }))
+        await pullSync(db, incrementalFetch)
+
+        const item = queryOne<{
+            title:string
+            description:string|null
+            updated_at:string
+        }>(db, 'SELECT title, description, updated_at FROM items WHERE id = 10')
+        t.equal(item?.title, 'Server reparsed', 'server row is re-pulled')
+        t.equal(item?.description, 'updated summary', 'server change lands')
+        t.equal(
+            item?.updated_at,
+            '2026-01-04 00:00:00',
+            'server updated_at lands'
+        )
+    } finally {
+        db.close()
+    }
+})
+
+test('pullSync resumes paged bootstrap after interrupted page', async (t) => {
+    storeContent.value = true
+    const db = await openLocalDb('did:test:pull-paged-resume')
+    const items = Array.from({ length: 1500 }, (_, i) => {
+        return makePagedItem(i + 1)
+    })
+    const requestedUrls:string[] = []
+    let failAfterPageTwo = true
+
+    const pagedFetch:typeof fetch = async (url:RequestInfo|URL) => {
+        const urlText = url.toString()
+        requestedUrls.push(urlText)
+        const parsed = new URL(urlText, 'https://rsss.test')
+        const cursor = parsed.searchParams.get('cursor')
+        const start = cursor ? Number(cursor) : 0
+        const page = items.slice(start, start + 500)
+        const next = start + page.length
+
+        if (failAfterPageTwo && start === 1000) {
+            throw new Error('interrupted between pages')
+        }
+
+        return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+                feeds: start === 0 ? [FEED] : [],
+                items: page,
+                hasMore: next < items.length,
+                nextCursor: next < items.length ? String(next) : null,
+                syncedAt: '2026-01-02 00:00:00',
+                latestUpdatedAt: page.at(-1)?.updated_at ?? null,
+                isFullSync: true
+            })
+        } as Response
+    }
+
+    try {
+        let caught:unknown
+        try {
+            await pullSync(db, pagedFetch)
+        } catch (err) {
+            caught = err
+        }
+
+        t.ok(caught instanceof Error, 'interrupted sync throws')
+
+        const partialCount = queryOne<{ count:number }>(
+            db, 'SELECT COUNT(*) AS count FROM items'
+        )
+        t.equal(partialCount?.count, 1000, 'commits completed pages')
+
+        failAfterPageTwo = false
+        await pullSync(db, pagedFetch)
+
+        const finalCount = queryOne<{ count:number }>(
+            db, 'SELECT COUNT(*) AS count FROM items'
+        )
+        t.equal(finalCount?.count, 1500, 'resumed sync stores every item')
+
+        const duplicateIds = queryAll<{ id:number; count:number }>(
+            db,
+            `SELECT id, COUNT(*) AS count
+             FROM items
+             GROUP BY id
+             HAVING COUNT(*) > 1`
+        )
+        t.equal(duplicateIds.length, 0, 'resume does not duplicate rows')
+        t.equal(requestedUrls.length, 4, 'only missing page is re-fetched')
+        t.ok(
+            requestedUrls[3].includes('cursor=1000'),
+            'resume starts at committed cursor'
         )
     } finally {
         db.close()

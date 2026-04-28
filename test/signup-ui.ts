@@ -140,7 +140,7 @@ test(
             // Bad email keeps button disabled.
             input.value = 'not-an-email'
             input.dispatchEvent(new Event('input', { bubbles: true }))
-            await new Promise(r => setTimeout(r, 0))
+            await new Promise(resolve => setTimeout(resolve, 0))
             const stillDisabled = (root.querySelector(
                 '.plan-sync button.btn-primary'
             ) as HTMLButtonElement).disabled
@@ -153,7 +153,7 @@ test(
             // Good email enables.
             input.value = 'alice@example.com'
             input.dispatchEvent(new Event('input', { bubbles: true }))
-            await new Promise(r => setTimeout(r, 0))
+            await new Promise(resolve => setTimeout(resolve, 0))
             const enabled = !(root.querySelector(
                 '.plan-sync button.btn-primary'
             ) as HTMLButtonElement).disabled

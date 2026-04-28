@@ -339,6 +339,54 @@ function getOutbox (db:Sqlite3Db):OutboxRow[] {
     return rows
 }
 
+function getItemFlags (
+    db:Sqlite3Db,
+    id:number
+):{ is_read:number; is_starred:number } {
+    const rows:{ is_read:number; is_starred:number }[] = []
+    db.exec({
+        sql: 'SELECT is_read, is_starred FROM items WHERE id = ?',
+        bind: [id],
+        rowMode: 'object',
+        resultRows: rows as Record<string, SqlValue>[]
+    })
+    return rows[0]
+}
+
+function getItemUpdatedAt (db:Sqlite3Db, id:number):string {
+    const rows:{ updated_at:string }[] = []
+    db.exec({
+        sql: 'SELECT updated_at FROM items WHERE id = ?',
+        bind: [id],
+        rowMode: 'object',
+        resultRows: rows as Record<string, SqlValue>[]
+    })
+    return rows[0].updated_at
+}
+
+async function withMockedNow (
+    iso:string,
+    fn:() => Promise<void>
+):Promise<void> {
+    const RealDate = Date
+    const fixedMs = RealDate.parse(iso)
+    class MockDate extends RealDate {
+        constructor () {
+            super(fixedMs)
+        }
+
+        static now ():number {
+            return fixedMs
+        }
+    }
+    globalThis.Date = MockDate as DateConstructor
+    try {
+        await fn()
+    } finally {
+        globalThis.Date = RealDate
+    }
+}
+
 test('addFeed creates an outbox row', async (t) => {
     const db = await openLocalDb('did:test:outbox-addfeed')
     const adapter = createLocalAdapter(db)
@@ -357,6 +405,70 @@ test('addFeed creates an outbox row', async (t) => {
         t.ok(rows[0].client_op_id, 'client_op_id is set')
         t.ok(rows[0].client_updated_at, 'client_updated_at is set')
         t.equal(rows[0].attempts, 0, 'attempts defaults to 0')
+    } finally {
+        db.close()
+    }
+})
+
+test('updateItem uses one timestamp for row and outbox', async (t) => {
+    const db = await openLocalDb('did:test:updateitem-one-clock')
+    await seedDb(db)
+    const adapter = createLocalAdapter(db)
+    try {
+        const items = await adapter.getItems({ isRead: false })
+        const itemId = items.items[0].id
+
+        await withMockedNow('2030-05-06T07:08:09.000Z', async () => {
+            await adapter.updateItem(itemId, { is_read: true })
+        })
+
+        const rows = getOutbox(db)
+        t.equal(
+            getItemUpdatedAt(db, itemId),
+            '2030-05-06 07:08:09',
+            'item row uses JS timestamp source'
+        )
+        t.equal(
+            rows[0].client_updated_at,
+            '2030-05-06 07:08:09',
+            'outbox uses same timestamp'
+        )
+    } finally {
+        db.close()
+    }
+})
+
+test('markAllRead uses one timestamp for rows and outbox', async (t) => {
+    const db = await openLocalDb('did:test:markallread-one-clock')
+    await seedDb(db)
+    const adapter = createLocalAdapter(db)
+    try {
+        await withMockedNow('2031-06-07T08:09:10.000Z', async () => {
+            await adapter.markAllRead(2)
+        })
+
+        const rows = getOutbox(db)
+        const itemRows:{ updated_at:string }[] = []
+        db.exec({
+            sql: `SELECT updated_at FROM items
+                  WHERE feed_id = 2
+                  ORDER BY id ASC`,
+            rowMode: 'object',
+            resultRows: itemRows as Record<string, SqlValue>[]
+        })
+
+        t.equal(itemRows.length, 1, 'one feed item updated')
+        t.ok(
+            itemRows.every((row) => {
+                return row.updated_at === '2031-06-07 08:09:10'
+            }),
+            'item rows use JS timestamp source'
+        )
+        t.equal(
+            rows[0].client_updated_at,
+            '2031-06-07 08:09:10',
+            'outbox uses same timestamp'
+        )
     } finally {
         db.close()
     }
@@ -394,6 +506,60 @@ test('updateItem creates an outbox row', async (t) => {
         const payload = JSON.parse(rows[0].payload)
         t.equal(payload.is_read, true, 'payload contains is_read')
         t.ok(rows[0].client_updated_at, 'client_updated_at is set')
+    } finally {
+        db.close()
+    }
+})
+
+test('updateItem outbox payload preserves false values', async (t) => {
+    const db = await openLocalDb('did:test:outbox-updateitem-false')
+    await seedDb(db)
+    const adapter = createLocalAdapter(db)
+    try {
+        const items = await adapter.getItems({ isRead: true })
+        const itemId = items.items[0].id
+        await adapter.updateItem(itemId, {
+            is_read: false,
+            is_starred: false
+        })
+
+        const flags = getItemFlags(db, itemId)
+        const rows = getOutbox(db)
+        const payload = JSON.parse(rows[0].payload)
+
+        t.equal(flags.is_read, 0, 'row is marked unread')
+        t.equal(flags.is_starred, 0, 'row is unstarred')
+        t.equal(payload.is_read, false, 'payload sends is_read false')
+        t.equal(
+            payload.is_starred,
+            false,
+            'payload sends is_starred false'
+        )
+    } finally {
+        db.close()
+    }
+})
+
+test('updateItem coalesces pending outbox row to final state', async (t) => {
+    const db = await openLocalDb('did:test:outbox-updateitem-coalesce')
+    await seedDb(db)
+    const adapter = createLocalAdapter(db)
+    try {
+        const items = await adapter.getItems({ isRead: false })
+        const itemId = items.items[0].id
+
+        await adapter.updateItem(itemId, { is_read: true })
+        await adapter.updateItem(itemId, { is_read: false })
+        await adapter.updateItem(itemId, { is_read: true })
+
+        const flags = getItemFlags(db, itemId)
+        const rows = getOutbox(db)
+        const payload = JSON.parse(rows[0].payload)
+
+        t.equal(flags.is_read, 1, 'row keeps the final read state')
+        t.equal(rows.length, 1, 'one pending update_item row remains')
+        t.equal(rows[0].target_id, itemId, 'pending row targets item')
+        t.equal(payload.is_read, true, 'payload matches final read state')
     } finally {
         db.close()
     }

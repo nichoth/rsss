@@ -34,6 +34,11 @@ interface OutboxRow {
     last_error:string|null
 }
 
+interface FeedTargetRewrite {
+    optimisticId:number
+    serverId:number
+}
+
 export async function getOutboxCount (db:Sqlite3Db):Promise<number> {
     const rows = await queryDb<{ n:number }>(
         db,
@@ -162,6 +167,75 @@ function extractFeed (
     return feed as Record<string, unknown>
 }
 
+async function replaceOptimisticFeed (
+    db:Sqlite3Db,
+    optimisticId:number,
+    feed:Record<string, unknown>
+):Promise<void> {
+    const serverId = feed.id as number
+
+    if (optimisticId === serverId) {
+        await upsertFeedFromServer(db, feed)
+        return
+    }
+
+    await execDb(db, 'PRAGMA defer_foreign_keys = ON')
+    await execDb(db, {
+        sql: `UPDATE feeds
+              SET id = ?,
+                  url = ?,
+                  title = ?,
+                  description = ?,
+                  site_url = ?,
+                  last_fetched = ?,
+                  created_at = ?,
+                  updated_at = ?
+              WHERE id = ?`,
+        bind: [
+            serverId,
+            feed.url as string,
+            (feed.title as string|null) ?? null,
+            (feed.description as string|null) ?? null,
+            (feed.site_url as string|null) ?? null,
+            (feed.last_fetched as string|null) ?? null,
+            feed.created_at as string,
+            feed.updated_at as string,
+            optimisticId
+        ]
+    })
+    await execDb(db, {
+        sql: 'UPDATE items SET feed_id = ? WHERE feed_id = ?',
+        bind: [serverId, optimisticId]
+    })
+}
+
+async function rewritePendingDeleteFeedTargets (
+    db:Sqlite3Db,
+    rewrite:FeedTargetRewrite
+):Promise<void> {
+    await execDb(db, {
+        sql: `UPDATE outbox
+              SET target_id = ?
+              WHERE op = 'delete_feed'
+              AND target_id = ?`,
+        bind: [rewrite.serverId, rewrite.optimisticId]
+    })
+}
+
+function rewriteQueuedDeleteFeedTargets (
+    rows:OutboxRow[],
+    rewrite:FeedTargetRewrite
+):void {
+    for (const pending of rows) {
+        if (
+            pending.op === 'delete_feed' &&
+            pending.target_id === rewrite.optimisticId
+        ) {
+            pending.target_id = rewrite.serverId
+        }
+    }
+}
+
 function extractItem (
     body:unknown
 ):Record<string, unknown>|null {
@@ -193,19 +267,23 @@ async function reconcileSuccessfulAddFeed (
     db:Sqlite3Db,
     row:OutboxRow,
     body:unknown
-):Promise<void> {
+):Promise<FeedTargetRewrite|null> {
     const feed = extractFeed(body)
     if (!feed || typeof feed.id !== 'number') {
         throw new Error('pushSync: add_feed response missing feed')
     }
 
     if (row.target_id !== null) {
-        await execDb(db, {
-            sql: 'DELETE FROM feeds WHERE id = ?',
-            bind: [row.target_id]
-        })
+        await replaceOptimisticFeed(db, row.target_id, feed)
+        const rewrite = {
+            optimisticId: row.target_id,
+            serverId: feed.id
+        }
+        await rewritePendingDeleteFeedTargets(db, rewrite)
+        return rewrite
     }
     await upsertFeedFromServer(db, feed)
+    return null
 }
 
 async function upsertItemFromServer (
@@ -338,14 +416,22 @@ export async function pushSync (
             if (res.ok) {
                 if (row.op === 'add_feed') {
                     const body = await res.json()
+                    let rewrite:FeedTargetRewrite|null = null
                     await execDb(db, 'BEGIN')
                     try {
-                        await reconcileSuccessfulAddFeed(db, row, body)
+                        rewrite = await reconcileSuccessfulAddFeed(
+                            db,
+                            row,
+                            body
+                        )
                         await deleteOutboxRow(db, row.id)
                         await execDb(db, 'COMMIT')
                     } catch (err) {
                         await execDb(db, 'ROLLBACK')
                         throw err
+                    }
+                    if (rewrite) {
+                        rewriteQueuedDeleteFeedTargets(rows, rewrite)
                     }
                     continue
                 }
@@ -364,9 +450,14 @@ export async function pushSync (
             if (res.status === 409) {
                 const body = await res.json()
                 await execDb(db, 'BEGIN')
+                let rewrite:FeedTargetRewrite|null = null
                 try {
                     if (row.op === 'add_feed') {
-                        await reconcileSuccessfulAddFeed(db, row, body)
+                        rewrite = await reconcileSuccessfulAddFeed(
+                            db,
+                            row,
+                            body
+                        )
                     } else if (row.op === 'delete_feed') {
                         const feed = extractFeed(body)
                         if (feed) await upsertFeedFromServer(db, feed)
@@ -383,6 +474,9 @@ export async function pushSync (
                 } catch (err) {
                     await execDb(db, 'ROLLBACK')
                     throw err
+                }
+                if (rewrite) {
+                    rewriteQueuedDeleteFeedTargets(rows, rewrite)
                 }
                 continue
             }

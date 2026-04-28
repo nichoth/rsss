@@ -17,12 +17,10 @@ import {
 } from './sqlite-init.js'
 import { closeDb } from './local-db.js'
 import {
-    isLocalTabBlocked,
+    acquireLocalTabLock,
+    getTabCoordinationState,
     LOCAL_TAB_LOCK_ERROR,
-    markLocalTabPrimary,
-    markLocalTabReleased,
-    setLocalTabBlocked,
-    startTabCoordination
+    releaseLocalTabLock
 } from './tab-coordination.js'
 import {
     bootstrapInProgress,
@@ -47,7 +45,9 @@ export {
 } from './sqlite-init.js'
 export {
     getLocalTabLockError,
+    getTabCoordinationState,
     localTabLockError,
+    localTabLockRevision,
     startTabCoordination
 } from './tab-coordination.js'
 export type { Sqlite3, Sqlite3Db } from './sqlite-init.js'
@@ -58,6 +58,7 @@ export {
     bootstrapFeedsCount,
     bootstrapItemsCount,
     bootstrapError,
+    bootstrapRetryAvailable,
     getBootstrappedDb,
     clearBootstrappedDb
 } from './bootstrap.js'
@@ -171,8 +172,7 @@ export async function getAdapter (did?:string):Promise<DbAdapter> {
         !bootstrapInProgress.value &&
         await isLocalFirstSupported()
     ) {
-        startTabCoordination()
-        if (isLocalTabBlocked()) {
+        if (!await acquireLocalTabLock()) {
             return remoteAdapter
         }
         if (_cachedAdapter && _cachedAdapterDid === did) {
@@ -186,7 +186,6 @@ export async function getAdapter (did?:string):Promise<DbAdapter> {
             _cachedAdapter = createLocalAdapter(db)
             _cachedAdapterDid = did
             localDbError.value = null
-            markLocalTabPrimary()
             return _cachedAdapter
         } catch (err) {
             const category = reportLocalDbError(err)
@@ -195,9 +194,10 @@ export async function getAdapter (did?:string):Promise<DbAdapter> {
                 category === 'unavailable' ||
                 category === 'locked'
             ) {
-                if (category === 'locked') setLocalTabBlocked()
+                await releaseLocalTabLock()
                 return remoteAdapter
             }
+            await releaseLocalTabLock()
             return remoteAdapter
         }
     }
@@ -218,7 +218,8 @@ export function getLocalDb (did?:string):Sqlite3Db|null {
     if (
         syncSubscriptions.value &&
         did &&
-        _cachedAdapterDid === did
+        _cachedAdapterDid === did &&
+        getTabCoordinationState() === 'primary'
     ) {
         return _cachedDb
     }
@@ -235,7 +236,7 @@ export function _resetAdapterCache ():void {
 
 addBootstrapFailureCleanup(() => {
     _resetAdapterCache()
-    markLocalTabReleased()
+    releaseLocalTabLock()
 })
 
 async function pushPendingWritesBeforeRemoval (
@@ -272,7 +273,7 @@ export async function disableLocalFirst (
     await closeDb(db)
     clearBootstrappedDb()
     _resetAdapterCache()
-    markLocalTabReleased()
+    await releaseLocalTabLock()
     await removeOpfsDb(did)
     batch(() => {
         setSyncSubscriptions(false)
@@ -299,7 +300,7 @@ export async function resetLocalFirst (
     await closeDb(db)
     clearBootstrappedDb()
     _resetAdapterCache()
-    markLocalTabReleased()
+    await releaseLocalTabLock()
     await removeOpfsDb(did)
     await bootstrapLocalDb(did, fetchFn)
 }

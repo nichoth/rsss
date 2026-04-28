@@ -16,13 +16,32 @@ import {
     setSyncSyncing
 } from './sync-status.js'
 
+const inFlightSyncs = new WeakMap<Sqlite3Db, Promise<void>>()
+
 /**
  * Run one local-first sync cycle. Push goes first so optimistic writes
  * reach the server before pull can merge newer remote rows.
+ * Invariant: getPendingOutboxRefs is called after pushSync resolves.
  */
 export async function runSync (
     db:Sqlite3Db,
     fetchFn:typeof fetch = fetch
+):Promise<void> {
+    const inFlight = inFlightSyncs.get(db)
+    if (inFlight) return inFlight
+
+    const syncPromise = runSyncCycle(db, fetchFn).finally(() => {
+        if (inFlightSyncs.get(db) === syncPromise) {
+            inFlightSyncs.delete(db)
+        }
+    })
+    inFlightSyncs.set(db, syncPromise)
+    return syncPromise
+}
+
+async function runSyncCycle (
+    db:Sqlite3Db,
+    fetchFn:typeof fetch
 ):Promise<void> {
     const trackStatus = isLocalFirstActive.value
     if (trackStatus) setSyncSyncing()

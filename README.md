@@ -179,6 +179,10 @@ wrangler secret put RESEND_API_KEY
 wrangler secret put RESEND_FROM
 ```
 
+Keep secret bindings out of `wrangler.jsonc` `vars`. In production,
+`AUTUMN_SECRET_KEY` must be set with `wrangler secret put` or
+`/api/health` returns a configuration error.
+
 4. Deploy:
 
 ```sh

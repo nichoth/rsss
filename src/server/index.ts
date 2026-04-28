@@ -135,6 +135,10 @@ function isEntitled (b:CachedBilling|null):boolean {
     return b.status === 'active' || b.status === 'scheduled'
 }
 
+function canUseDevBillingShortcut (env:Env):boolean {
+    return env.NODE_ENV === 'development' && !billingUseLive(env)
+}
+
 /**
  * Resolve current entitlement, refreshing from Autumn when there's
  * no cached value. Local dev (no Autumn key) treats the cached value
@@ -186,6 +190,27 @@ const STATE_CHANGING_METHODS = new Set([
     'POST',
     'PUT'
 ])
+
+function productionConfigErrors (env:Env):string[] {
+    const errors:string[] = []
+
+    if (env.NODE_ENV === 'production' && !env.AUTUMN_SECRET_KEY) {
+        errors.push('missing_autumn_secret')
+    }
+
+    return errors
+}
+
+function isLoopbackHostname (hostname:string):boolean {
+    return hostname === 'localhost' ||
+        hostname === '127.0.0.1' ||
+        hostname === '::1' ||
+        hostname === '[::1]'
+}
+
+function shouldUseSecureSessionCookie (requestUrl:string):boolean {
+    return !isLoopbackHostname(new URL(requestUrl).hostname)
+}
 
 export function isAllowedRequestOrigin (
     origin:string,
@@ -286,6 +311,17 @@ app.use('*', async (c, next) => {
  * Health check
  */
 app.get('/api/health', (c) => {
+    const configErrors = productionConfigErrors(c.env)
+
+    if (configErrors.length > 0) {
+        return c.json({
+            status: 'error',
+            service: 'rsss',
+            error: configErrors[0],
+            configErrors
+        }, 500)
+    }
+
     return c.json({ status: 'ok', service: 'rsss' })
 })
 
@@ -310,10 +346,7 @@ function resolveOAuthClient (
     envClientId?:string
 ):{ clientId:string; redirectUri:string } {
     const url = new URL(requestUrl)
-    const isLoopback = (
-        url.hostname === 'localhost' ||
-        url.hostname === '127.0.0.1'
-    )
+    const isLoopback = isLoopbackHostname(url.hostname)
 
     if (envClientId || !isLoopback) {
         const baseUrl = url.origin
@@ -511,7 +544,7 @@ app.post('/api/auth/callback', async (c) => {
 
         setCookie(c, 'session', sessionCookie, {
             httpOnly: true,
-            secure: c.env.NODE_ENV === 'production',
+            secure: shouldUseSecureSessionCookie(c.req.url),
             sameSite: 'Lax',
             path: '/',
             maxAge: 30 * 24 * 60 * 60 // 30 days
@@ -568,6 +601,31 @@ const requireAuth = async (c:Context<{
 
     if (!session) {
         return c.json({ error: 'Unauthorized' }, 401)
+    }
+
+    await next()
+}
+
+const requireEntitlement = async (c:Context<{
+    Bindings:Env;
+    Variables:Variables
+}>, next:Next) => {
+    const session = c.get('session')
+
+    if (!session) {
+        return c.json({ error: 'Unauthorized' }, 401)
+    }
+
+    try {
+        const billing = await resolveBilling(c.env, session.did)
+        if (!isEntitled(billing)) {
+            return c.json({ error: 'Payment required' }, 402)
+        }
+    } catch (err) {
+        console.error('data entitlement error:', err)
+        return c.json({
+            error: 'billing_unavailable'
+        }, 503)
     }
 
     await next()
@@ -637,6 +695,20 @@ app.post('/api/auth/dev-login', async (c) => {
         )
     }
 
+    if (!isLoopbackHostname(new URL(c.req.url).hostname)) {
+        return c.json(
+            { error: 'Not allowed on non-loopback host' },
+            403
+        )
+    }
+
+    if (!c.env.SESSION_SECRET) {
+        return c.json(
+            { error: 'SESSION_SECRET is not configured' },
+            500
+        )
+    }
+
     const body = await c.req.json<{
         did?:string;
         handle?:string
@@ -647,12 +719,8 @@ app.post('/api/auth/dev-login', async (c) => {
         handle: body.handle || 'test.bsky.social'
     }
 
-    const secret = (
-        c.env.SESSION_SECRET
-            || 'dev-secret-key-32-chars-long!!'
-    )
     const sessionCookie = await createSessionCookie(
-        session, secret, c.env.SESSIONS
+        session, c.env.SESSION_SECRET, c.env.SESSIONS
     )
 
     // Track this user in KV for admin tools
@@ -663,7 +731,7 @@ app.post('/api/auth/dev-login', async (c) => {
 
     setCookie(c, 'session', sessionCookie, {
         httpOnly: true,
-        secure: false,
+        secure: shouldUseSecureSessionCookie(c.req.url),
         sameSite: 'Lax',
         path: '/',
         maxAge: 30 * 24 * 60 * 60
@@ -728,6 +796,12 @@ app.post('/api/billing/checkout', requireAuth, async (c) => {
     // the success email here exercises the full Resend path
     // without a real card.
     if (!billingUseLive(c.env)) {
+        if (!canUseDevBillingShortcut(c.env)) {
+            return c.json({
+                error: 'billing_unavailable'
+            }, 503)
+        }
+
         const billing:CachedBilling = {
             planId,
             status: 'active',
@@ -824,6 +898,12 @@ app.post(
         // Dev mode: there is no Autumn round-trip, just confirm
         // whatever's already cached.
         if (!billingUseLive(c.env)) {
+            if (!canUseDevBillingShortcut(c.env)) {
+                return c.json({
+                    error: 'billing_unavailable'
+                }, 503)
+            }
+
             const cached = await readCachedBilling(
                 c.env,
                 session.did
@@ -1017,6 +1097,7 @@ export const dataRouter = new Hono<{
 }>()
 
 dataRouter.use('*', requireAuth)
+dataRouter.use('*', requireEntitlement)
 
 /**
  * Proxy requests to user's Durable Object.

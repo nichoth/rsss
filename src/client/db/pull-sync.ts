@@ -28,6 +28,8 @@ export interface SyncResponse {
     syncedAt:string
     latestUpdatedAt:string
     isFullSync:boolean
+    hasMore?:boolean
+    nextCursor?:string|null
 }
 
 interface PendingOutboxRefs {
@@ -38,6 +40,7 @@ interface PendingOutboxRefs {
 }
 
 async function getLastPullAt (db:Sqlite3Db):Promise<string|null> {
+    await ensureSyncCursorColumn(db)
     const rows = await queryDb<{ last_pull_at:string|null }>(
         db,
         'SELECT last_pull_at FROM sync_meta WHERE id = 1'
@@ -46,10 +49,48 @@ async function getLastPullAt (db:Sqlite3Db):Promise<string|null> {
 }
 
 async function setLastPullAt (db:Sqlite3Db, value:string):Promise<void> {
+    await ensureSyncCursorColumn(db)
     await execDb(db, {
-        sql: 'UPDATE sync_meta SET last_pull_at = ? WHERE id = 1',
+        sql: `UPDATE sync_meta
+              SET last_pull_at = ?, pull_cursor = NULL
+              WHERE id = 1`,
         bind: [value]
     })
+}
+
+async function getPullCursor (db:Sqlite3Db):Promise<string|null> {
+    await ensureSyncCursorColumn(db)
+    const rows = await queryDb<{ pull_cursor:string|null }>(
+        db,
+        'SELECT pull_cursor FROM sync_meta WHERE id = 1'
+    )
+    return rows[0]?.pull_cursor ?? null
+}
+
+async function setPullCursor (
+    db:Sqlite3Db,
+    value:string|null
+):Promise<void> {
+    await ensureSyncCursorColumn(db)
+    await execDb(db, {
+        sql: 'UPDATE sync_meta SET pull_cursor = ? WHERE id = 1',
+        bind: [value]
+    })
+}
+
+const syncCursorColumnReady = new WeakSet<Sqlite3Db>()
+
+async function ensureSyncCursorColumn (db:Sqlite3Db):Promise<void> {
+    if (syncCursorColumnReady.has(db)) return
+
+    const cols = await queryDb<{ name:string }>(
+        db,
+        'PRAGMA table_info(sync_meta)'
+    )
+    if (!cols.some((col) => col.name === 'pull_cursor')) {
+        await execDb(db, 'ALTER TABLE sync_meta ADD COLUMN pull_cursor TEXT')
+    }
+    syncCursorColumnReady.add(db)
 }
 
 async function upsertFeed (
@@ -194,6 +235,8 @@ function shouldSkipItem (
 export interface PullSyncOptions {
     onFeedUpserted?:(count:number) => void
     onItemUpserted?:(count:number) => void
+    onFeedPage?:(count:number) => void
+    onItemPage?:(count:number) => void
     trackStatus?:boolean
 }
 
@@ -211,70 +254,103 @@ export async function pullSync (
     if (trackStatus) setSyncSyncing()
 
     const lastPullAt = await getLastPullAt(db)
-    const url = lastPullAt
-        ? `/api/sync?since=${encodeURIComponent(lastPullAt)}`
-        : '/api/sync'
-
-    let res:Response
-    try {
-        res = await fetchFn(url)
-    } catch (err) {
-        if (trackStatus) {
-            setSyncError(
-                err instanceof Error ? err.message : String(err)
-            )
-        }
-        throw err
-    }
-
-    if (res.status === 401) {
-        throw new PullSyncAuthError()
-    }
-
-    if (res.status === 402) {
-        // Subscription required -- swallow silently so the
-        // local-only fallback is quiet rather than spammy.
-        if (trackStatus) setSyncDone(0)
-        throw new SyncBillingError()
-    }
-
-    if (!res.ok) {
-        const msg = `pullSync: server returned ${res.status}`
-        if (trackStatus) setSyncError(msg)
-        throw new Error(msg)
-    }
-
-    const data = (await res.json()) as SyncResponse
+    let cursor = await getPullCursor(db)
     const keepContent = storeContent.value
+    // Invariant: getPendingOutboxRefs is called after pushSync resolves.
     const pendingRefs = await getPendingOutboxRefs(db)
+    let skippedRows = false
+    let done = false
 
-    await execDb(db, 'BEGIN')
-    try {
-        let feedCount = 0
-        for (const feed of data.feeds) {
-            if (shouldSkipFeed(feed, pendingRefs)) continue
-            await upsertFeed(db, feed)
-            feedCount++
-            opts.onFeedUpserted?.(feedCount)
+    while (!done) {
+        const url = buildSyncUrl(lastPullAt, cursor)
+        let res:Response
+        try {
+            res = await fetchFn(url)
+        } catch (err) {
+            if (trackStatus) {
+                setSyncError(
+                    err instanceof Error ? err.message : String(err)
+                )
+            }
+            throw err
         }
-        let itemCount = 0
-        for (const item of data.items) {
-            if (shouldSkipItem(item, pendingRefs)) continue
-            await upsertItem(db, item, keepContent)
-            itemCount++
-            opts.onItemUpserted?.(itemCount)
+
+        if (res.status === 401) {
+            throw new PullSyncAuthError()
         }
-        await setLastPullAt(db, data.latestUpdatedAt)
-        await execDb(db, 'COMMIT')
-    } catch (err) {
-        await execDb(db, 'ROLLBACK')
-        if (trackStatus) {
-            setSyncError(
-                err instanceof Error ? err.message : String(err)
-            )
+
+        if (res.status === 402) {
+            // Subscription required -- swallow silently so the
+            // local-only fallback is quiet rather than spammy.
+            if (trackStatus) setSyncDone(0)
+            throw new SyncBillingError()
         }
-        throw err
+
+        if (!res.ok) {
+            const msg = `pullSync: server returned ${res.status}`
+            if (trackStatus) setSyncError(msg)
+            throw new Error(msg)
+        }
+
+        const data = (await res.json()) as SyncResponse
+
+        await execDb(db, 'BEGIN')
+        try {
+            let feedCount = 0
+            for (const feed of data.feeds) {
+                if (shouldSkipFeed(feed, pendingRefs)) {
+                    skippedRows = true
+                    continue
+                }
+                await upsertFeed(db, feed)
+                feedCount++
+                opts.onFeedUpserted?.(feedCount)
+            }
+            let itemCount = 0
+            for (const item of data.items) {
+                if (shouldSkipItem(item, pendingRefs)) {
+                    skippedRows = true
+                    continue
+                }
+                await upsertItem(db, item, keepContent)
+                itemCount++
+                opts.onItemUpserted?.(itemCount)
+            }
+
+            if (data.hasMore) {
+                cursor = data.nextCursor ?? null
+                if (!skippedRows) await setPullCursor(db, cursor)
+            } else {
+                if (skippedRows) {
+                    await setPullCursor(db, null)
+                } else {
+                    await setLastPullAt(db, data.latestUpdatedAt)
+                }
+                cursor = null
+                done = true
+            }
+            await execDb(db, 'COMMIT')
+            opts.onFeedPage?.(feedCount)
+            opts.onItemPage?.(itemCount)
+        } catch (err) {
+            await execDb(db, 'ROLLBACK')
+            if (trackStatus) {
+                setSyncError(
+                    err instanceof Error ? err.message : String(err)
+                )
+            }
+            throw err
+        }
     }
 
     if (trackStatus) setSyncDone(0)
+}
+
+function buildSyncUrl (since:string|null, cursor:string|null):string {
+    const params = new URLSearchParams()
+    if (since) params.set('since', since)
+    if (cursor) params.set('cursor', cursor)
+
+    const qs = params.toString()
+    return qs ? `/api/sync?${qs}` : '/api/sync'
 }

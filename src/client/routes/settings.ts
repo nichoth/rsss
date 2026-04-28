@@ -19,6 +19,7 @@ import {
     bootstrapFeedsCount,
     bootstrapItemsCount,
     bootstrapError,
+    bootstrapRetryAvailable,
     disableLocalFirst,
     resetLocalFirst,
     getBootstrappedDb,
@@ -65,6 +66,15 @@ export const SettingsRoute:FunctionComponent<{
         state._setRoute('/signup')
     }
 
+    function confirmTerminalBootstrapReset (message:string):boolean {
+        return confirm([
+            `Setup failed: ${message}`,
+            '',
+            'Reset local storage on this device and turn off ' +
+            'local storage?'
+        ].join('\n'))
+    }
+
     async function handleSyncChange (ev:Event) {
         const checked = (ev.target as HTMLInputElement).checked
         const did = state.user.value?.did
@@ -72,7 +82,9 @@ export const SettingsRoute:FunctionComponent<{
             setSyncSubscriptions(true)
             saveLocalFirstSettings()
             if (did) {
-                bootstrapLocalDb(did)
+                bootstrapLocalDb(did, fetch, {
+                    confirmTerminalReset: confirmTerminalBootstrapReset
+                })
             }
         } else {
             if (!did) {
@@ -124,6 +136,14 @@ export const SettingsRoute:FunctionComponent<{
                 ;(ev.target as HTMLInputElement).checked = true
             }
         }
+    }
+
+    function handleBootstrapRetry () {
+        const did = state.user.value?.did
+        if (!did) return
+        bootstrapLocalDb(did, fetch, {
+            confirmTerminalReset: confirmTerminalBootstrapReset
+        })
     }
 
     async function handleReset () {
@@ -309,6 +329,14 @@ export const SettingsRoute:FunctionComponent<{
                 <p class="bootstrap-error">
                     Setup failed: ${bError}
                 </p>
+            `}
+            ${bootstrapRetryAvailable.value && !inProgress && html`
+                <button
+                    class="btn-retry-bootstrap"
+                    onClick=${handleBootstrapRetry}
+                >
+                    Retry setup
+                </button>
             `}
             ${dbError && html`
                 <p class="bootstrap-error">

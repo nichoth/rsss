@@ -4,6 +4,7 @@ import { test } from '@substrate-system/tapzero'
 import wasmUrl from '@sqlite.org/sqlite-wasm/sqlite3.wasm'
 import {
     openLocalDb,
+    probeOpfsSupport,
     setTestMode,
     setSQLiteWorkerClientFactoryForTests,
     OPFSUnavailableError,
@@ -66,6 +67,91 @@ test('openLocalDb delegates production open and schema setup to worker',
             await db.exec({ sql: 'SELECT 1', bind: [] })
             t.equal(execSql.at(-1), 'SELECT 1',
                 'returned db delegates exec calls to the worker')
+        } finally {
+            setSQLiteWorkerClientFactoryForTests(null)
+            setTestMode(true, wasmUrl as string)
+            Object.defineProperty(globalThis, 'navigator', {
+                configurable: true,
+                value: previousNavigator
+            })
+            Object.defineProperty(globalThis, 'crossOriginIsolated', {
+                configurable: true,
+                value: previousIsolated
+            })
+            ;(globalThis as Record<string, unknown>)
+                .FileSystemSyncAccessHandle = previousAccessHandle
+        }
+    })
+
+test('probeOpfsSupport reuses one OPFS VFS install for the next open',
+    async (t) => {
+        const previousNavigator = globalThis.navigator
+        const previousIsolated = (
+            globalThis as { crossOriginIsolated?:boolean }
+        ).crossOriginIsolated
+        const previousAccessHandle = (
+            globalThis as Record<string, unknown>
+        ).FileSystemSyncAccessHandle
+        let factoryCalls = 0
+        let installCalls = 0
+        let disposeCalls = 0
+        let closeCalls = 0
+
+        Object.defineProperty(globalThis, 'navigator', {
+            configurable: true,
+            value: {
+                storage: {
+                    getDirectory: async () => ({})
+                }
+            }
+        })
+        Object.defineProperty(globalThis, 'crossOriginIsolated', {
+            configurable: true,
+            value: true
+        })
+        ;(globalThis as Record<string, unknown>)
+            .FileSystemSyncAccessHandle = function () {}
+
+        setTestMode(false)
+        setSQLiteWorkerClientFactoryForTests(() => {
+            factoryCalls++
+            let vfsReady = false
+
+            return {
+                probe: async () => {
+                    if (!vfsReady) {
+                        installCalls++
+                        vfsReady = true
+                    }
+                },
+                open: async () => {
+                    if (!vfsReady) {
+                        installCalls++
+                        vfsReady = true
+                    }
+                },
+                exec: async () => {},
+                query: async () => [],
+                close: async () => {
+                    closeCalls++
+                },
+                dispose: () => {
+                    disposeCalls++
+                }
+            } as unknown as SQLiteWorkerClient
+        })
+
+        try {
+            const supported = await probeOpfsSupport()
+            const db = await openLocalDb('did:plc:alice')
+
+            t.equal(supported, true, 'probe succeeds')
+            t.equal(factoryCalls, 1, 'reuses the successful probe worker')
+            t.equal(installCalls, 1, 'installs OPFS-SAH-pool once')
+            t.equal(disposeCalls, 0, 'keeps the probed worker for open')
+
+            await db.close()
+            t.equal(closeCalls, 1, 'open db still owns worker shutdown')
         } finally {
             setSQLiteWorkerClientFactoryForTests(null)
             setTestMode(true, wasmUrl as string)

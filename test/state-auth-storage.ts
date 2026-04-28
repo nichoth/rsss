@@ -17,15 +17,48 @@ import {
 import type { SQLiteWorkerClient } from
     '../src/client/db/sqlite-worker-client.js'
 import {
-    resetTabCoordinationForTests
+    releaseLocalTabLock,
+    resetTabCoordinationForTests,
+    setLocalTabBlocked
 } from '../src/client/db/tab-coordination.js'
+import { isLocalFirstActive } from '../src/client/db/sync-status.js'
 import { syncSubscriptions } from '../src/client/local-first-settings.js'
 import { billingStatus } from '../src/client/billing-status.js'
 import { State, type AppState } from '../src/client/state.js'
+import { remoteAdapter } from '../src/client/db/remote-adapter.js'
 
 type ErrorCtor = new () => Error
 type StateWithSyncAuth = typeof State & {
     handleSyncAuthError?:(state:AppState, err:unknown) => boolean
+}
+
+class FakeBroadcastChannel {
+    static channels:FakeBroadcastChannel[] = []
+
+    name:string
+    onmessage:((ev:{ data:unknown }) => void)|null = null
+    closed = false
+
+    constructor (name:string) {
+        this.name = name
+        FakeBroadcastChannel.channels.push(this)
+    }
+
+    postMessage (data:unknown):void {
+        for (const channel of FakeBroadcastChannel.channels) {
+            if (channel === this || channel.name !== this.name) continue
+            if (channel.closed) continue
+            channel.onmessage?.({ data })
+        }
+    }
+
+    close ():void {
+        this.closed = true
+    }
+
+    static reset ():void {
+        FakeBroadcastChannel.channels = []
+    }
 }
 
 setTestMode(true, wasmUrl as string)
@@ -45,6 +78,7 @@ function emptySyncFetch ():typeof fetch {
 }
 
 function setupLocalFirstForStateTest ():void {
+    setTestMode(true, wasmUrl as string)
     _resetSupportedCache()
     _resetAdapterCache()
     resetTabCoordinationForTests()
@@ -78,6 +112,19 @@ function setupLocalFirstForStateTest ():void {
         value: true,
         configurable: true
     })
+}
+
+function setupBroadcastLockTest ():FakeBroadcastChannel {
+    FakeBroadcastChannel.reset()
+    Object.defineProperty(globalThis, 'BroadcastChannel', {
+        value: FakeBroadcastChannel,
+        configurable: true
+    })
+    Object.defineProperty(navigator, 'locks', {
+        value: undefined,
+        configurable: true
+    })
+    return new FakeBroadcastChannel('rsss-tab')
 }
 
 async function settleOnlineHandler ():Promise<void> {
@@ -349,6 +396,155 @@ test('online sync refreshes lists, counts, and the route item',
             _resetSupportedCache()
             syncSubscriptions.value = false
             resetTabCoordinationForTests()
+        }
+    })
+
+test('online event skips sync when local-first is inactive',
+    async t => {
+        const originals = {
+            checkAuth: State.checkAuth,
+            loadBillingStatus: State.loadBillingStatus,
+            loadFeeds: State.loadFeeds,
+            loadItems: State.loadItems,
+            loadCounts: State.loadCounts,
+            fetch: globalThis.fetch
+        }
+        const did = 'did:plc:online-inactive'
+        let syncCalls = 0
+
+        setupLocalFirstForStateTest()
+        await getAdapter(did)
+        globalThis.fetch = async (input, init) => {
+            const url = input instanceof Request ?
+                input.url :
+                input.toString()
+            if (!init?.method && url.includes('/api/sync')) {
+                syncCalls++
+                return emptySyncFetch()(input, init)
+            }
+            return originals.fetch.call(globalThis, input, init)
+        }
+
+        State.checkAuth = async () => {}
+        State.loadBillingStatus = async () => null
+        State.loadFeeds = async () => {}
+        State.loadItems = async () => {}
+        State.loadCounts = async () => {}
+
+        try {
+            const state = State()
+            state.user.value = {
+                did,
+                handle: 'online-inactive.test'
+            }
+            await settleOnlineHandler()
+            syncCalls = 0
+            isLocalFirstActive.value = false
+
+            window.dispatchEvent(new Event('online'))
+            await settleOnlineHandler()
+
+            t.equal(
+                syncCalls,
+                0,
+                'inactive local-first skips online sync'
+            )
+
+            state.cleanup()
+        } finally {
+            State.checkAuth = originals.checkAuth
+            State.loadBillingStatus = originals.loadBillingStatus
+            State.loadFeeds = originals.loadFeeds
+            State.loadItems = originals.loadItems
+            State.loadCounts = originals.loadCounts
+            globalThis.fetch = originals.fetch
+            isLocalFirstActive.value = false
+            setSQLiteWorkerClientFactoryForTests(null)
+            _resetAdapterCache()
+            _resetSupportedCache()
+            syncSubscriptions.value = false
+            resetTabCoordinationForTests()
+        }
+    })
+
+test('released tab lock reacquires local adapter and starts sync',
+    async t => {
+        const originals = {
+            checkAuth: State.checkAuth,
+            loadBillingStatus: State.loadBillingStatus,
+            loadFeeds: State.loadFeeds,
+            loadItems: State.loadItems,
+            loadCounts: State.loadCounts,
+            loadItemByRoute: State.loadItemByRoute,
+            fetch: globalThis.fetch
+        }
+        const did = 'did:plc:lock-release'
+        let syncCalls = 0
+
+        setupLocalFirstForStateTest()
+        const primary = setupBroadcastLockTest()
+        await getAdapter(did)
+        await releaseLocalTabLock()
+        setLocalTabBlocked()
+        globalThis.fetch = async (input, init) => {
+            const url = input instanceof Request ?
+                input.url :
+                input.toString()
+            if (!init?.method && url.includes('/api/sync')) {
+                syncCalls++
+                return emptySyncFetch()(input, init)
+            }
+            return originals.fetch.call(globalThis, input, init)
+        }
+
+        State.checkAuth = async () => {}
+        State.loadBillingStatus = async () => null
+        State.loadFeeds = async () => {}
+        State.loadItems = async () => {}
+        State.loadCounts = async () => {}
+        State.loadItemByRoute = async () => null
+
+        try {
+            const state = State()
+            state.user.value = {
+                did,
+                handle: 'lock-release.test'
+            }
+            await settleOnlineHandler()
+
+            t.equal(
+                await getAdapter(did),
+                remoteAdapter,
+                'blocked tab stays on remote adapter before release'
+            )
+
+            primary.postMessage({ type: 'released' })
+            await settleOnlineHandler()
+
+            t.equal(syncCalls, 1, 'release starts a sync cycle')
+            t.notEqual(
+                await getAdapter(did),
+                remoteAdapter,
+                'next adapter lookup returns local adapter'
+            )
+            await settleOnlineHandler()
+
+            state.cleanup()
+        } finally {
+            State.checkAuth = originals.checkAuth
+            State.loadBillingStatus = originals.loadBillingStatus
+            State.loadFeeds = originals.loadFeeds
+            State.loadItems = originals.loadItems
+            State.loadCounts = originals.loadCounts
+            State.loadItemByRoute = originals.loadItemByRoute
+            globalThis.fetch = originals.fetch
+            primary.close()
+            setSQLiteWorkerClientFactoryForTests(null)
+            _resetAdapterCache()
+            _resetSupportedCache()
+            syncSubscriptions.value = false
+            resetTabCoordinationForTests()
+            FakeBroadcastChannel.reset()
         }
     })
 

@@ -1,7 +1,8 @@
 export const SYNC_META_SQL = `
     CREATE TABLE IF NOT EXISTS sync_meta (
         id INTEGER PRIMARY KEY CHECK (id = 1),
-        last_pull_at TEXT
+        last_pull_at TEXT,
+        pull_cursor TEXT
     );
     INSERT OR IGNORE INTO sync_meta (id, last_pull_at) VALUES (1, NULL);
 `

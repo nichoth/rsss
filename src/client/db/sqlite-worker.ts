@@ -45,6 +45,8 @@ interface WorkerScope {
 const workerScope = globalThis as unknown as WorkerScope
 let sqlitePromise:Promise<SqliteWorkerNamespace>|null = null
 let db:WorkerDb|null = null
+let opfsPoolDirectory:string|null = null
+let opfsPoolDb:WorkerDbConstructor|null = null
 
 workerScope.onmessage = (event) => {
     dispatch(event.data).catch((err) => {
@@ -105,15 +107,7 @@ async function probeOpfs (directory = 'rsss-db'):Promise<void> {
 
     await getDirectory.call(workerNavigator!.storage)
 
-    const sqlite = await initSqliteInWorker()
-    if (typeof sqlite.installOpfsSAHPoolVfs !== 'function') {
-        throw new Error('SQLite OPFS-SAH-pool VFS is unavailable')
-    }
-
-    const pool = await sqlite.installOpfsSAHPoolVfs({ directory })
-    if (typeof pool.OpfsSAHPoolDb !== 'function') {
-        throw new Error('SQLite OPFS-SAH-pool database is unavailable')
-    }
+    await getOpfsPoolDb(directory)
 }
 
 async function openDb (options:SqliteWorkerOpenOptions):Promise<void> {
@@ -133,11 +127,31 @@ async function openDb (options:SqliteWorkerOpenOptions):Promise<void> {
         throw new Error('SQLite worker open requires did or filename')
     }
 
-    const pool = await sqlite.installOpfsSAHPoolVfs({
-        directory: options.directory || 'rsss-db'
-    })
-    db = new pool.OpfsSAHPoolDb(filename)
+    const PoolDb = await getOpfsPoolDb(options.directory || 'rsss-db')
+    db = new PoolDb(filename)
     applySchema(db)
+}
+
+async function getOpfsPoolDb (
+    directory:string
+):Promise<WorkerDbConstructor> {
+    if (opfsPoolDb && opfsPoolDirectory === directory) {
+        return opfsPoolDb
+    }
+
+    const sqlite = await initSqliteInWorker()
+    if (typeof sqlite.installOpfsSAHPoolVfs !== 'function') {
+        throw new Error('SQLite OPFS-SAH-pool VFS is unavailable')
+    }
+
+    const pool = await sqlite.installOpfsSAHPoolVfs({ directory })
+    if (typeof pool.OpfsSAHPoolDb !== 'function') {
+        throw new Error('SQLite OPFS-SAH-pool database is unavailable')
+    }
+
+    opfsPoolDirectory = directory
+    opfsPoolDb = pool.OpfsSAHPoolDb
+    return opfsPoolDb
 }
 
 function applySchema (targetDb:WorkerDb):void {
