@@ -222,6 +222,11 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Local write timestamp watermarks**: Local-first mutations should use a
+  single SQLite-format timestamp that is strictly newer than
+  `sync_meta.last_pull_at`. If the device clock is behind or equal to the
+  server watermark, bump one second past `last_pull_at` so the next
+  server-side `updated_at > since` query can still see the write.
 - **Dead-letter attempt limit**: Tests that seed near-threshold outbox rows
   should import `DEAD_LETTER_ATTEMPT_LIMIT` from `push-sync.ts` instead of
   hardcoding `9` or `10`, so retry-cap regressions track the configured
@@ -2827,4 +2832,26 @@ Thread: https://ampcode.com/threads/unknown
     one read item and one starred item under the optimistic feed id.
   - A delete-and-reinsert add-feed reconcile path proves the regression by
     cascading those items away before the canonical feed row is inserted.
+---
+
+## 2026-04-27 21:34 PDT - US-110
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Protected local writes from clock-skewed sync
+  watermarks.
+  - Added a pull-sync regression where the server writes
+    `latestUpdatedAt = '2026-04-25 10:00:00'`, the client clock is behind,
+    and a local feed write must still sort after the next pull `since`.
+  - Added SQLite timestamp parsing and made local adapter mutations choose a
+    single write timestamp newer than `sync_meta.last_pull_at`.
+- Files changed:
+  - `src/client/db/time.ts`
+  - `src/client/db/local-adapter.ts`
+  - `test/pull-sync.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Local-first writes must compare against `sync_meta.last_pull_at`, not
+    only the device clock, before assigning row and outbox timestamps.
+  - Tapout browser tests share a fixed port, so run focused browser suites
+    serially rather than in parallel.
 ---

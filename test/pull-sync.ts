@@ -6,6 +6,8 @@ import {
     openLocalDb,
     setTestMode
 } from '../src/client/db/sqlite-init.js'
+import { createLocalAdapter } from
+    '../src/client/db/local-adapter.js'
 import { purgeStoredContent } from
     '../src/client/db/content-storage.js'
 import * as pullSyncModule from '../src/client/db/pull-sync.js'
@@ -89,6 +91,33 @@ function queryAll<T> (db:Sqlite3Db, sql:string, bind?:unknown[]):T[] {
         resultRows: rows as Record<string, SqlValue>[]
     })
     return rows
+}
+
+async function withMockedNow (
+    iso:string,
+    fn:() => Promise<void>
+):Promise<void> {
+    const RealDate = Date
+    const fixedMs = RealDate.parse(iso)
+    class MockDate extends RealDate {
+        constructor (...args:unknown[]) {
+            if (args.length === 0) {
+                super(fixedMs)
+                return
+            }
+            super(...(args as [number]))
+        }
+
+        static now ():number {
+            return fixedMs
+        }
+    }
+    globalThis.Date = MockDate as DateConstructor
+    try {
+        await fn()
+    } finally {
+        globalThis.Date = RealDate
+    }
 }
 
 test('full sync upserts feeds and items', async (t) => {
@@ -240,6 +269,96 @@ test('incremental sync uses since param', async (t) => {
         db.close()
     }
 })
+
+test('local writes after a server watermark remain pull-visible',
+    async (t) => {
+        storeContent.value = true
+        const db = await openLocalDb('did:test:pull-clock-skew-feed')
+        const adapter = createLocalAdapter(db)
+        let capturedSince:string|null = null
+        let serverReturnedFeed = false
+
+        try {
+            await pullSync(db, makeFetch({
+                feeds: [],
+                items: [],
+                syncedAt: '2026-04-25 10:00:00',
+                latestUpdatedAt: '2026-04-25 10:00:00',
+                isFullSync: true
+            }))
+
+            await withMockedNow(
+                '2026-04-25T09:59:59.000Z',
+                async () => {
+                    await adapter.addFeed('https://clock.example.com/feed')
+                }
+            )
+
+            const feed = queryOne<{
+                id:number
+                url:string
+                title:string|null
+                description:string|null
+                site_url:string|null
+                last_fetched:string|null
+                created_at:string
+                updated_at:string
+            }>(db, 'SELECT * FROM feeds WHERE url = ?', [
+                'https://clock.example.com/feed'
+            ])
+            const outbox = queryOne<{ client_updated_at:string }>(
+                db,
+                `SELECT client_updated_at FROM outbox
+                 WHERE op = 'add_feed'`
+            )
+
+            const deltaFetch:typeof fetch = async (url) => {
+                const parsed = new URL(url.toString(), 'https://rsss.test')
+                capturedSince = parsed.searchParams.get('since')
+                const feeds = (
+                    feed &&
+                    capturedSince &&
+                    feed.updated_at > capturedSince
+                ) ? [feed] : []
+                serverReturnedFeed = feeds.length === 1
+
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async () => ({
+                        feeds,
+                        items: [],
+                        syncedAt: '2026-04-25 10:01:00',
+                        latestUpdatedAt: '2026-04-25 10:01:00',
+                        isFullSync: false
+                    })
+                } as Response
+            }
+
+            await pullSync(db, deltaFetch)
+
+            t.equal(
+                capturedSince,
+                '2026-04-25 10:00:00',
+                'next pull uses the server watermark as since'
+            )
+            t.ok(
+                feed && feed.updated_at > '2026-04-25 10:00:00',
+                'local feed timestamp sorts after the server watermark'
+            )
+            t.equal(
+                outbox?.client_updated_at,
+                feed?.updated_at,
+                'outbox and feed row use the same sortable timestamp'
+            )
+            t.ok(
+                serverReturnedFeed,
+                'server-style updated_at > since query can see the write'
+            )
+        } finally {
+            db.close()
+        }
+    })
 
 test('pullSync throws on non-ok response', async (t) => {
     const db = await openLocalDb('did:test:pull-error')

@@ -6,9 +6,27 @@ import type {
     ItemsResponse,
     CountsResponse
 } from './types.js'
-import { formatSqliteTs } from './time.js'
+import { formatSqliteTs, parseSqliteTs } from './time.js'
 import { itemRouteCandidates } from '../../shared/item-route.js'
 import { execDb, queryDb, queryOneDb } from './local-db.js'
+
+async function getLocalWriteTimestamp (db:Sqlite3Db):Promise<string> {
+    const nowDate = new Date()
+    const now = formatSqliteTs(nowDate)
+    const meta = await queryOneDb<{ last_pull_at:string|null }>(
+        db,
+        'SELECT last_pull_at FROM sync_meta WHERE id = 1'
+    )
+    const lastPullAt = meta?.last_pull_at
+    if (!lastPullAt) return now
+
+    const lastPullDate = parseSqliteTs(lastPullAt)
+    if (!lastPullDate || nowDate.getTime() > lastPullDate.getTime()) {
+        return now
+    }
+
+    return formatSqliteTs(new Date(lastPullDate.getTime() + 1000))
+}
 
 async function insertOutbox (
     db:Sqlite3Db,
@@ -80,7 +98,7 @@ export function createLocalAdapter (db:Sqlite3Db):DbAdapter {
         },
 
         async addFeed (url:string):Promise<Feed> {
-            const now = formatSqliteTs(new Date())
+            const now = await getLocalWriteTimestamp(db)
             await execDb(db, 'BEGIN')
             try {
                 await execDb(db, {
@@ -105,7 +123,7 @@ export function createLocalAdapter (db:Sqlite3Db):DbAdapter {
         },
 
         async deleteFeed (id:number):Promise<void> {
-            const now = formatSqliteTs(new Date())
+            const now = await getLocalWriteTimestamp(db)
             await execDb(db, 'BEGIN')
             try {
                 await execDb(db, {
@@ -235,7 +253,7 @@ export function createLocalAdapter (db:Sqlite3Db):DbAdapter {
             }
             if (fields.length === 0) return
 
-            const now = formatSqliteTs(new Date())
+            const now = await getLocalWriteTimestamp(db)
             fields.push('updated_at = ?')
             params.push(now, id)
 
@@ -273,7 +291,7 @@ export function createLocalAdapter (db:Sqlite3Db):DbAdapter {
         },
 
         async markAllRead (feedId?:number):Promise<void> {
-            const now = formatSqliteTs(new Date())
+            const now = await getLocalWriteTimestamp(db)
             await execDb(db, 'BEGIN')
             try {
                 if (feedId !== undefined) {
