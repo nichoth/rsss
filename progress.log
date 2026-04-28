@@ -2808,3 +2808,23 @@ Thread: https://ampcode.com/threads/unknown
   - Browser tapout tests use a fixed port; run focused tapout commands
     serially when invoking multiple suites.
 ---
+
+## 2026-04-27 21:23 PDT - US-109
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Tightened add-feed reconcile cascade coverage.
+  - Updated the existing regression to match the PRD case exactly: two
+    optimistic-feed items, one read and one starred.
+  - Verified the test fails against the old delete-and-reinsert reconcile
+    path, where `ON DELETE CASCADE` removes the attached items.
+  - Restored the in-place reconcile implementation and verified the focused
+    push-sync suite passes.
+- Files changed:
+  - `test/push-sync.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - The add-feed item-preservation regression should remain a two-row test:
+    one read item and one starred item under the optimistic feed id.
+  - A delete-and-reinsert add-feed reconcile path proves the regression by
+    cascading those items away before the canonical feed row is inserted.
+---
