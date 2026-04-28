@@ -1172,6 +1172,24 @@ export const dataRouter = new Hono<{
 dataRouter.use('*', requireAuth)
 dataRouter.use('*', requireEntitlement)
 
+function buildDoProxyHeaders (headers:Headers):Headers {
+    const forwarded = new Headers()
+
+    headers.forEach((value, name) => {
+        const normalized = name.toLowerCase()
+
+        if (
+            normalized === 'content-type' ||
+            normalized === 'cookie' ||
+            normalized.startsWith('x-rsss-')
+        ) {
+            forwarded.set(name, value)
+        }
+    })
+
+    return forwarded
+}
+
 /**
  * Proxy requests to user's Durable Object.
  * All data routes under /api go to the user's DO.
@@ -1195,7 +1213,7 @@ dataRouter.all('*', async (c) => {
     const response = await stub.fetch(
         new Request(doUrl.toString(), {
             method: c.req.method,
-            headers: c.req.raw.headers,
+            headers: buildDoProxyHeaders(c.req.raw.headers),
             body: c.req.raw.body
         })
     )

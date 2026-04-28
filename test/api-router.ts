@@ -83,6 +83,54 @@ function makeDataEnv (
     }
 }
 
+test('dataRouter strips client authorization before DO proxy', async (t) => {
+    const kv = new MemoryKv()
+    const router = authenticatedDataRouter()
+    const proxiedHeaders = {
+        authorization: 'not proxied',
+        contentType: null as string|null,
+        rsssClientOpId: null as string|null
+    }
+    const env = {
+        USER_DO: {
+            idFromName: () => 'id',
+            get: () => ({
+                fetch: async (request:Request) => {
+                    proxiedHeaders.authorization =
+                        request.headers.get('authorization') ?? 'not proxied'
+                    proxiedHeaders.contentType =
+                        request.headers.get('content-type')
+                    proxiedHeaders.rsssClientOpId =
+                        request.headers.get('x-rsss-client-op-id')
+                    return new Response(null, { status: 200 })
+                }
+            })
+        },
+        SESSIONS: kv as unknown as KVNamespace,
+        NODE_ENV: 'test'
+    }
+
+    await kv.put(billingCacheKey(TEST_SESSION.did), activeBilling())
+
+    const res = await router.request(
+        'https://rsss.space/api/feeds',
+        {
+            method: 'GET',
+            headers: {
+                authorization: 'Bearer xyz',
+                'content-type': 'application/json',
+                'x-rsss-client-op-id': 'op-1'
+            }
+        },
+        env
+    )
+
+    t.equal(res.status, 200)
+    t.equal(proxiedHeaders.authorization, 'not proxied')
+    t.equal(proxiedHeaders.contentType, 'application/json')
+    t.equal(proxiedHeaders.rsssClientOpId, 'op-1')
+})
+
 test('dataRouter applies auth before proxying to the DO', async (t) => {
     let didProxy = false
     const env = {

@@ -222,6 +222,10 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Worker-to-DO proxy headers**: `dataRouter` must build a fresh DO
+  `Request` with an explicit allowlist. Forward only `content-type`,
+  `cookie`, and `x-rsss-*` headers; never pass through client auth headers
+  such as `Authorization`.
 - **Logout route safety**: Browser-driven logout must stay on
   `POST /api/auth/logout` with the CSRF token echo. `GET /logout`
   intentionally returns 405 so links, prefetchers, or image loads cannot
@@ -2710,4 +2714,24 @@ Thread: https://ampcode.com/threads/unknown
     Node-bundled server tests.
   - Keep logout POST-only with CSRF token echo. `GET /logout` is retained
     only as a safe 405 response.
+---
+
+## 2026-04-27 20:58 PDT - US-105
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added an explicit Worker-to-DO header allowlist.
+  - `dataRouter` now builds a fresh header set for DO proxy requests.
+  - Forwarded headers are limited to `content-type`, `cookie`, and
+    `x-rsss-*` custom headers.
+  - Added a regression proving client `Authorization: Bearer xyz` is not
+    present on the request observed by the DO stub.
+- Files changed:
+  - `src/server/index.ts`
+  - `test/api-router.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Do not pass `c.req.raw.headers` directly into the Durable Object proxy;
+    client-controlled auth headers must be stripped at the Worker boundary.
+  - Browser-bundled request construction with a streaming POST body requires
+    `duplex`, so header-only proxy tests should avoid unnecessary bodies.
 ---
