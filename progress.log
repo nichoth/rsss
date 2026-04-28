@@ -129,6 +129,11 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Worker secret bindings**: Production secrets such as
+  `AUTUMN_SECRET_KEY` must be configured with `wrangler secret put`, not
+  `wrangler.jsonc` `vars`. Static deployment checks belong in
+  `test/deploy-config.mjs`, and `/api/health` should expose production
+  config errors loudly.
 - **Session cookie Secure flag**: Session cookies should call
   `shouldUseSecureSessionCookie(c.req.url)` in `src/server/index.ts`.
   The flag is true for every non-loopback hostname and false only for
@@ -2033,4 +2038,30 @@ Thread: https://ampcode.com/threads/unknown
   - The existing server signup/auth test harness can assert `Set-Cookie`
     attributes through `app.request()` without driving the full OAuth
     exchange.
+---
+
+## 2026-04-27 17:20 PDT - US-080
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Removed the Autumn secret from committed Wrangler
+  vars.
+  - Deleted `AUTUMN_SECRET_KEY` from `wrangler.jsonc` `vars`.
+  - Added a deployment config regression that fails if the secret is
+    reintroduced under `vars`, and wired it into `npm test`.
+  - Made `/api/health` fail in production when the Autumn secret is missing.
+  - Documented that production secrets must be set with
+    `wrangler secret put`.
+- Files changed:
+  - `README.md`
+  - `src/server/index.ts`
+  - `test/api-router.ts`
+  - `test/deploy-config.mjs`
+  - `test/run-all-tests.mjs`
+  - `wrangler.jsonc`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Keep static deployment config assertions in `test/deploy-config.mjs`
+    and list them in `test/run-all-tests.mjs`.
+  - Production-only config failures can be exposed through `/api/health`
+    without changing local or test environment behavior.
 ---

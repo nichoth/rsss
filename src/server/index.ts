@@ -191,6 +191,16 @@ const STATE_CHANGING_METHODS = new Set([
     'PUT'
 ])
 
+function productionConfigErrors (env:Env):string[] {
+    const errors:string[] = []
+
+    if (env.NODE_ENV === 'production' && !env.AUTUMN_SECRET_KEY) {
+        errors.push('missing_autumn_secret')
+    }
+
+    return errors
+}
+
 function isLoopbackHostname (hostname:string):boolean {
     return hostname === 'localhost' ||
         hostname === '127.0.0.1' ||
@@ -301,6 +311,17 @@ app.use('*', async (c, next) => {
  * Health check
  */
 app.get('/api/health', (c) => {
+    const configErrors = productionConfigErrors(c.env)
+
+    if (configErrors.length > 0) {
+        return c.json({
+            status: 'error',
+            service: 'rsss',
+            error: configErrors[0],
+            configErrors
+        }, 500)
+    }
+
     return c.json({ status: 'ok', service: 'rsss' })
 })
 

@@ -248,3 +248,21 @@ test('same-origin state-changing api requests continue to work', async (t) => {
     t.equal(res.status, 200)
     t.equal(body.success, true)
 })
+
+test('production health check fails without Autumn secret', async (t) => {
+    const res = await app.request(
+        'https://rsss.space/api/health',
+        {},
+        {
+            NODE_ENV: 'production',
+            SESSIONS: {
+                get: async () => null
+            },
+            SESSION_SECRET: 'test-secret'
+        }
+    )
+    const body = await res.json() as { error?:string }
+
+    t.equal(res.status, 500)
+    t.equal(body.error, 'missing_autumn_secret')
+})
