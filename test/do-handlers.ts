@@ -237,3 +237,30 @@ test(
         t.equal(sql.feeds.length, 2, 'no feed rows are changed')
     }
 )
+
+test('UserDO delete feed clamps future client timestamps', async t => {
+    const { app, sql } = createDoHarness()
+    const originalWarn = console.warn
+    const warnings:unknown[][] = []
+    console.warn = (...args:unknown[]) => {
+        warnings.push(args)
+    }
+    sql.feeds[0].updated_at = '9999-12-31T23:59:58'
+
+    try {
+        const response = await app.request('/feeds/1', {
+            method: 'DELETE',
+            body: JSON.stringify({
+                client_updated_at: '9999-12-31T23:59:59'
+            })
+        })
+        const body = await response.json() as { feed:FeedRow }
+
+        t.equal(response.status, 409, 'clamped write is rejected')
+        t.equal(body.feed.id, 1, 'authoritative feed is returned')
+        t.equal(sql.feeds.length, 2, 'feed row is not deleted')
+        t.equal(warnings.length, 1, 'clamp event is logged')
+    } finally {
+        console.warn = originalWarn
+    }
+})

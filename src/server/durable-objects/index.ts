@@ -9,7 +9,10 @@ import {
     DEAD_LETTER_OUTBOX_SQL
 } from '../../shared/schema.js'
 import { itemRouteCandidates } from '../../shared/item-route.js'
-import { resolveLwwWrite } from '../../shared/lww.js'
+import {
+    clampClientUpdatedAt,
+    resolveLwwWrite
+} from '../../shared/lww.js'
 import {
     FeedFetchError,
     fetchFeedText,
@@ -210,6 +213,20 @@ function syncCursorWhere (
     }
 }
 
+function lwwClientUpdatedAt (value:string|undefined):string|undefined {
+    if (value === undefined) return undefined
+
+    const result = clampClientUpdatedAt(value)
+    if (result.wasClamped) {
+        console.warn('[DO] Clamped client_updated_at', {
+            client_updated_at: value,
+            clamped_client_updated_at: result.clientUpdatedAt
+        })
+    }
+
+    return result.clientUpdatedAt
+}
+
 /**
  * Store feeds and items for a single user.
  * Each user gets their own DO with its own SQLite database.
@@ -338,6 +355,9 @@ export class UserDO extends DurableObject<Env> {
                 client_op_id?:string
                 client_updated_at?:string
             }>()
+            const clientUpdatedAt = lwwClientUpdatedAt(
+                body.client_updated_at
+            )
             console.log('[DO] POST /feeds', body.url)
 
             if (!body.url) {
@@ -374,7 +394,7 @@ export class UserDO extends DurableObject<Env> {
                         body.url
                     ).one() as Record<string, unknown> | null
                     if (
-                        body.client_updated_at !== undefined &&
+                        clientUpdatedAt !== undefined &&
                         existingFeed
                     ) {
                         if (body.client_op_id !== undefined) {
@@ -382,10 +402,8 @@ export class UserDO extends DurableObject<Env> {
                         }
                         const serverTs = existingFeed.updated_at as string|null
                         if (
-                            resolveLwwWrite(
-                                serverTs,
-                                body.client_updated_at
-                            ) === 'conflict'
+                            resolveLwwWrite(serverTs, clientUpdatedAt) ===
+                            'conflict'
                         ) {
                             return c.json({ feed: existingFeed }, 409)
                         }
@@ -457,6 +475,9 @@ export class UserDO extends DurableObject<Env> {
                 client_op_id?:string
                 client_updated_at?:string
             }>().catch(() => ({}))
+            const clientUpdatedAt = lwwClientUpdatedAt(
+                body.client_updated_at
+            )
 
             const feed = this.sql.exec(
                 'SELECT * FROM feeds WHERE id = ?', id
@@ -468,10 +489,10 @@ export class UserDO extends DurableObject<Env> {
                 return c.json({ error: 'Feed not found' }, 404)
             }
 
-            if (body.client_updated_at !== undefined) {
+            if (clientUpdatedAt !== undefined) {
                 const serverTs = feed.updated_at as string | null
                 if (
-                    resolveLwwWrite(serverTs, body.client_updated_at) ===
+                    resolveLwwWrite(serverTs, clientUpdatedAt) ===
                     'conflict'
                 ) {
                     return c.json({ feed }, 409)
@@ -632,6 +653,9 @@ export class UserDO extends DurableObject<Env> {
                 is_starred?:boolean
                 client_updated_at?:string
             }>()
+            const clientUpdatedAt = lwwClientUpdatedAt(
+                body.client_updated_at
+            )
 
             const item = this.sql.exec(
                 'SELECT * FROM items WHERE id = ?', id
@@ -640,10 +664,10 @@ export class UserDO extends DurableObject<Env> {
                 return c.json({ error: 'Item not found' }, 404)
             }
 
-            if (body.client_updated_at !== undefined) {
+            if (clientUpdatedAt !== undefined) {
                 const serverTs = item.updated_at as string | null
                 if (
-                    resolveLwwWrite(serverTs, body.client_updated_at) ===
+                    resolveLwwWrite(serverTs, clientUpdatedAt) ===
                     'conflict'
                 ) {
                     return c.json({ item }, 409)
@@ -679,8 +703,11 @@ export class UserDO extends DurableObject<Env> {
                 feed_id?:number
                 client_updated_at?:string
             }>().catch(() => ({ feed_id: undefined }))
+            const clientUpdatedAt = lwwClientUpdatedAt(
+                body.client_updated_at
+            )
 
-            if (body.client_updated_at !== undefined) {
+            if (clientUpdatedAt !== undefined) {
                 // LWW: check if any items in scope are newer than client
                 let newerItems:unknown[]
                 if (body.feed_id !== undefined) {
@@ -688,12 +715,12 @@ export class UserDO extends DurableObject<Env> {
                         'SELECT * FROM items WHERE feed_id = ?' +
                         ' AND updated_at > ?',
                         body.feed_id,
-                        body.client_updated_at
+                        clientUpdatedAt
                     ).toArray()
                 } else {
                     newerItems = this.sql.exec(
                         'SELECT * FROM items WHERE updated_at > ?',
-                        body.client_updated_at
+                        clientUpdatedAt
                     ).toArray()
                 }
                 if (newerItems.length > 0) {

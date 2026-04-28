@@ -222,6 +222,10 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **LWW client timestamps**: Durable Object mutating routes must pass
+  `client_updated_at` through `lwwClientUpdatedAt()` before any
+  `resolveLwwWrite()` call or SQL `updated_at > ?` comparison. That helper
+  clamps spoofed future timestamps and logs the clamp for observability.
 - **Feed URL canonicalization**: Feed URL writes and dedupe lookups should use
   `validateFeedUrl()` and store its returned value. It lowercases URL parts
   through `URL` and strips trailing slashes from non-root paths so add-feed
@@ -2602,4 +2606,27 @@ Thread: https://ampcode.com/threads/unknown
 - **Learnings for future iterations:**
   - Store and compare the value returned by `validateFeedUrl()` for feed
     URLs; callers should not preserve the raw request URL for dedupe paths.
+---
+## 2026-04-27 20:31 PDT - US-101
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Clamped server-side LWW client timestamps.
+  - Added `clampClientUpdatedAt()` to cap client timestamps at
+    `now + 5min` and return SQLite-compatible timestamp text when clamped.
+  - Routed Durable Object mutating LWW checks through a logging clamp helper,
+    including `mark-all-read` SQL conflict comparisons.
+  - Added focused LWW and Durable Object handler regressions for a spoofed
+    `9999-12-31T23:59:59` client timestamp.
+- Files changed:
+  - `src/shared/lww.ts`
+  - `src/server/durable-objects/index.ts`
+  - `test/server-lww.ts`
+  - `test/do-handlers.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Keep LWW server comparisons on SQLite-style timestamp strings after
+    clamping so lexicographic comparisons stay compatible with existing
+    `updated_at` values.
+  - `mark-all-read` does not call `resolveLwwWrite()`; it performs SQL
+    `updated_at > ?` checks and must receive the clamped timestamp too.
 ---
