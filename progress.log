@@ -2855,3 +2855,22 @@ Thread: https://ampcode.com/threads/unknown
   - Tapout browser tests share a fixed port, so run focused browser suites
     serially rather than in parallel.
 ---
+## 2026-04-27 21:39 PDT - US-111
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Strengthened concurrent `runSync` regression
+  coverage.
+  - Changed the concurrent sync-cycle test to use a transactional
+    `add_feed` outbox push path.
+  - Asserted both parallel callers settle without a SQLite transaction
+    overlap error.
+  - Proved the test fails when the per-DB mutex is removed: the focused
+    suite observed two push requests and two pull requests.
+- Files changed:
+  - `test/sync-cycle.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - To test the `runSync` mutex against transaction overlap, seed an
+    `add_feed` outbox row; the success reconcile path opens a transaction
+    after the push response, unlike simple `update_item` deletion.
+---

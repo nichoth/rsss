@@ -180,7 +180,7 @@ test('runSync pulls new items after draining mark-all-read',
     }
 )
 
-test('runSync coalesces concurrent callers into one HTTP cycle',
+test('runSync coalesces concurrent callers before transactional push',
     async (t) => {
         const db = await openLocalDb('did:test:sync-cycle-concurrent')
         let pushCalls = 0
@@ -196,28 +196,14 @@ test('runSync coalesces concurrent callers into one HTTP cycle',
 
         try {
             db.exec({
-                sql: `INSERT INTO feeds
-                    (id, url, title, created_at, updated_at)
-                    VALUES (1, 'https://example.com/feed', 'Feed',
-                        '2026-01-01 00:00:00',
-                        '2026-01-01 00:00:00')`
-            })
-            db.exec({
-                sql: `INSERT INTO items
-                    (id, feed_id, guid, title, link, is_read, is_starred,
-                     created_at, updated_at)
-                    VALUES (10, 1, 'guid-10', 'Item',
-                        'https://example.com/item-10', 1, 0,
-                        '2026-01-01 00:00:00',
-                        '2026-01-03 00:00:00')`
-            })
-            db.exec({
                 sql: `INSERT INTO outbox
                     (op, target_id, payload, client_op_id,
                      client_updated_at)
-                    VALUES ('update_item', 10, ?, 'op-concurrent',
+                    VALUES ('add_feed', NULL, ?, 'op-concurrent',
                         '2026-01-03 00:00:00')`,
-                bind: [JSON.stringify({ id: 10, is_read: true })]
+                bind: [JSON.stringify({
+                    url: 'https://example.com/feed'
+                })]
             })
 
             const fetchFn:typeof fetch = async (_url, init) => {
@@ -230,7 +216,18 @@ test('runSync coalesces concurrent callers into one HTTP cycle',
                     return {
                         ok: true,
                         status: 200,
-                        json: async () => ({})
+                        json: async () => ({
+                            feed: {
+                                id: 1,
+                                url: 'https://example.com/feed',
+                                title: 'Feed',
+                                description: null,
+                                site_url: null,
+                                last_fetched: null,
+                                created_at: '2026-01-01 00:00:00',
+                                updated_at: '2026-01-03 00:00:00'
+                            }
+                        })
                     } as Response
                 }
 
@@ -255,7 +252,19 @@ test('runSync coalesces concurrent callers into one HTTP cycle',
             await new Promise(resolve => setTimeout(resolve, 0))
             releaseFirstPush()
 
-            await Promise.all([first, second])
+            const results = await Promise.allSettled([first, second])
+            const errors = results
+                .filter((result) => result.status === 'rejected')
+                .map((result) => String(result.reason))
+
+            t.equal(errors.length, 0, 'concurrent callers do not reject')
+            t.equal(
+                errors.some((msg) => (
+                    msg.includes('cannot start a transaction')
+                )),
+                false,
+                'concurrent callers do not overlap SQLite transactions'
+            )
 
             t.equal(pushCalls, 1, 'only one push request is sent')
             t.equal(pullCalls, 1, 'only one pull request is sent')
