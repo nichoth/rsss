@@ -163,6 +163,7 @@ wrangler kv namespace create SESSIONS
 
 | Name | Purpose |
 | --- | --- |
+| `APP_ORIGIN` | Canonical app origin (e.g. `https://rsss.space`). Required; CORS/CSRF allowlist fails closed when unset. |
 | `ADMIN_TOKEN` | Bearer token for admin-only routes. |
 | `SESSION_SECRET` | Secret used to encrypt session cookies. |
 | `OAUTH_CLIENT_ID` | Bluesky OAuth client id. |

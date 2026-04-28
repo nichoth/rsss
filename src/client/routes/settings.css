@@ -54,13 +54,13 @@
 }
 
 .local-first-section {
-    .unsupported-note {
+    & .unsupported-note {
         color: var(--color-text-secondary);
         margin: 0 0 1rem;
         font-style: italic;
     }
 
-    .bootstrap-progress {
+    & .bootstrap-progress {
         margin-top: 1rem;
         padding: 0.75rem 1rem;
         background: var(--color-bg);
@@ -70,29 +70,29 @@
             margin: 0 0 0.25rem;
         }
 
-        .bootstrap-status {
+        & .bootstrap-status {
             font-weight: 500;
         }
 
-        .bootstrap-counts {
+        & .bootstrap-counts {
             color: var(--color-text-secondary);
             font-size: 1rem;
         }
     }
 
-    .bootstrap-error {
+    & .bootstrap-error {
         margin-top: 1rem;
         color: var(--color-error);
         font-size: 1rem;
     }
 
-    .bootstrap-warning {
+    & .bootstrap-warning {
         margin-top: 1rem;
         color: var(--color-warning);
         font-size: 1rem;
     }
 
-    .reset-local-data {
+    & .reset-local-data {
         margin-top: 1.5rem;
         padding-top: 1rem;
         border-top: 1px solid var(--color-border-subtle);
@@ -100,7 +100,7 @@
         align-items: center;
         gap: 1rem;
 
-        .reset-desc {
+        & .reset-desc {
             margin: 0;
             color: var(--color-text-secondary);
         }
@@ -249,7 +249,6 @@
 
 .danger-zone {
     border-color: var(--color-error);
-    border-left-width: 4px;
 
     & h2 {
         color: var(--color-error);
@@ -261,35 +260,5 @@
 
     & .pending-deletion-notice {
         color: var(--color-error);
-    }
-
-    & .btn-delete-account {
-        display: inline-block;
-        background-color: transparent;
-        color: var(--color-error);
-        border: 1px solid var(--color-error);
-        padding: 0.5rem 1rem;
-        text-decoration: none;
-        font-size: 1rem;
-        cursor: pointer;
-
-        &:hover {
-            background-color: var(--color-error);
-            color: var(--color-surface);
-        }
-    }
-
-    & .btn-cancel-deletion {
-        background-color: var(--color-primary);
-        color: var(--color-surface);
-        border: 1px solid var(--color-primary);
-        padding: 0.5rem 1rem;
-        font-size: 1rem;
-        cursor: pointer;
-
-        &:hover {
-            background-color: var(--color-primary-hover);
-            border-color: var(--color-primary-hover);
-        }
     }
 }

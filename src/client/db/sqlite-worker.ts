@@ -1,3 +1,4 @@
+import sqliteWasmUrl from '@sqlite.org/sqlite-wasm/sqlite3.wasm?url'
 import type {
     SqliteWorkerBindValue,
     SqliteWorkerOpenOptions,
@@ -165,7 +166,9 @@ function applySchema (targetDb:WorkerDb):void {
 async function initSqliteInWorker ():Promise<SqliteWorkerNamespace> {
     if (!sqlitePromise) {
         sqlitePromise = import('@sqlite.org/sqlite-wasm')
-            .then((sqlite3Module) => sqlite3Module.default())
+            .then((sqlite3Module) => sqlite3Module.default({
+                locateFile: () => sqliteWasmUrl
+            }))
             .then((sqlite) => sqlite as unknown as SqliteWorkerNamespace)
     }
 

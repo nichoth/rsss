@@ -8,6 +8,7 @@
   },
   "scripts": {
     "lint": "eslint \"./**/*.{ts,js}\"",
+    "stylelint": "stylelint \"**/*.css\" --ignore-pattern \"public/**\"",
     "build-tests": "esbuild test/index.ts --bundle --format=cjs --keep-names > test/test-bundle.js",
     "test": "node test/run-all-tests.mjs",
     "typecheck": "tsc --noEmit",

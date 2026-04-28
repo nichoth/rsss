@@ -467,7 +467,7 @@ export const SettingsRoute:FunctionComponent<{
         </section>
 
         <section class="settings-section danger-zone">
-            <h2>Danger Zone</h2>
+            <h2>Delete</h2>
             ${pendingDeletion.value ? html`
                 <p class="pending-deletion-notice">
                     <strong>Account deletion scheduled.</strong>
@@ -476,7 +476,7 @@ export const SettingsRoute:FunctionComponent<{
                         pendingDeletion.value.scheduledFor)}.
                 </p>
                 <button
-                    class="btn-cancel-deletion"
+                    class="btn"
                     onClick=${handleCancelDeletion}
                 >
                     Cancel deletion
@@ -488,7 +488,7 @@ export const SettingsRoute:FunctionComponent<{
                 </p>
                 <a
                     href="/confirm-close"
-                    class="btn-delete-account"
+                    class="btn"
                     onClick=${handleDeleteAccount}
                 >
                     Delete account
