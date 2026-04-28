@@ -2874,3 +2874,22 @@ Thread: https://ampcode.com/threads/unknown
     `add_feed` outbox row; the success reconcile path opens a transaction
     after the push response, unlike simple `update_item` deletion.
 ---
+
+## 2026-04-27 21:43 PDT - US-112
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Verified and marked complete the in-flight sync
+  disable regression coverage.
+  - Confirmed `test/bootstrap.ts` starts a hanging pull, calls
+    `disableLocalFirst`, awaits cancellation, and asserts no sync error UI
+    state is set.
+  - Confirmed the same regression asserts the OPFS file is removed exactly
+    once for the expected local database filename.
+- Files changed:
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `runSync` cancellation coverage for local-first disable lives in
+    `test/bootstrap.ts` beside the destructive local data flow tests.
+  - Use the existing persistent OPFS test harness in `test/bootstrap.ts`
+    when asserting removal ordering or exact file deletion behavior.
+---
