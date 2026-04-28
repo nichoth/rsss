@@ -222,6 +222,11 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Feed parser hostile-input caps**: `parseFeed` returns bounded data:
+  1000 items max, titles capped at 8 KB, descriptions at 64 KB, and content
+  at 1 MB. Any truncation sets `isTooLarge`, and `fetchFeed` records
+  `last_error = 'feed too large'` with status 413 after inserting the
+  bounded rows.
 - **Deferred local-first enable**: `setSyncSubscriptions(true)` returns
   `pending` while `billingStatus.value === null` and applies automatically
   if an entitled billing status arrives. Callers that start bootstrap should
@@ -2392,4 +2397,27 @@ Thread: https://ampcode.com/threads/unknown
   - Browser-rendered route regressions that import CSS should use
     `--loader:.css=text` for focused `esbuild` runs, matching the full
     browser test bundle.
+---
+## 2026-04-27 19:08 PDT - US-093
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Capped hostile feed parser output before insertion.
+  - RSS and Atom parsing now truncates item arrays to 1000 rows.
+  - Feed and item titles are capped at 8 KB, descriptions at 64 KB, and
+    content at 1 MB.
+  - Any parser truncation sets `isTooLarge`; `fetchFeed` records
+    `last_error = 'feed too large'` with status 413 after inserting the
+    bounded rows.
+  - Added regressions for 5000-item feeds, 4 MB content fields, and the
+    feed-row warning path.
+- Files changed:
+  - `src/server/durable-objects/index.ts`
+  - `test/feed-parser.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Feed parser tests can exercise the private parser with
+    `Object.create(UserDO.prototype)` and a typed test shim.
+  - `fetchFeed` tests that need the real `fetchFeedText` path can stub
+    `globalThis.fetch`; remember to handle the DNS-over-HTTPS request before
+    returning the feed response.
 ---

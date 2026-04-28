@@ -41,6 +41,24 @@ interface XmlObject {
     [key:string]:XmlValue
 }
 
+interface ParsedFeedItem {
+    guid:string | null
+    title:string | null
+    link:string | null
+    description:string | null
+    content:string | null
+    author:string | null
+    pubDate:string | null
+}
+
+interface ParsedFeed {
+    title:string | null
+    description:string | null
+    link:string | null
+    isTooLarge:boolean
+    items:ParsedFeedItem[]
+}
+
 const FEED_XML_PARSER = new XMLParser({
     attributeNamePrefix: '@_',
     cdataPropName: '#cdata',
@@ -52,6 +70,12 @@ const FEED_REFRESH_CONCURRENCY = 8
 const MIGRATION_STATE_KEY = 'schema_migration'
 const USER_DO_MIGRATION_VERSION = 2
 const SYNC_PAGE_LIMIT = 500
+const MAX_PARSED_FEED_ITEMS = 1000
+const MAX_FEED_TITLE_LENGTH = 8 * 1024
+const MAX_FEED_DESCRIPTION_LENGTH = 64 * 1024
+const MAX_FEED_CONTENT_LENGTH = 1024 * 1024
+const FEED_TOO_LARGE_ERROR = 'feed too large'
+const FEED_TOO_LARGE_STATUS = 413
 const FEED_SYNC_COLUMNS = `
     id, url, title, description, site_url, last_fetched, last_error,
     last_status, created_at, updated_at
@@ -829,6 +853,18 @@ export class UserDO extends DurableObject<Env> {
                     // Ignore duplicate key errors
                 }
             }
+
+            if (parsedFeed.isTooLarge) {
+                this.sql.exec(
+                    `UPDATE feeds SET
+                        last_error = ?,
+                        last_status = ?
+                    WHERE id = ?`,
+                    FEED_TOO_LARGE_ERROR,
+                    FEED_TOO_LARGE_STATUS,
+                    feed.id
+                )
+            }
         } catch (err) {
             console.error(`Error fetching feed ${feed.url}:`, err)
             this.sql.exec(
@@ -846,20 +882,7 @@ export class UserDO extends DurableObject<Env> {
     /**
      * Parse RSS or Atom feed XML
      */
-    private parseFeed (xml: string): {
-        title: string | null
-        description: string | null
-        link: string | null
-        items: Array<{
-            guid: string | null
-            title: string | null
-            link: string | null
-            description: string | null
-            content: string | null
-            author: string | null
-            pubDate: string | null
-        }>
-    } {
+    private parseFeed (xml: string): ParsedFeed {
         const doc = FEED_XML_PARSER.parse(xml) as XmlObject
         const rss = this.asObject(this.getChild(doc, ['rss', 'rdf:RDF']))
         const channel = rss ?
@@ -874,32 +897,62 @@ export class UserDO extends DurableObject<Env> {
             title: null,
             description: null,
             link: null,
+            isTooLarge: false,
             items: []
         }
     }
 
     private parseRss (channel: XmlObject) {
-        const title = this.getText(channel, ['title'])
-        const description = this.getText(channel, ['description'])
+        let isTooLarge = false
+        const markTooLarge = () => {
+            isTooLarge = true
+        }
+        const title = this.capText(
+            this.getText(channel, ['title']),
+            MAX_FEED_TITLE_LENGTH,
+            markTooLarge
+        )
+        const description = this.capText(
+            this.getText(channel, ['description']),
+            MAX_FEED_DESCRIPTION_LENGTH,
+            markTooLarge
+        )
         const link = this.getText(channel, ['link'])
-        const items: ReturnType<typeof this.parseFeed>['items'] = []
+        const items: ParsedFeedItem[] = []
         const itemNodes = this.asArray(this.getChild(channel, ['item']))
+        const cappedItemNodes = itemNodes.slice(0, MAX_PARSED_FEED_ITEMS)
 
-        for (const itemNode of itemNodes) {
+        if (itemNodes.length > MAX_PARSED_FEED_ITEMS) {
+            isTooLarge = true
+        }
+
+        for (const itemNode of cappedItemNodes) {
             const item = this.asObject(itemNode)
             if (!item) continue
 
             items.push({
                 guid: this.getText(item, ['guid', 'id']) ||
                     this.getText(item, ['link']),
-                title: this.getText(item, ['title', 'media:title']),
+                title: this.capText(
+                    this.getText(item, ['title', 'media:title']),
+                    MAX_FEED_TITLE_LENGTH,
+                    markTooLarge
+                ),
                 link: this.getText(item, ['link']),
-                description: this.getText(item, ['description']),
-                content: this.getText(item, [
-                    'content:encoded',
-                    'encoded',
-                    'content'
-                ]),
+                description: this.capText(
+                    this.getText(item, ['description']),
+                    MAX_FEED_DESCRIPTION_LENGTH,
+                    markTooLarge
+                ),
+                content: this.capText(
+                    this.getText(item, [
+                        'content:encoded',
+                        'encoded',
+                        'content'
+                    ]),
+                    MAX_FEED_CONTENT_LENGTH,
+                    markTooLarge
+                ),
                 author: this.getText(item, [
                     'author',
                     'dc:creator',
@@ -909,17 +962,34 @@ export class UserDO extends DurableObject<Env> {
             })
         }
 
-        return { title, description, link, items }
+        return { title, description, link, isTooLarge, items }
     }
 
     private parseAtom (feed: XmlObject) {
-        const title = this.getText(feed, ['title'])
-        const description = this.getText(feed, ['subtitle'])
+        let isTooLarge = false
+        const markTooLarge = () => {
+            isTooLarge = true
+        }
+        const title = this.capText(
+            this.getText(feed, ['title']),
+            MAX_FEED_TITLE_LENGTH,
+            markTooLarge
+        )
+        const description = this.capText(
+            this.getText(feed, ['subtitle']),
+            MAX_FEED_DESCRIPTION_LENGTH,
+            markTooLarge
+        )
         const link = this.getLinkHref(this.getChild(feed, ['link']))
-        const items: ReturnType<typeof this.parseFeed>['items'] = []
+        const items: ParsedFeedItem[] = []
         const entries = this.asArray(this.getChild(feed, ['entry']))
+        const cappedEntries = entries.slice(0, MAX_PARSED_FEED_ITEMS)
 
-        for (const entryNode of entries) {
+        if (entries.length > MAX_PARSED_FEED_ITEMS) {
+            isTooLarge = true
+        }
+
+        for (const entryNode of cappedEntries) {
             const entry = this.asObject(entryNode)
             if (!entry) continue
 
@@ -927,10 +997,22 @@ export class UserDO extends DurableObject<Env> {
 
             items.push({
                 guid: this.getText(entry, ['id']),
-                title: this.getText(entry, ['title']),
+                title: this.capText(
+                    this.getText(entry, ['title']),
+                    MAX_FEED_TITLE_LENGTH,
+                    markTooLarge
+                ),
                 link: this.getLinkHref(this.getChild(entry, ['link'])),
-                description: this.getText(entry, ['summary']),
-                content: this.getText(entry, ['content']),
+                description: this.capText(
+                    this.getText(entry, ['summary']),
+                    MAX_FEED_DESCRIPTION_LENGTH,
+                    markTooLarge
+                ),
+                content: this.capText(
+                    this.getText(entry, ['content']),
+                    MAX_FEED_CONTENT_LENGTH,
+                    markTooLarge
+                ),
                 author: author ? this.getText(author, ['name']) : null,
                 pubDate: this.parseDate(
                     this.getText(entry, ['published']) ||
@@ -939,7 +1021,19 @@ export class UserDO extends DurableObject<Env> {
             })
         }
 
-        return { title, description, link, items }
+        return { title, description, link, isTooLarge, items }
+    }
+
+    private capText (
+        value:string | null,
+        maxLength:number,
+        markTooLarge:() => void
+    ):string | null {
+        if (value === null) return null
+        if (value.length <= maxLength) return value
+
+        markTooLarge()
+        return value.slice(0, maxLength)
     }
 
     private getLinkHref (value:XmlValue | undefined):string | null {
