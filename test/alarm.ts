@@ -17,6 +17,13 @@ interface QueryResult {
     one:() => unknown | null
 }
 
+interface AlarmStorage {
+    get:<T>(key:string) => Promise<T | undefined>
+    put:(key:string, value:unknown) => Promise<void>
+    delete:(key:string) => Promise<void>
+    setAlarm:(time:number) => Promise<void>
+}
+
 function result (rows:unknown[]):QueryResult {
     return {
         toArray () {
@@ -57,26 +64,81 @@ function deferred () {
 function createAlarmDo (
     feeds:FeedRow[],
     fetchFeed:(feed:FeedRow) => Promise<void>,
-    setAlarm = async (_time:number) => {}
+    setAlarm = async (_time:number) => {},
+    storage:Partial<AlarmStorage> = {}
 ) {
     const userDo = Object.create(UserDO.prototype) as {
         sql:{ exec:(query:string, ...params:unknown[]) => QueryResult }
-        ctx:{ storage:{ setAlarm:(time:number) => Promise<void> } }
+        ctx:{ storage:AlarmStorage }
         fetchFeed:(feed:FeedRow) => Promise<void>
         alarm:() => Promise<void>
     }
 
     userDo.sql = {
-        exec (query:string) {
+        exec (query:string, ...params:unknown[]) {
             if (query.includes('SELECT * FROM feeds')) {
-                return result(feeds)
+                const hasCursor = query.includes('WHERE id > ?')
+                const cursor = hasCursor ? Number(params[0]) : 0
+                const parsedLimit = Number(params[params.length - 1])
+                const limit = Number.isFinite(parsedLimit)
+                    ? parsedLimit
+                    : feeds.length
+                const batch = feeds
+                    .filter(feed => feed.id > cursor)
+                    .slice(0, limit)
+
+                return result(batch)
             }
 
             throw new Error(`Unexpected SQL: ${query}`)
         }
     }
-    userDo.ctx = { storage: { setAlarm } }
+    userDo.ctx = {
+        storage: {
+            get: storage.get || (async () => undefined),
+            put: storage.put || (async () => {}),
+            delete: storage.delete || (async () => {}),
+            setAlarm: storage.setAlarm || setAlarm
+        }
+    }
     userDo.fetchFeed = fetchFeed
+
+    return userDo
+}
+
+function createResumeAlarmDo (
+    feeds:FeedRow[],
+    fetchFeed:(feed:FeedRow) => Promise<void>,
+    storage:AlarmStorage,
+    failOnQuery:number
+) {
+    let queryCount = 0
+    const userDo = createAlarmDo(feeds, fetchFeed, storage.setAlarm, storage)
+
+    userDo.sql = {
+        exec (query:string, ...params:unknown[]) {
+            if (!query.includes('SELECT * FROM feeds')) {
+                throw new Error(`Unexpected SQL: ${query}`)
+            }
+
+            queryCount++
+            if (queryCount === failOnQuery) {
+                throw new Error('CPU budget exhausted')
+            }
+
+            const hasCursor = query.includes('WHERE id > ?')
+            const cursor = hasCursor ? Number(params[0]) : 0
+            const parsedLimit = Number(params[params.length - 1])
+            const limit = Number.isFinite(parsedLimit)
+                ? parsedLimit
+                : feeds.length
+            const batch = feeds
+                .filter(feed => feed.id > cursor)
+                .slice(0, limit)
+
+            return result(batch)
+        }
+    }
 
     return userDo
 }
@@ -124,6 +186,71 @@ test('alarm waits for the rescheduled alarm to persist', async t => {
     await alarmPromise
 
     t.equal(alarmSettled, true, 'alarm resolves after setAlarm resolves')
+})
+
+test('alarm resumes refresh after a mid-run kill', async t => {
+    const feeds = Array.from({ length: 10 }, (_value, index) => {
+        return createFeed(index + 1)
+    })
+    const stored = new Map<string, unknown>()
+    const alarmTimes:number[] = []
+    const fetched:number[] = []
+    const storage:AlarmStorage = {
+        async get <T> (key:string) {
+            return stored.get(key) as T | undefined
+        },
+        async put (key:string, value:unknown) {
+            stored.set(key, value)
+        },
+        async delete (key:string) {
+            stored.delete(key)
+        },
+        async setAlarm (time:number) {
+            alarmTimes.push(time)
+        }
+    }
+    const firstRun = createResumeAlarmDo(
+        feeds,
+        async (feed) => {
+            fetched.push(feed.id)
+        },
+        storage,
+        2
+    )
+
+    let killed = false
+    try {
+        await firstRun.alarm()
+    } catch {
+        killed = true
+    }
+
+    t.equal(killed, true, 'first alarm stops mid-refresh')
+    t.deepEqual(
+        fetched,
+        [1, 2, 3, 4, 5, 6, 7, 8],
+        'first alarm completes the first refresh batch'
+    )
+    t.equal(alarmTimes.length, 1, 'next alarm is scheduled before kill')
+
+    const secondRun = createResumeAlarmDo(
+        feeds,
+        async (feed) => {
+            fetched.push(feed.id)
+        },
+        storage,
+        0
+    )
+
+    await secondRun.alarm()
+
+    t.deepEqual(
+        fetched,
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+        'second alarm resumes with the remaining feeds'
+    )
+    t.equal(alarmTimes.length, 2, 'the resumed run schedules another alarm')
+    t.equal(stored.size, 0, 'completed refresh clears the resume cursor')
 })
 
 test('fetchFeed stores last_error and last_status on failure', async t => {

@@ -222,6 +222,11 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Durable Object alarm resume cursor**: `UserDO.alarm()` schedules the
+  next alarm before feed work, refreshes feeds in id-ordered batches, and
+  stores `alarm_refresh_cursor.last_feed_id` in DO storage only after a
+  batch completes. Keep alarm refresh queries cursor-aware so a CPU-budget
+  kill resumes at the next unprocessed batch.
 - **Feed parser hostile-input caps**: `parseFeed` returns bounded data:
   1000 items max, titles capped at 8 KB, descriptions at 64 KB, and content
   at 1 MB. Any truncation sets `isTooLarge`, and `fetchFeed` records
@@ -2420,4 +2425,24 @@ Thread: https://ampcode.com/threads/unknown
   - `fetchFeed` tests that need the real `fetchFeedText` path can stub
     `globalThis.fetch`; remember to handle the DNS-over-HTTPS request before
     returning the feed response.
+---
+## 2026-04-27 19:13 PDT - US-094
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Made Durable Object alarm refresh resumable.
+  - Moved next-alarm scheduling to the start of `UserDO.alarm()`.
+  - Changed feed refresh to process id-ordered batches of 8 feeds and store
+    the last completed feed id in DO storage after each successful batch.
+  - Added a regression that simulates a CPU-budget kill after the first
+    refresh batch and verifies the next alarm processes only remaining feeds.
+- Files changed:
+  - `src/server/durable-objects/index.ts`
+  - `test/alarm.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Durable Object alarm refresh uses `alarm_refresh_cursor.last_feed_id` as
+    a batch resume marker. Update it only after a whole batch completes, so
+    failed batches are retried instead of skipped.
+  - Alarm tests that fake `SELECT * FROM feeds` need to respect cursor and
+    `LIMIT` params now that alarm refresh loops over batches.
 ---

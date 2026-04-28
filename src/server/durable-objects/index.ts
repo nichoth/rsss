@@ -67,6 +67,8 @@ const FEED_XML_PARSER = new XMLParser({
     trimValues: true
 })
 const FEED_REFRESH_CONCURRENCY = 8
+const FEED_REFRESH_INTERVAL_MS = 10 * 60 * 1000
+const ALARM_REFRESH_CURSOR_KEY = 'alarm_refresh_cursor'
 const MIGRATION_STATE_KEY = 'schema_migration'
 const USER_DO_MIGRATION_VERSION = 2
 const SYNC_PAGE_LIMIT = 500
@@ -89,6 +91,10 @@ const ITEM_SYNC_COLUMNS = `
 
 interface MigrationState {
     migration_v?:number
+}
+
+interface AlarmRefreshCursor {
+    last_feed_id?:number
 }
 
 type SyncRowKind = 'feed' | 'item'
@@ -219,7 +225,9 @@ export class UserDO extends DurableObject<Env> {
             const currentAlarm = await ctx.storage.getAlarm()
             if (!currentAlarm) {
                 // Set first alarm 10 minutes from now
-                await ctx.storage.setAlarm(Date.now() + 10 * 60 * 1000)
+                await ctx.storage.setAlarm(
+                    Date.now() + FEED_REFRESH_INTERVAL_MS
+                )
             }
         })
     }
@@ -1131,13 +1139,72 @@ export class UserDO extends DurableObject<Env> {
      * Alarm handler for periodic feed refresh
      */
     async alarm (): Promise<void> {
-        const feeds = this.sql.exec('SELECT * FROM feeds')
-            .toArray() as unknown as Feed[]
+        await this.scheduleNextFeedRefresh()
+        await this.refreshFeedBatches()
+    }
 
-        await this.refreshFeeds(feeds)
+    private async scheduleNextFeedRefresh ():Promise<void> {
+        await this.ctx.storage.setAlarm(
+            Date.now() + FEED_REFRESH_INTERVAL_MS
+        )
+    }
 
-        // Schedule next alarm in 10 minutes
-        await this.ctx.storage.setAlarm(Date.now() + 10 * 60 * 1000)
+    private async refreshFeedBatches ():Promise<void> {
+        let cursor = await this.getAlarmRefreshCursor()
+
+        while (true) {
+            const feeds = this.selectFeedRefreshBatch(cursor)
+            if (feeds.length === 0) {
+                await this.ctx.storage.delete(ALARM_REFRESH_CURSOR_KEY)
+                return
+            }
+
+            await this.refreshFeeds(feeds)
+
+            const lastFeed = feeds[feeds.length - 1]
+            if (!lastFeed) return
+
+            cursor = lastFeed.id
+            await this.ctx.storage.put(ALARM_REFRESH_CURSOR_KEY, {
+                last_feed_id: cursor
+            })
+        }
+    }
+
+    private async getAlarmRefreshCursor ():Promise<number> {
+        const cursor = await this.ctx.storage.get<AlarmRefreshCursor>(
+            ALARM_REFRESH_CURSOR_KEY
+        )
+        const lastFeedId = cursor?.last_feed_id
+        if (
+            typeof lastFeedId === 'number' &&
+            Number.isFinite(lastFeedId) &&
+            lastFeedId > 0
+        ) {
+            return lastFeedId
+        }
+
+        return 0
+    }
+
+    private selectFeedRefreshBatch (cursor:number):Feed[] {
+        if (cursor > 0) {
+            return this.sql.exec(
+                `SELECT * FROM feeds
+                WHERE id > ?
+                ORDER BY id ASC
+                LIMIT ?`,
+                cursor,
+                FEED_REFRESH_CONCURRENCY
+            ).toArray() as unknown as Feed[]
+        }
+
+        return this.sql.exec(
+            `SELECT * FROM feeds
+            ORDER BY id ASC
+            LIMIT ?`,
+            FEED_REFRESH_CONCURRENCY
+        ).toArray() as unknown as Feed[]
     }
 
     private async refreshFeeds (feeds:Feed[]):Promise<void> {
