@@ -222,6 +222,10 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Logout route safety**: Browser-driven logout must stay on
+  `POST /api/auth/logout` with the CSRF token echo. `GET /logout`
+  intentionally returns 405 so links, prefetchers, or image loads cannot
+  clear a session.
 - **Billing email recipient source**: `billing_pending_email:*` is the
   request-body email intended for Autumn customer binding only.
   Notification recipients must come from `billing_contact_email:*`, which is
@@ -2686,4 +2690,24 @@ Thread: https://ampcode.com/threads/unknown
   - Dev checkout may still send subscription emails when a contact email has
     already been verified/stashed, but request-body email alone is not
     sufficient.
+---
+## 2026-04-27 20:53 PDT - US-104
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Dropped side-effecting GET logout behavior.
+  - `GET /logout` now returns 405 without touching session cookies.
+  - `POST /api/auth/logout` remains the client logout path.
+  - Added Node regression coverage for both paths and wired it into the
+    full test runner.
+- Files changed:
+  - `src/server/index.ts`
+  - `test/logout.ts`
+  - `test/run-all-tests.mjs`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Browser-bundled `tapout` tests strip explicit `Cookie` headers; logout
+    endpoint tests that need cookie/session behavior should run as
+    Node-bundled server tests.
+  - Keep logout POST-only with CSRF token echo. `GET /logout` is retained
+    only as a safe 405 response.
 ---

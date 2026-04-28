@@ -22,6 +22,12 @@ const commands = [
         '| node --input-type=module | tap-spec'
     ].join(' '),
     [
+        'esbuild ./test/logout.ts --bundle --platform=node',
+        '--format=esm',
+        '--alias:cloudflare:workers=./test/cloudflare-workers-stub.ts',
+        '| node --input-type=module | tap-spec'
+    ].join(' '),
+    [
         'esbuild ./test/index.ts --bundle',
         '--alias:cloudflare:workers=./test/cloudflare-workers-stub.ts',
         '--loader:.css=text',

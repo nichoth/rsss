@@ -660,17 +660,8 @@ app.post('/api/auth/logout', async (c) => {
     return c.json({ success: true })
 })
 
-app.get('/logout', async (c) => {
-    const cookie = getCookie(c, 'session')
-    if (cookie && c.env.SESSION_SECRET) {
-        await destroySessionCookie(
-            cookie,
-            c.env.SESSION_SECRET,
-            c.env.SESSIONS
-        )
-    }
-    deleteCookie(c, 'session', { path: '/' })
-    return c.redirect('/login')
+app.get('/logout', (c) => {
+    return c.text('Method Not Allowed', 405)
 })
 
 const requireAuth = async (c:Context<{
