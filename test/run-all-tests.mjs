@@ -15,6 +15,35 @@ const commands = [
     'node test/vite-build-inputs.mjs',
     'node test/vite-isolation-headers.mjs',
     'node test/isolation-headers-static.mjs',
+    'node test/run-all-coverage.mjs',
+    'esbuild ./test/tab-coordination.ts --bundle | tapout',
+    'esbuild ./test/adapter-factory.ts --bundle | tapout',
+    [
+        'esbuild ./test/sqlite-init.ts --bundle',
+        '--loader:.wasm=dataurl',
+        '| tapout'
+    ].join(' '),
+    [
+        'esbuild ./test/local-adapter.ts --bundle',
+        '--loader:.wasm=dataurl',
+        '| tapout'
+    ].join(' '),
+    [
+        'esbuild ./test/pull-sync.ts --bundle',
+        '--loader:.wasm=dataurl',
+        '| tapout'
+    ].join(' '),
+    [
+        'esbuild ./test/push-sync.ts --bundle',
+        '--loader:.wasm=dataurl',
+        '| tapout'
+    ].join(' '),
+    [
+        'esbuild ./test/bootstrap.ts --bundle',
+        '--loader:.wasm=dataurl',
+        '| tapout'
+    ].join(' '),
+    'esbuild ./test/local-first-settings.ts --bundle | tapout',
     [
         'esbuild ./test/session-record.ts --bundle --platform=node',
         '--format=esm',

@@ -587,6 +587,10 @@ Thread: https://ampcode.com/threads/unknown
 - **Aggregate tests with sqlite-wasm**: If a test imported through
   `test/index.ts` imports `@sqlite.org/sqlite-wasm/sqlite3.wasm`,
   `test/run-all-tests.mjs` must pass `--loader:.wasm=dataurl` to esbuild.
+- **Full-runner local-first coverage**: `test/run-all-coverage.mjs` owns
+  static assertions that required local-first client suites are listed in
+  `test/run-all-tests.mjs`; add new high-risk focused suites there with the
+  wasm loader when they import SQLite WASM.
 
 ## 2026-04-26 12:19 PDT - US-050
 Thread: https://ampcode.com/threads/unknown
@@ -2734,4 +2738,27 @@ Thread: https://ampcode.com/threads/unknown
     client-controlled auth headers must be stripped at the Worker boundary.
   - Browser-bundled request construction with a streaming POST body requires
     `duplex`, so header-only proxy tests should avoid unnecessary bodies.
+---
+
+## 2026-04-27 21:02 PDT - US-106
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Wired high-risk local-first client suites into
+  `npm test`.
+  - Added `test/run-all-coverage.mjs` to guard the full runner against
+    dropping required local-first suites.
+  - Added focused `run-all-tests.mjs` entries for tab coordination,
+    adapter factory, SQLite init, local adapter, pull sync, push sync,
+    bootstrap, and local-first settings.
+  - Ensured SQLite WASM-backed focused suites run with
+    `--loader:.wasm=dataurl` from the full test runner.
+- Files changed:
+  - `test/run-all-coverage.mjs`
+  - `test/run-all-tests.mjs`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Keep `test/run-all-coverage.mjs` in sync when adding high-risk
+    local-first suites that must be part of `npm test`.
+  - Browser `tapout` commands use a fixed port, so list focused browser
+    suites serially in `test/run-all-tests.mjs`.
 ---
