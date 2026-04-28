@@ -9,7 +9,10 @@ import {
     DEAD_LETTER_OUTBOX_SQL
 } from '../../shared/schema.js'
 import { itemRouteCandidates } from '../../shared/item-route.js'
-import { resolveLwwWrite } from '../../shared/lww.js'
+import {
+    clampClientUpdatedAt,
+    resolveLwwWrite
+} from '../../shared/lww.js'
 import {
     FeedFetchError,
     fetchFeedText,
@@ -41,6 +44,24 @@ interface XmlObject {
     [key:string]:XmlValue
 }
 
+interface ParsedFeedItem {
+    guid:string | null
+    title:string | null
+    link:string | null
+    description:string | null
+    content:string | null
+    author:string | null
+    pubDate:string | null
+}
+
+interface ParsedFeed {
+    title:string | null
+    description:string | null
+    link:string | null
+    isTooLarge:boolean
+    items:ParsedFeedItem[]
+}
+
 const FEED_XML_PARSER = new XMLParser({
     attributeNamePrefix: '@_',
     cdataPropName: '#cdata',
@@ -49,9 +70,19 @@ const FEED_XML_PARSER = new XMLParser({
     trimValues: true
 })
 const FEED_REFRESH_CONCURRENCY = 8
+const FEED_REFRESH_INTERVAL_MS = 10 * 60 * 1000
+const MANUAL_REFRESH_LIMIT_MS = 60 * 1000
+const MANUAL_REFRESH_STORAGE_PREFIX = 'manual_refresh:'
+const ALARM_REFRESH_CURSOR_KEY = 'alarm_refresh_cursor'
 const MIGRATION_STATE_KEY = 'schema_migration'
 const USER_DO_MIGRATION_VERSION = 2
 const SYNC_PAGE_LIMIT = 500
+const MAX_PARSED_FEED_ITEMS = 1000
+const MAX_FEED_TITLE_LENGTH = 8 * 1024
+const MAX_FEED_DESCRIPTION_LENGTH = 64 * 1024
+const MAX_FEED_CONTENT_LENGTH = 1024 * 1024
+const FEED_TOO_LARGE_ERROR = 'feed too large'
+const FEED_TOO_LARGE_STATUS = 413
 const FEED_SYNC_COLUMNS = `
     id, url, title, description, site_url, last_fetched, last_error,
     last_status, created_at, updated_at
@@ -63,8 +94,31 @@ const ITEM_SYNC_COLUMNS = `
     feeds.title AS feed_title
 `
 
+function errorMessage (err:unknown):string {
+    return err instanceof Error ? err.message : String(err)
+}
+
+function isDuplicateInsertError (err:unknown):boolean {
+    const message = errorMessage(err).toLowerCase()
+
+    return message.includes('sqlite_constraint_unique') ||
+        message.includes('unique constraint failed')
+}
+
 interface MigrationState {
     migration_v?:number
+}
+
+interface AlarmRefreshCursor {
+    last_feed_id?:number
+}
+
+interface ManualRefreshState {
+    last_manual_refresh_at?:number
+}
+
+interface ManualRefreshLimit {
+    retryAfterSeconds:number
 }
 
 type SyncRowKind = 'feed' | 'item'
@@ -169,6 +223,41 @@ function syncCursorWhere (
     }
 }
 
+function lwwClientUpdatedAt (value:string|undefined):string|undefined {
+    if (value === undefined) return undefined
+
+    const result = clampClientUpdatedAt(value)
+    if (result.wasClamped) {
+        console.warn('[DO] Clamped client_updated_at', {
+            client_updated_at: value,
+            clamped_client_updated_at: result.clientUpdatedAt
+        })
+    }
+
+    return result.clientUpdatedAt
+}
+
+function manualRefreshStorageKey (feedId:number):string {
+    return `${MANUAL_REFRESH_STORAGE_PREFIX}${feedId}`
+}
+
+function isRecentManualRefresh (
+    refreshedAt:number|undefined,
+    now:number
+):boolean {
+    return typeof refreshedAt === 'number' &&
+        Number.isFinite(refreshedAt) &&
+        now - refreshedAt < MANUAL_REFRESH_LIMIT_MS
+}
+
+function manualRefreshRetryAfterSeconds (
+    refreshedAt:number,
+    now:number
+):number {
+    const remainingMs = MANUAL_REFRESH_LIMIT_MS - (now - refreshedAt)
+    return Math.max(1, Math.ceil(remainingMs / 1000))
+}
+
 /**
  * Store feeds and items for a single user.
  * Each user gets their own DO with its own SQLite database.
@@ -181,6 +270,7 @@ function syncCursorWhere (
 export class UserDO extends DurableObject<Env> {
     private app: Hono
     private sql: SqlStorage
+    private manualRefreshClaims?:Map<number, number>
 
     constructor (ctx: DurableObjectState, env: Env) {
         super(ctx, env)
@@ -195,7 +285,9 @@ export class UserDO extends DurableObject<Env> {
             const currentAlarm = await ctx.storage.getAlarm()
             if (!currentAlarm) {
                 // Set first alarm 10 minutes from now
-                await ctx.storage.setAlarm(Date.now() + 10 * 60 * 1000)
+                await ctx.storage.setAlarm(
+                    Date.now() + FEED_REFRESH_INTERVAL_MS
+                )
             }
         })
     }
@@ -295,6 +387,9 @@ export class UserDO extends DurableObject<Env> {
                 client_op_id?:string
                 client_updated_at?:string
             }>()
+            const clientUpdatedAt = lwwClientUpdatedAt(
+                body.client_updated_at
+            )
             console.log('[DO] POST /feeds', body.url)
 
             if (!body.url) {
@@ -331,7 +426,7 @@ export class UserDO extends DurableObject<Env> {
                         body.url
                     ).one() as Record<string, unknown> | null
                     if (
-                        body.client_updated_at !== undefined &&
+                        clientUpdatedAt !== undefined &&
                         existingFeed
                     ) {
                         if (body.client_op_id !== undefined) {
@@ -339,10 +434,8 @@ export class UserDO extends DurableObject<Env> {
                         }
                         const serverTs = existingFeed.updated_at as string|null
                         if (
-                            resolveLwwWrite(
-                                serverTs,
-                                body.client_updated_at
-                            ) === 'conflict'
+                            resolveLwwWrite(serverTs, clientUpdatedAt) ===
+                            'conflict'
                         ) {
                             return c.json({ feed: existingFeed }, 409)
                         }
@@ -414,6 +507,9 @@ export class UserDO extends DurableObject<Env> {
                 client_op_id?:string
                 client_updated_at?:string
             }>().catch(() => ({}))
+            const clientUpdatedAt = lwwClientUpdatedAt(
+                body.client_updated_at
+            )
 
             const feed = this.sql.exec(
                 'SELECT * FROM feeds WHERE id = ?', id
@@ -425,10 +521,10 @@ export class UserDO extends DurableObject<Env> {
                 return c.json({ error: 'Feed not found' }, 404)
             }
 
-            if (body.client_updated_at !== undefined) {
+            if (clientUpdatedAt !== undefined) {
                 const serverTs = feed.updated_at as string | null
                 if (
-                    resolveLwwWrite(serverTs, body.client_updated_at) ===
+                    resolveLwwWrite(serverTs, clientUpdatedAt) ===
                     'conflict'
                 ) {
                     return c.json({ feed }, 409)
@@ -446,6 +542,18 @@ export class UserDO extends DurableObject<Env> {
 
             if (!feed) {
                 return c.json({ error: 'Feed not found' }, 404)
+            }
+
+            const limit = await this.claimManualFeedRefresh(feed.id)
+            if (limit) {
+                const response = c.json({
+                    error: 'Feed refresh rate limited'
+                }, 429)
+                response.headers.set(
+                    'Retry-After',
+                    String(limit.retryAfterSeconds)
+                )
+                return response
             }
 
             try {
@@ -589,6 +697,9 @@ export class UserDO extends DurableObject<Env> {
                 is_starred?:boolean
                 client_updated_at?:string
             }>()
+            const clientUpdatedAt = lwwClientUpdatedAt(
+                body.client_updated_at
+            )
 
             const item = this.sql.exec(
                 'SELECT * FROM items WHERE id = ?', id
@@ -597,10 +708,10 @@ export class UserDO extends DurableObject<Env> {
                 return c.json({ error: 'Item not found' }, 404)
             }
 
-            if (body.client_updated_at !== undefined) {
+            if (clientUpdatedAt !== undefined) {
                 const serverTs = item.updated_at as string | null
                 if (
-                    resolveLwwWrite(serverTs, body.client_updated_at) ===
+                    resolveLwwWrite(serverTs, clientUpdatedAt) ===
                     'conflict'
                 ) {
                     return c.json({ item }, 409)
@@ -636,8 +747,11 @@ export class UserDO extends DurableObject<Env> {
                 feed_id?:number
                 client_updated_at?:string
             }>().catch(() => ({ feed_id: undefined }))
+            const clientUpdatedAt = lwwClientUpdatedAt(
+                body.client_updated_at
+            )
 
-            if (body.client_updated_at !== undefined) {
+            if (clientUpdatedAt !== undefined) {
                 // LWW: check if any items in scope are newer than client
                 let newerItems:unknown[]
                 if (body.feed_id !== undefined) {
@@ -645,12 +759,12 @@ export class UserDO extends DurableObject<Env> {
                         'SELECT * FROM items WHERE feed_id = ?' +
                         ' AND updated_at > ?',
                         body.feed_id,
-                        body.client_updated_at
+                        clientUpdatedAt
                     ).toArray()
                 } else {
                     newerItems = this.sql.exec(
                         'SELECT * FROM items WHERE updated_at > ?',
-                        body.client_updated_at
+                        clientUpdatedAt
                     ).toArray()
                 }
                 if (newerItems.length > 0) {
@@ -825,9 +939,38 @@ export class UserDO extends DurableObject<Env> {
                         item.author,
                         item.pubDate
                     )
-                } catch (_err) {
-                    // Ignore duplicate key errors
+                } catch (err) {
+                    if (isDuplicateInsertError(err)) continue
+
+                    const message = errorMessage(err)
+
+                    console.error(
+                        `Error inserting feed item for ${feed.url}:`,
+                        err
+                    )
+                    this.sql.exec(
+                        `UPDATE feeds SET
+                            last_error = ?,
+                            last_status = ?
+                        WHERE id = ?`,
+                        message,
+                        500,
+                        feed.id
+                    )
+                    return
                 }
+            }
+
+            if (parsedFeed.isTooLarge) {
+                this.sql.exec(
+                    `UPDATE feeds SET
+                        last_error = ?,
+                        last_status = ?
+                    WHERE id = ?`,
+                    FEED_TOO_LARGE_ERROR,
+                    FEED_TOO_LARGE_STATUS,
+                    feed.id
+                )
             }
         } catch (err) {
             console.error(`Error fetching feed ${feed.url}:`, err)
@@ -836,7 +979,7 @@ export class UserDO extends DurableObject<Env> {
                     last_error = ?,
                     last_status = ?
                 WHERE id = ?`,
-                err instanceof Error ? err.message : String(err),
+                errorMessage(err),
                 err instanceof FeedFetchError ? err.status : 500,
                 feed.id
             )
@@ -846,20 +989,7 @@ export class UserDO extends DurableObject<Env> {
     /**
      * Parse RSS or Atom feed XML
      */
-    private parseFeed (xml: string): {
-        title: string | null
-        description: string | null
-        link: string | null
-        items: Array<{
-            guid: string | null
-            title: string | null
-            link: string | null
-            description: string | null
-            content: string | null
-            author: string | null
-            pubDate: string | null
-        }>
-    } {
+    private parseFeed (xml: string): ParsedFeed {
         const doc = FEED_XML_PARSER.parse(xml) as XmlObject
         const rss = this.asObject(this.getChild(doc, ['rss', 'rdf:RDF']))
         const channel = rss ?
@@ -874,32 +1004,62 @@ export class UserDO extends DurableObject<Env> {
             title: null,
             description: null,
             link: null,
+            isTooLarge: false,
             items: []
         }
     }
 
     private parseRss (channel: XmlObject) {
-        const title = this.getText(channel, ['title'])
-        const description = this.getText(channel, ['description'])
+        let isTooLarge = false
+        const markTooLarge = () => {
+            isTooLarge = true
+        }
+        const title = this.capText(
+            this.getText(channel, ['title']),
+            MAX_FEED_TITLE_LENGTH,
+            markTooLarge
+        )
+        const description = this.capText(
+            this.getText(channel, ['description']),
+            MAX_FEED_DESCRIPTION_LENGTH,
+            markTooLarge
+        )
         const link = this.getText(channel, ['link'])
-        const items: ReturnType<typeof this.parseFeed>['items'] = []
+        const items: ParsedFeedItem[] = []
         const itemNodes = this.asArray(this.getChild(channel, ['item']))
+        const cappedItemNodes = itemNodes.slice(0, MAX_PARSED_FEED_ITEMS)
 
-        for (const itemNode of itemNodes) {
+        if (itemNodes.length > MAX_PARSED_FEED_ITEMS) {
+            isTooLarge = true
+        }
+
+        for (const itemNode of cappedItemNodes) {
             const item = this.asObject(itemNode)
             if (!item) continue
 
             items.push({
                 guid: this.getText(item, ['guid', 'id']) ||
                     this.getText(item, ['link']),
-                title: this.getText(item, ['title', 'media:title']),
+                title: this.capText(
+                    this.getText(item, ['title', 'media:title']),
+                    MAX_FEED_TITLE_LENGTH,
+                    markTooLarge
+                ),
                 link: this.getText(item, ['link']),
-                description: this.getText(item, ['description']),
-                content: this.getText(item, [
-                    'content:encoded',
-                    'encoded',
-                    'content'
-                ]),
+                description: this.capText(
+                    this.getText(item, ['description']),
+                    MAX_FEED_DESCRIPTION_LENGTH,
+                    markTooLarge
+                ),
+                content: this.capText(
+                    this.getText(item, [
+                        'content:encoded',
+                        'encoded',
+                        'content'
+                    ]),
+                    MAX_FEED_CONTENT_LENGTH,
+                    markTooLarge
+                ),
                 author: this.getText(item, [
                     'author',
                     'dc:creator',
@@ -909,17 +1069,34 @@ export class UserDO extends DurableObject<Env> {
             })
         }
 
-        return { title, description, link, items }
+        return { title, description, link, isTooLarge, items }
     }
 
     private parseAtom (feed: XmlObject) {
-        const title = this.getText(feed, ['title'])
-        const description = this.getText(feed, ['subtitle'])
+        let isTooLarge = false
+        const markTooLarge = () => {
+            isTooLarge = true
+        }
+        const title = this.capText(
+            this.getText(feed, ['title']),
+            MAX_FEED_TITLE_LENGTH,
+            markTooLarge
+        )
+        const description = this.capText(
+            this.getText(feed, ['subtitle']),
+            MAX_FEED_DESCRIPTION_LENGTH,
+            markTooLarge
+        )
         const link = this.getLinkHref(this.getChild(feed, ['link']))
-        const items: ReturnType<typeof this.parseFeed>['items'] = []
+        const items: ParsedFeedItem[] = []
         const entries = this.asArray(this.getChild(feed, ['entry']))
+        const cappedEntries = entries.slice(0, MAX_PARSED_FEED_ITEMS)
 
-        for (const entryNode of entries) {
+        if (entries.length > MAX_PARSED_FEED_ITEMS) {
+            isTooLarge = true
+        }
+
+        for (const entryNode of cappedEntries) {
             const entry = this.asObject(entryNode)
             if (!entry) continue
 
@@ -927,10 +1104,22 @@ export class UserDO extends DurableObject<Env> {
 
             items.push({
                 guid: this.getText(entry, ['id']),
-                title: this.getText(entry, ['title']),
+                title: this.capText(
+                    this.getText(entry, ['title']),
+                    MAX_FEED_TITLE_LENGTH,
+                    markTooLarge
+                ),
                 link: this.getLinkHref(this.getChild(entry, ['link'])),
-                description: this.getText(entry, ['summary']),
-                content: this.getText(entry, ['content']),
+                description: this.capText(
+                    this.getText(entry, ['summary']),
+                    MAX_FEED_DESCRIPTION_LENGTH,
+                    markTooLarge
+                ),
+                content: this.capText(
+                    this.getText(entry, ['content']),
+                    MAX_FEED_CONTENT_LENGTH,
+                    markTooLarge
+                ),
                 author: author ? this.getText(author, ['name']) : null,
                 pubDate: this.parseDate(
                     this.getText(entry, ['published']) ||
@@ -939,7 +1128,19 @@ export class UserDO extends DurableObject<Env> {
             })
         }
 
-        return { title, description, link, items }
+        return { title, description, link, isTooLarge, items }
+    }
+
+    private capText (
+        value:string | null,
+        maxLength:number,
+        markTooLarge:() => void
+    ):string | null {
+        if (value === null) return null
+        if (value.length <= maxLength) return value
+
+        markTooLarge()
+        return value.slice(0, maxLength)
     }
 
     private getLinkHref (value:XmlValue | undefined):string | null {
@@ -1033,17 +1234,123 @@ export class UserDO extends DurableObject<Env> {
         return this.app.fetch(request)
     }
 
+    private getManualRefreshClaims ():Map<number, number> {
+        if (!this.manualRefreshClaims) {
+            this.manualRefreshClaims = new Map()
+        }
+
+        return this.manualRefreshClaims
+    }
+
+    private async claimManualFeedRefresh (
+        feedId:number,
+        now = Date.now()
+    ):Promise<ManualRefreshLimit|null> {
+        const claims = this.getManualRefreshClaims()
+        const claimedAt = claims.get(feedId)
+
+        if (isRecentManualRefresh(claimedAt, now)) {
+            return {
+                retryAfterSeconds: manualRefreshRetryAfterSeconds(
+                    claimedAt as number,
+                    now
+                )
+            }
+        }
+
+        claims.set(feedId, now)
+
+        const key = manualRefreshStorageKey(feedId)
+        const stored = await this.ctx.storage.get<ManualRefreshState>(key)
+        const storedAt = stored?.last_manual_refresh_at
+
+        if (isRecentManualRefresh(storedAt, now)) {
+            claims.set(feedId, storedAt as number)
+            return {
+                retryAfterSeconds: manualRefreshRetryAfterSeconds(
+                    storedAt as number,
+                    now
+                )
+            }
+        }
+
+        await this.ctx.storage.put(key, {
+            last_manual_refresh_at: now
+        })
+
+        return null
+    }
+
     /**
      * Alarm handler for periodic feed refresh
      */
     async alarm (): Promise<void> {
-        const feeds = this.sql.exec('SELECT * FROM feeds')
-            .toArray() as unknown as Feed[]
+        await this.scheduleNextFeedRefresh()
+        await this.refreshFeedBatches()
+    }
 
-        await this.refreshFeeds(feeds)
+    private async scheduleNextFeedRefresh ():Promise<void> {
+        await this.ctx.storage.setAlarm(
+            Date.now() + FEED_REFRESH_INTERVAL_MS
+        )
+    }
 
-        // Schedule next alarm in 10 minutes
-        await this.ctx.storage.setAlarm(Date.now() + 10 * 60 * 1000)
+    private async refreshFeedBatches ():Promise<void> {
+        let cursor = await this.getAlarmRefreshCursor()
+
+        while (true) {
+            const feeds = this.selectFeedRefreshBatch(cursor)
+            if (feeds.length === 0) {
+                await this.ctx.storage.delete(ALARM_REFRESH_CURSOR_KEY)
+                return
+            }
+
+            await this.refreshFeeds(feeds)
+
+            const lastFeed = feeds[feeds.length - 1]
+            if (!lastFeed) return
+
+            cursor = lastFeed.id
+            await this.ctx.storage.put(ALARM_REFRESH_CURSOR_KEY, {
+                last_feed_id: cursor
+            })
+        }
+    }
+
+    private async getAlarmRefreshCursor ():Promise<number> {
+        const cursor = await this.ctx.storage.get<AlarmRefreshCursor>(
+            ALARM_REFRESH_CURSOR_KEY
+        )
+        const lastFeedId = cursor?.last_feed_id
+        if (
+            typeof lastFeedId === 'number' &&
+            Number.isFinite(lastFeedId) &&
+            lastFeedId > 0
+        ) {
+            return lastFeedId
+        }
+
+        return 0
+    }
+
+    private selectFeedRefreshBatch (cursor:number):Feed[] {
+        if (cursor > 0) {
+            return this.sql.exec(
+                `SELECT * FROM feeds
+                WHERE id > ?
+                ORDER BY id ASC
+                LIMIT ?`,
+                cursor,
+                FEED_REFRESH_CONCURRENCY
+            ).toArray() as unknown as Feed[]
+        }
+
+        return this.sql.exec(
+            `SELECT * FROM feeds
+            ORDER BY id ASC
+            LIMIT ?`,
+            FEED_REFRESH_CONCURRENCY
+        ).toArray() as unknown as Feed[]
     }
 
     private async refreshFeeds (feeds:Feed[]):Promise<void> {

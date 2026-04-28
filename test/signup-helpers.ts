@@ -67,6 +67,7 @@ export type Kv = ReturnType<typeof makeKv>
 // ---------------------------------------------------------------
 
 export const SESSION_SECRET = 'test-secret-key-32-chars-long!!!'
+export const TEST_CSRF_TOKEN = 'test-csrf'
 
 export interface TestEnv {
     SESSIONS:Kv;
@@ -121,7 +122,7 @@ export async function makeSession (
     )
     return {
         session,
-        cookieHeader: `session=${cookie}`
+        cookieHeader: `session=${cookie}; csrf_token=${TEST_CSRF_TOKEN}`
     }
 }
 

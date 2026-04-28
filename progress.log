@@ -1,3 +1,22 @@
+## 2026-04-27 21:47 PDT - US-113
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added re-entrant online sync coverage.
+  - Added a regression test that dispatches a second `online` event while
+    the first event's `/api/sync` request is still in flight.
+  - Confirmed the second event reuses the in-flight `runSync` cycle instead
+    of issuing a duplicate sync request.
+  - Verified the existing inactive local-first online-event regression still
+    covers the `isLocalFirstActive === false` branch.
+- Files changed:
+  - `test/state-auth-storage.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - State auth effects can start an initial local-first sync as soon as
+    `state.user.value` is set; online-event tests that need to own the sync
+    window should let that startup cycle settle before installing a hanging
+    `/api/sync` fetch stub.
+---
 ## 2026-04-27 15:56 PDT - US-071
 Thread: https://ampcode.com/threads/unknown
 - What was implemented: Preserved local item state during add-feed
@@ -20,6 +39,7 @@ Thread: https://ampcode.com/threads/unknown
     CASCADE`, never delete an optimistic feed row before preserving or
     reattaching its local items.
 ---
+
 ## 2026-04-27 17:40 PDT - US-084
 Thread: https://ampcode.com/threads/unknown
 - What was implemented: Gated the online sync handler on active local-first.
@@ -37,6 +57,81 @@ Thread: https://ampcode.com/threads/unknown
   - Online-event tests should cover the cached-DB-but-inactive state, not
     only `syncSubscriptions.value = false`; `getLocalDb` can still expose a
     handle while state-level sync is being torn down.
+---
+## 2026-04-27 18:24 PDT - US-088
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Split transient and permanent push-sync failures.
+  - 5xx and network failures now remain retryable in the outbox instead of
+    consuming the dead-letter budget.
+  - Permanent 4xx failures other than 401/402/409 move immediately to
+    `dead_letter_outbox`.
+  - Added regressions for 10 sequential 5xx responses followed by success,
+    immediate 400 dead-lettering, and 402 billing-error preservation.
+- Files changed:
+  - `src/client/db/push-sync.ts`
+  - `test/push-sync.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Treat outbox `attempts` on 5xx/network errors as retry/backoff state, not
+    as the dead-letter budget. Only permanent client errors should promote
+    rows to `dead_letter_outbox`.
+  - Keep 401 and 402 outbox rows untouched; those errors must throw so auth
+    or billing flows can handle them without losing pending writes.
+---
+## 2026-04-27 18:28 PDT - US-089
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added a storage quota gate before local-first
+  bootstrap writes.
+  - `bootstrapLocalDb` now checks `navigator.storage.estimate()` before
+    acquiring the local tab lock or opening SQLite.
+  - Low free space below the configurable 100 MB threshold sets
+    `bootstrapStorageWarning` and stops unless the caller explicitly
+    confirms through `confirmLowStorage`.
+  - Settings now passes the low-storage confirmation prompt and renders the
+    warning signal.
+  - Added a regression test that low storage prevents bootstrap without
+    confirmation and permits it after confirmation.
+- Files changed:
+  - `src/client/db/bootstrap.ts`
+  - `src/client/db/index.ts`
+  - `src/client/routes/settings.ts`
+  - `src/client/routes/settings.css`
+  - `test/bootstrap.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Bootstrap preflight gates should run before `acquireLocalTabLock()` and
+    `openLocalDb()` so a cancelled setup does not create a SQLite handle or
+    contend for the OPFS primary-tab lock.
+  - Settings imports bootstrap state from `src/client/db/index.ts`; new
+    bootstrap signals used by route code must be re-exported there.
+---
+## 2026-04-27 18:56 PDT - US-092
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Hardened feed-fetch SSRF defenses.
+  - Expanded feed URL validation to reject RFC1918, link-local,
+    unique-local, unspecified, loopback, and IPv4-mapped private addresses.
+  - Added canonical IP checks that catch browser-normalized numeric loopback
+    encodings such as decimal, octal, and hex host forms.
+  - Changed feed fetching to use DNS-over-HTTPS pre-resolution before the
+    production fetch, `redirect: 'manual'`, a 3 redirect cap, and validation
+    of every redirect target.
+  - Added focused regressions for blocked IP ranges, numeric encodings,
+    private DNS answers, and a redirect to a private IP.
+- Files changed:
+  - `src/server/feed-fetch.ts`
+  - `test/feed-fetch-security.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `new URL()` canonicalizes some numeric IPv4 encodings to dotted decimal;
+    keep validation on the canonical hostname before fetch.
+  - Feed fetch tests can pass a `resolveHostname` stub to cover DNS
+    pre-resolution without making real network requests.
+  - Production feed fetch uses DNS-over-HTTPS pre-resolution only on the
+    default fetch path; tests with injected fetches should provide their own
+    resolver when they need DNS behavior.
 ---
 
 ## 2026-04-24 - US-017
@@ -143,10 +238,99 @@ Thread: https://ampcode.com/threads/unknown
   - `bootstrapLocalDb` lives in its own module (`bootstrap.ts`) to avoid circular imports between `index.ts` (which imports it) and the settings/state layers.
   - `getBootstrappedDb()` / `clearBootstrappedDb()` let `getAdapter()` reuse the DB opened during bootstrap without re-opening it.
   - `pullSync` progress callbacks fire inside the transaction loop — useful for live UI but note the DB is mid-transaction when callbacks fire.
----
 
 ## Codebase Patterns
 
+- **runSync status ownership**: `runSync` calls `pushSync` and `pullSync`
+  with `trackStatus: false` and owns steady-state UI sync errors. Typed auth
+  and billing errors should pass through so `state.ts` can route to login or
+  refresh billing status without setting `syncError`.
+- **State startup sync in tests**: Setting `state.user.value` can trigger the
+  auth effect's initial local-first `runSync`. Online-event tests that need
+  to own an in-flight sync window should let startup settle before swapping
+  in a hanging `/api/sync` fetch stub.
+- **Local write timestamp watermarks**: Local-first mutations should use a
+  single SQLite-format timestamp that is strictly newer than
+  `sync_meta.last_pull_at`. If the device clock is behind or equal to the
+  server watermark, bump one second past `last_pull_at` so the next
+  server-side `updated_at > since` query can still see the write.
+- **Dead-letter attempt limit**: Tests that seed near-threshold outbox rows
+  should import `DEAD_LETTER_ATTEMPT_LIMIT` from `push-sync.ts` instead of
+  hardcoding `9` or `10`, so retry-cap regressions track the configured
+  limit.
+- **Worker-to-DO proxy headers**: `dataRouter` must build a fresh DO
+  `Request` with an explicit allowlist. Forward only `content-type`,
+  `cookie`, and `x-rsss-*` headers; never pass through client auth headers
+  such as `Authorization`.
+- **dataRouter route test matrix**: Entitlement proxy tests should key route
+  fixtures by `METHOD path`, not path alone, because routes such as
+  `/api/feeds` support multiple methods with different expected statuses.
+- **Logout route safety**: Browser-driven logout must stay on
+  `POST /api/auth/logout` with the CSRF token echo. `GET /logout`
+  intentionally returns 405 so links, prefetchers, or image loads cannot
+  clear a session.
+- **Billing email recipient source**: `billing_pending_email:*` is the
+  request-body email intended for Autumn customer binding only.
+  Notification recipients must come from `billing_contact_email:*`, which is
+  populated from Autumn-returned `customer.email`.
+- **Manual feed refresh rate limits**: `/feeds/:id/refresh` should claim the
+  per-feed manual refresh slot before validation or outbound fetch. Keep the
+  in-memory claim for rapid same-instance requests and the DO storage
+  `last_manual_refresh_at` record for hibernation persistence; alarm and
+  bulk refresh paths stay outside this manual limit.
+- **LWW client timestamps**: Durable Object mutating routes must pass
+  `client_updated_at` through `lwwClientUpdatedAt()` before any
+  `resolveLwwWrite()` call or SQL `updated_at > ?` comparison. That helper
+  clamps spoofed future timestamps and logs the clamp for observability.
+- **Feed URL canonicalization**: Feed URL writes and dedupe lookups should use
+  `validateFeedUrl()` and store its returned value. It lowercases URL parts
+  through `URL` and strips trailing slashes from non-root paths so add-feed
+  retries and user duplicates compare against the same canonical string.
+- **Cookie-header server tests**: Tests that need to send a `Cookie`
+  request header through the real Hono app must run in Node. Chromium-based
+  `tapout` tests strip that header, so use a Node-bundled test like
+  `test/session-record.ts` or the signup server suite.
+- **CORS app origin allowlist**: Server CORS must echo request origins only
+  when `origin === env.APP_ORIGIN`. Do not fall back to request origin or a
+  hardcoded production origin; missing `APP_ORIGIN` is a config error even in
+  test/dev health-check coverage.
+- **Credentialless isolation scope**: `withIsolationHeaders` should add
+  COOP/COEP only to documents and JavaScript. Cross-origin image responses
+  are left undecorated; the embedding document's
+  `Cross-Origin-Embedder-Policy: credentialless` is what makes browser
+  image subresource requests omit auth cookies.
+- **CSRF double-submit requests**: State-changing client requests must echo
+  the readable `csrf_token` cookie in the `X-CSRF-Token` header. The main
+  `State` API client and `remoteAdapter` both install this through ky
+  `beforeRequest` hooks; Node server tests that set `Cookie` manually must
+  include the matching header and a same-origin fetch context.
+- **Feed item insert errors**: `fetchFeed` should ignore only SQLite unique
+  constraint insert failures. Any other item insert error must be logged and
+  written to the feed row's `last_error`/`last_status` so broken feeds do not
+  look permanently idle.
+- **Durable Object alarm resume cursor**: `UserDO.alarm()` schedules the
+  next alarm before feed work, refreshes feeds in id-ordered batches, and
+  stores `alarm_refresh_cursor.last_feed_id` in DO storage only after a
+  batch completes. Keep alarm refresh queries cursor-aware so a CPU-budget
+  kill resumes at the next unprocessed batch.
+- **Feed parser hostile-input caps**: `parseFeed` returns bounded data:
+  1000 items max, titles capped at 8 KB, descriptions at 64 KB, and content
+  at 1 MB. Any truncation sets `isTooLarge`, and `fetchFeed` records
+  `last_error = 'feed too large'` with status 413 after inserting the
+  bounded rows.
+- **Deferred local-first enable**: `setSyncSubscriptions(true)` returns
+  `pending` while `billingStatus.value === null` and applies automatically
+  if an entitled billing status arrives. Callers that start bootstrap should
+  only do so when the result is `applied`.
+- **Disable/reset sync cancellation**: Destructive local-first flows should
+  call `beginLocalFirstDisable(db)` before closing/removing local data and
+  `endLocalFirstDisable(db)` only after the removal window is over.
+  `runSync` treats that window as cancellation, aborts in-flight fetches,
+  and suppresses sync-status error writes.
+- **Bootstrap storage quota gate**: `bootstrapLocalDb` probes
+  `navigator.storage.estimate()` before acquiring the local tab lock or
+  opening SQLite. Low free space sets `bootstrapStorageWarning` and stops
+  unless the caller supplies `confirmLowStorage` and the user confirms.
 - **LWW equal timestamp tie-break**: Shared conflict checks should use
   `resolveLwwWrite(serverUpdatedAt, clientUpdatedAt)`. Server rows only win
   when their timestamp is strictly newer; equal timestamps accept the arriving
@@ -233,6 +417,10 @@ Thread: https://ampcode.com/threads/unknown
   `classifyLocalDbError`; adapter selection stores user-facing recovery state
   in `localDbError`. Quota/corruption should return `remoteAdapter` with a
   visible Settings error instead of silently falling back.
+- **Local DB error messages**: Bootstrap and steady-state sync should pass
+  SQLite/OPFS write failures through `describeLocalDbError()` before writing
+  UI signals such as `bootstrapError` or `syncError`, so quota/corruption
+  failures do not leak raw SQLite text.
 - **OPFS removal ordering**: Disable/reset/bootstrap-failure cleanup should
   close the active local SQLite handle with `closeDb(db)` before calling
   `removeOpfsDb(did)`.
@@ -253,6 +441,10 @@ Thread: https://ampcode.com/threads/unknown
   retries reconcile by unique feed URL, delete-feed retries with a missing
   row return success, and item/mark-all-read writes are idempotent value
   assignments.
+- **Outbox failure classification**: 5xx and network failures are transient
+  retry/backoff state and must not move rows to `dead_letter_outbox`.
+  Permanent 4xx responses other than 401/402/409 dead-letter immediately;
+  401/402 throw and preserve the outbox row.
 - **Push conflict response contract**: Server 409 responses are wrapped as
   `{ feed }`, `{ item }`, or `{ items }`. Client 409 handling should extract
   those authoritative rows, upsert them locally, then clear the matching
@@ -376,6 +568,10 @@ Thread: https://ampcode.com/threads/unknown
 - **Server feed fetch security**: Feed fetches should go through
   `src/server/feed-fetch.ts` so URL validation, fetch timeout, and the
   5MB response cap stay centralized.
+- **Feed fetch SSRF hardening**: `fetchFeedText` owns DNS pre-resolution,
+  manual redirect following, and redirect target revalidation. Keep new feed
+  network paths on this helper so private IPs, numeric IP encodings, and
+  private redirect targets are blocked consistently.
 - **OPFS tab coordination**: Local-first OPFS ownership is coordinated in
   `src/client/db/tab-coordination.ts` with BroadcastChannel `rsss-tab`.
   Check this coordinator before opening SQLite so second tabs fall back to
@@ -434,6 +630,10 @@ Thread: https://ampcode.com/threads/unknown
 - **Aggregate tests with sqlite-wasm**: If a test imported through
   `test/index.ts` imports `@sqlite.org/sqlite-wasm/sqlite3.wasm`,
   `test/run-all-tests.mjs` must pass `--loader:.wasm=dataurl` to esbuild.
+- **Full-runner local-first coverage**: `test/run-all-coverage.mjs` owns
+  static assertions that required local-first client suites are listed in
+  `test/run-all-tests.mjs`; add new high-risk focused suites there with the
+  wasm loader when they import SQLite WASM.
 
 ## 2026-04-26 12:19 PDT - US-050
 Thread: https://ampcode.com/threads/unknown
@@ -2246,4 +2446,551 @@ Thread: https://ampcode.com/threads/unknown
     would cause new server items in the same feed to be skipped.
   - Static sync-invariant checks live in `test/sync-invariant-static.mjs`
     and are wired into `test/run-all-tests.mjs`.
+---
+## 2026-04-27 18:33 PDT - US-090
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Made local-first disable cancel-safe for in-flight
+  sync.
+  - Added a regression that starts a hanging pull request, disables
+    local-first, and verifies the request aborts without setting a sync UI
+    error while OPFS removal runs exactly once.
+  - Added per-DB sync cancellation state and abort controllers around
+    `runSync` fetches.
+  - Wired disable/reset flows to mark the destructive local-data removal
+    window before closing the SQLite handle and removing OPFS data.
+- Files changed:
+  - `src/client/db/sync.ts`
+  - `src/client/db/index.ts`
+  - `test/bootstrap.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Disable/reset flows should abort any active `runSync` before closing
+    the cached DB or removing the OPFS file, then suppress cancellation as
+    a normal outcome instead of surfacing it through sync status.
+  - Focused bootstrap tests run through `npm run test:bootstrap`; direct
+    `npx vitest test/bootstrap.ts` is not the project runner and fails
+    during Cloudflare/Vite startup.
+---
+## 2026-04-27 18:46 PDT - US-091
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Deferred local-first enable while billing loads.
+  - Added pending sync-subscription intent state for the
+    `billingStatus.value === null` window.
+  - Settings now keeps the local-first toggle usable while billing is
+    loading and delays bootstrap until the pending enable is applied.
+  - Added model and browser-rendered Settings regressions for toggling
+    local-first before billing status resolves.
+- Files changed:
+  - `src/client/local-first-settings.ts`
+  - `src/client/routes/settings.ts`
+  - `test/local-first-settings.ts`
+  - `test/settings-route.ts`
+  - `test/index.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `setSyncSubscriptions(true)` can now return `pending` while billing is
+    unresolved. Callers that start bootstrap should only do so when the
+    result is `applied`.
+  - Browser-rendered route regressions that import CSS should use
+    `--loader:.css=text` for focused `esbuild` runs, matching the full
+    browser test bundle.
+---
+## 2026-04-27 19:08 PDT - US-093
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Capped hostile feed parser output before insertion.
+  - RSS and Atom parsing now truncates item arrays to 1000 rows.
+  - Feed and item titles are capped at 8 KB, descriptions at 64 KB, and
+    content at 1 MB.
+  - Any parser truncation sets `isTooLarge`; `fetchFeed` records
+    `last_error = 'feed too large'` with status 413 after inserting the
+    bounded rows.
+  - Added regressions for 5000-item feeds, 4 MB content fields, and the
+    feed-row warning path.
+- Files changed:
+  - `src/server/durable-objects/index.ts`
+  - `test/feed-parser.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Feed parser tests can exercise the private parser with
+    `Object.create(UserDO.prototype)` and a typed test shim.
+  - `fetchFeed` tests that need the real `fetchFeedText` path can stub
+    `globalThis.fetch`; remember to handle the DNS-over-HTTPS request before
+    returning the feed response.
+---
+## 2026-04-27 19:13 PDT - US-094
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Made Durable Object alarm refresh resumable.
+  - Moved next-alarm scheduling to the start of `UserDO.alarm()`.
+  - Changed feed refresh to process id-ordered batches of 8 feeds and store
+    the last completed feed id in DO storage after each successful batch.
+  - Added a regression that simulates a CPU-budget kill after the first
+    refresh batch and verifies the next alarm processes only remaining feeds.
+- Files changed:
+  - `src/server/durable-objects/index.ts`
+  - `test/alarm.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Durable Object alarm refresh uses `alarm_refresh_cursor.last_feed_id` as
+    a batch resume marker. Update it only after a whole batch completes, so
+    failed batches are retried instead of skipped.
+  - Alarm tests that fake `SELECT * FROM feeds` need to respect cursor and
+    `LIMIT` params now that alarm refresh loops over batches.
+---
+## 2026-04-27 19:17 PDT - US-095
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Stopped swallowing non-duplicate item insert errors.
+  - Added a regression for a simulated `SQLITE_TOOBIG` item insert failure
+    during feed refresh.
+  - `fetchFeed` now ignores only SQLite unique constraint insert failures;
+    other insert failures are logged and recorded on the feed row.
+- Files changed:
+  - `src/server/durable-objects/index.ts`
+  - `test/feed-parser.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Item insert failures can happen after feed metadata is already updated;
+    keep feed-level error recording inside the insert loop for non-duplicate
+    SQLite errors.
+  - Focused feed parser tests that import `UserDO` need the
+    `cloudflare:workers` test alias when bundling with esbuild.
+---
+## 2026-04-27 20:05 PDT - US-096
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Strengthened CSRF handling for state-changing routes.
+  - State-changing methods now reject requests with neither `Origin` nor
+    `Sec-Fetch-Site` before route handling.
+  - Session creation sets a readable `csrf_token` cookie, logout clears it,
+    and non-exempt state-changing routes require a matching
+    `X-CSRF-Token` header.
+  - Client ky API calls in `State` and `remoteAdapter` echo the token
+    automatically from `document.cookie`.
+  - Production health now reports missing `APP_ORIGIN` as a config error.
+- Files changed:
+  - `src/server/index.ts`
+  - `src/client/state.ts`
+  - `src/client/db/remote-adapter.ts`
+  - `test/api-router.ts`
+  - `test/signup.ts`
+  - `test/signup-helpers.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Browser-based `app.request` tests cannot reliably set forbidden
+    `Cookie`/`Origin` headers; use pure helper tests or Node server tests
+    for cookie round trips.
+  - Any Node integration test that manually sets an authenticated session
+    cookie for POST/PATCH/PUT/DELETE must also include the matching
+    `X-CSRF-Token` header and same-origin fetch context.
+---
+
+## 2026-04-27 20:08 PDT - US-097
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Documented and tested COEP credentialless behavior.
+  - Added an inline comment to `withIsolationHeaders` explaining that
+    `credentialless` keeps cross-origin isolation for embeds while browser
+    cross-origin image subresource requests omit auth cookies.
+  - Added a static regression test for the credentialless comment and a
+    header test that image responses are not decorated with document
+    isolation headers.
+  - Wired the static header regression into focused and full test runners.
+- Files changed:
+  - `src/server/isolation-headers.ts`
+  - `test/isolation-headers-static.mjs`
+  - `test/server-headers.ts`
+  - `test/run-header-tests.mjs`
+  - `test/run-all-tests.mjs`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `withIsolationHeaders` should keep isolation headers scoped to documents
+    and JavaScript; image responses rely on the embedding document's
+    `Cross-Origin-Embedder-Policy: credentialless` behavior.
+---
+
+## 2026-04-27 20:13 PDT - US-098
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Tightened the server CORS allowlist and APP_ORIGIN
+  config gate.
+  - Removed the hardcoded production-origin runtime fallback.
+  - CORS now echoes only the exact `env.APP_ORIGIN` value.
+  - Health-check config validation now fails when `APP_ORIGIN` is missing.
+  - Added regressions for missing `APP_ORIGIN` and non-allowlisted origins.
+- Files changed:
+  - `src/server/index.ts`
+  - `test/api-router.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - CORS allowlist checks should depend only on `env.APP_ORIGIN`; same-origin
+    request URLs are not an implicit CORS allowlist entry.
+  - Keep missing `APP_ORIGIN` visible through `/api/health` so deploy
+    misconfiguration is caught before relying on API CORS behavior.
+---
+## 2026-04-27 20:21 PDT - US-099
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Validated session records loaded from KV.
+  - Added runtime guards for the parsed stored session shape before
+    `verifySessionCookie` returns an OAuth session.
+  - Invalid stored session records are deleted from KV.
+  - The session middleware now clears the browser session cookie when a
+    presented cookie fails verification.
+  - Added a Node-side regression for a malformed `session:<sid>` record
+    asserting a 401, KV deletion, and a cleared cookie.
+- Files changed:
+  - `src/server/auth/oauth.ts`
+  - `src/server/index.ts`
+  - `test/session-record.ts`
+  - `test/run-all-tests.mjs`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Cookie-header tests for the real Hono app must run in Node because
+    Chromium `tapout` tests strip the request `Cookie` header.
+  - Parsed KV values should be treated as `unknown` until runtime guards
+    validate nested auth fields.
+---
+## 2026-04-27 20:26 PDT - US-100
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Normalized feed URLs before add-feed dedupe.
+  - `validateFeedUrl()` now strips trailing slashes from non-root paths
+    after URL parsing and blocked-host validation.
+  - Added a Durable Object handler regression for
+    `https://Example.COM/feed/` and `https://example.com/feed` resolving to
+    the same stored feed row.
+- Files changed:
+  - `src/server/feed-fetch.ts`
+  - `test/do-handlers.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Store and compare the value returned by `validateFeedUrl()` for feed
+    URLs; callers should not preserve the raw request URL for dedupe paths.
+---
+## 2026-04-27 20:31 PDT - US-101
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Clamped server-side LWW client timestamps.
+  - Added `clampClientUpdatedAt()` to cap client timestamps at
+    `now + 5min` and return SQLite-compatible timestamp text when clamped.
+  - Routed Durable Object mutating LWW checks through a logging clamp helper,
+    including `mark-all-read` SQL conflict comparisons.
+  - Added focused LWW and Durable Object handler regressions for a spoofed
+    `9999-12-31T23:59:59` client timestamp.
+- Files changed:
+  - `src/shared/lww.ts`
+  - `src/server/durable-objects/index.ts`
+  - `test/server-lww.ts`
+  - `test/do-handlers.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Keep LWW server comparisons on SQLite-style timestamp strings after
+    clamping so lexicographic comparisons stay compatible with existing
+    `updated_at` values.
+  - `mark-all-read` does not call `resolveLwwWrite()`; it performs SQL
+    `updated_at > ?` checks and must receive the clamped timestamp too.
+---
+
+## 2026-04-27 20:36 PDT - US-102
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added a per-feed manual refresh rate limit.
+  - `POST /feeds/:id/refresh` now claims a 60-second per-feed refresh slot
+    before validation or outbound feed fetch.
+  - The limiter stores `last_manual_refresh_at` in Durable Object storage and
+    also keeps an in-memory claim to collapse rapid same-instance requests.
+  - Rate-limited manual refreshes return 429 with `Retry-After`.
+  - Added a regression test proving 100 rapid manual refresh requests trigger
+    only one outbound `fetchFeed`.
+- Files changed:
+  - `src/server/durable-objects/index.ts`
+  - `test/do-handlers.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Manual refresh limiting needs both persisted DO storage state and a
+    synchronous in-memory claim because rapid requests can reach the first
+    awaited storage read before persistence completes.
+  - Alarm and bulk feed refresh paths should continue to bypass the manual
+    refresh limiter; the operator-facing DOS risk is the user-triggered
+    per-feed endpoint.
+---
+## 2026-04-27 20:42 PDT - US-103
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Split billing form email from notification email.
+  - Added a regression that proves `POST /api/billing/checkout` does not
+    send a Resend payload to `body.email = 'attacker@example.com'`.
+  - Added a separate `billing_contact_email:*` KV key for
+    Autumn-returned customer emails used by subscription/payment
+    notifications.
+  - Kept `billing_pending_email:*` as the request-body email used for
+    Autumn binding only.
+- Files changed:
+  - `src/server/index.ts`
+  - `test/signup.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Billing notification recipients should resolve only from
+    `billing_contact_email:*`, which is populated from Autumn
+    `customer.email`; do not read `billing_pending_email:*` for outbound
+    email recipients.
+  - Dev checkout may still send subscription emails when a contact email has
+    already been verified/stashed, but request-body email alone is not
+    sufficient.
+---
+## 2026-04-27 20:53 PDT - US-104
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Dropped side-effecting GET logout behavior.
+  - `GET /logout` now returns 405 without touching session cookies.
+  - `POST /api/auth/logout` remains the client logout path.
+  - Added Node regression coverage for both paths and wired it into the
+    full test runner.
+- Files changed:
+  - `src/server/index.ts`
+  - `test/logout.ts`
+  - `test/run-all-tests.mjs`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Browser-bundled `tapout` tests strip explicit `Cookie` headers; logout
+    endpoint tests that need cookie/session behavior should run as
+    Node-bundled server tests.
+  - Keep logout POST-only with CSRF token echo. `GET /logout` is retained
+    only as a safe 405 response.
+---
+
+## 2026-04-27 20:58 PDT - US-105
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added an explicit Worker-to-DO header allowlist.
+  - `dataRouter` now builds a fresh header set for DO proxy requests.
+  - Forwarded headers are limited to `content-type`, `cookie`, and
+    `x-rsss-*` custom headers.
+  - Added a regression proving client `Authorization: Bearer xyz` is not
+    present on the request observed by the DO stub.
+- Files changed:
+  - `src/server/index.ts`
+  - `test/api-router.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Do not pass `c.req.raw.headers` directly into the Durable Object proxy;
+    client-controlled auth headers must be stripped at the Worker boundary.
+  - Browser-bundled request construction with a streaming POST body requires
+    `duplex`, so header-only proxy tests should avoid unnecessary bodies.
+---
+
+## 2026-04-27 21:02 PDT - US-106
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Wired high-risk local-first client suites into
+  `npm test`.
+  - Added `test/run-all-coverage.mjs` to guard the full runner against
+    dropping required local-first suites.
+  - Added focused `run-all-tests.mjs` entries for tab coordination,
+    adapter factory, SQLite init, local adapter, pull sync, push sync,
+    bootstrap, and local-first settings.
+  - Ensured SQLite WASM-backed focused suites run with
+    `--loader:.wasm=dataurl` from the full test runner.
+- Files changed:
+  - `test/run-all-coverage.mjs`
+  - `test/run-all-tests.mjs`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Keep `test/run-all-coverage.mjs` in sync when adding high-risk
+    local-first suites that must be part of `npm test`.
+  - Browser `tapout` commands use a fixed port, so list focused browser
+    suites serially in `test/run-all-tests.mjs`.
+---
+## 2026-04-27 21:14 PDT - US-107
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added bootstrap interruption and resumption
+  regression tests.
+  - Added persistent worker-backed SQLite test coverage for a paged
+    bootstrap interrupted by a network failure, then retried after the user
+    re-toggles local-first.
+  - Added terminal retry coverage proving an interrupted OPFS file is removed
+    after confirmed terminal bootstrap failure.
+  - Added leftover outbox coverage proving pre-existing outbox rows do not
+    block bootstrap completion.
+- Files changed:
+  - `test/bootstrap.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Bootstrap recovery tests that need OPFS persistence should use a
+    persistent worker-backed fake instead of test-mode `:memory:` DBs, then
+    restore `setTestMode(true, wasmUrl)` and reset adapter/tab caches in
+    teardown.
+---
+
+## 2026-04-27 21:18 PDT - US-108
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added dead-letter outbox regression coverage.
+  - Exported `DEAD_LETTER_ATTEMPT_LIMIT` from `push-sync.ts`.
+  - Updated the dead-letter promotion test to use the shared attempt limit.
+  - Added coverage that existing `dead_letter_outbox` rows are not retried.
+  - Added sync-cycle coverage that final sync status includes dead-letter
+    count after `runSync`.
+- Files changed:
+  - `src/client/db/push-sync.ts`
+  - `test/push-sync.ts`
+  - `test/sync-cycle.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Dead-letter retry-cap tests should import the shared attempt limit rather
+    than duplicating literal threshold values.
+  - Browser tapout tests use a fixed port; run focused tapout commands
+    serially when invoking multiple suites.
+---
+
+## 2026-04-27 21:23 PDT - US-109
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Tightened add-feed reconcile cascade coverage.
+  - Updated the existing regression to match the PRD case exactly: two
+    optimistic-feed items, one read and one starred.
+  - Verified the test fails against the old delete-and-reinsert reconcile
+    path, where `ON DELETE CASCADE` removes the attached items.
+  - Restored the in-place reconcile implementation and verified the focused
+    push-sync suite passes.
+- Files changed:
+  - `test/push-sync.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - The add-feed item-preservation regression should remain a two-row test:
+    one read item and one starred item under the optimistic feed id.
+  - A delete-and-reinsert add-feed reconcile path proves the regression by
+    cascading those items away before the canonical feed row is inserted.
+---
+
+## 2026-04-27 21:34 PDT - US-110
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Protected local writes from clock-skewed sync
+  watermarks.
+  - Added a pull-sync regression where the server writes
+    `latestUpdatedAt = '2026-04-25 10:00:00'`, the client clock is behind,
+    and a local feed write must still sort after the next pull `since`.
+  - Added SQLite timestamp parsing and made local adapter mutations choose a
+    single write timestamp newer than `sync_meta.last_pull_at`.
+- Files changed:
+  - `src/client/db/time.ts`
+  - `src/client/db/local-adapter.ts`
+  - `test/pull-sync.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Local-first writes must compare against `sync_meta.last_pull_at`, not
+    only the device clock, before assigning row and outbox timestamps.
+  - Tapout browser tests share a fixed port, so run focused browser suites
+    serially rather than in parallel.
+---
+## 2026-04-27 21:39 PDT - US-111
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Strengthened concurrent `runSync` regression
+  coverage.
+  - Changed the concurrent sync-cycle test to use a transactional
+    `add_feed` outbox push path.
+  - Asserted both parallel callers settle without a SQLite transaction
+    overlap error.
+  - Proved the test fails when the per-DB mutex is removed: the focused
+    suite observed two push requests and two pull requests.
+- Files changed:
+  - `test/sync-cycle.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - To test the `runSync` mutex against transaction overlap, seed an
+    `add_feed` outbox row; the success reconcile path opens a transaction
+    after the push response, unlike simple `update_item` deletion.
+---
+
+## 2026-04-27 21:43 PDT - US-112
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Verified and marked complete the in-flight sync
+  disable regression coverage.
+  - Confirmed `test/bootstrap.ts` starts a hanging pull, calls
+    `disableLocalFirst`, awaits cancellation, and asserts no sync error UI
+    state is set.
+  - Confirmed the same regression asserts the OPFS file is removed exactly
+    once for the expected local database filename.
+- Files changed:
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `runSync` cancellation coverage for local-first disable lives in
+    `test/bootstrap.ts` beside the destructive local data flow tests.
+  - Use the existing persistent OPFS test harness in `test/bootstrap.ts`
+    when asserting removal ordering or exact file deletion behavior.
+---
+## 2026-04-27 22:00 PDT - US-114
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Covered SQLite quota write failures end to end.
+  - Added a regression for SQLite `SQLITE_FULL` write errors being
+    classified as `quota`.
+  - Added bootstrap and steady-state sync regressions that mock a local
+    SQLite write failure and assert quota errors reach UI signals.
+  - Added shared `describeLocalDbError()` formatting so bootstrap and
+    `runSync` show the local-storage recovery message instead of raw SQLite
+    text.
+- Files changed:
+  - `src/client/db/sqlite-init.ts`
+  - `src/client/db/bootstrap.ts`
+  - `src/client/db/pull-sync.ts`
+  - `src/client/db/sync.ts`
+  - `test/sqlite-init.ts`
+  - `test/bootstrap.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - SQLite quota failures can surface as `SQLITE_FULL: database or disk is
+    full`, not only browser `QuotaExceededError`.
+  - Local-first UI error signals should use `describeLocalDbError()` for
+    SQLite/OPFS write failures so quota and corruption messages stay
+    consistent across bootstrap and steady-state sync.
+  - Tapout browser test commands share a fixed local port; run focused
+    browser suites serially instead of in parallel.
+---
+## 2026-04-27 22:06 PDT - US-115
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added runSync UI-error plumbing coverage.
+  - Added sync-cycle regressions for pull network failures, push non-auth
+    failures, and typed auth/billing pass-through behavior.
+  - Updated runSync so SyncBillingError and PushSyncBillingError escape
+    without setting the steady-state sync error signal.
+- Files changed:
+  - `src/client/db/sync.ts`
+  - `test/sync-cycle.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - runSync centralizes steady-state sync error UI updates while calling
+    pushSync and pullSync with trackStatus disabled.
+  - Typed auth and billing errors are control-flow errors for state.ts; they
+    should not be converted into syncError updates inside runSync.
+---
+## 2026-04-27 22:17 PDT - US-116
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Expanded billing entitlement gate coverage.
+  - Added a route-matrix coverage assertion for every Durable Object data
+    route exposed through `dataRouter`.
+  - Expanded unauthenticated billing-gate regressions so every data route
+    returns 402 and does not reach the Durable Object when entitlement is
+    missing.
+  - Expanded entitled regressions so every data route reaches the Durable
+    Object and preserves the method-specific proxied status.
+- Files changed:
+  - `test/api-router.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `dataRouter` entitlement tests should cover the Durable Object data route
+    matrix, including direct feed/item reads and writes beyond the common
+    `/api/sync`, `/api/feeds`, and `/api/items` paths.
+  - Test proxy fixtures must use `METHOD path` keys because GET, POST, and
+    DELETE routes can share the same path while expecting different statuses.
 ---

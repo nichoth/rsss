@@ -64,6 +64,10 @@ function pendingEmailKey (did:string):string {
     return `billing_pending_email:${did}`
 }
 
+function contactEmailKey (did:string):string {
+    return `billing_contact_email:${did}`
+}
+
 const PENDING_EMAIL_TTL_SECONDS = 60 * 60 * 24 * 2  // 2 days
 
 async function stashPendingEmail (
@@ -78,24 +82,36 @@ async function stashPendingEmail (
     )
 }
 
-async function readPendingEmail (
+async function stashContactEmail (
+    env:Env,
+    did:string,
+    email:string
+):Promise<void> {
+    await env.SESSIONS.put(
+        contactEmailKey(did),
+        email,
+        { expirationTtl: PENDING_EMAIL_TTL_SECONDS }
+    )
+}
+
+async function readContactEmail (
     env:Env,
     did:string
 ):Promise<string|null> {
-    return env.SESSIONS.get(pendingEmailKey(did))
+    return env.SESSIONS.get(contactEmailKey(did))
 }
 
 /**
  * Resolve the user's contact email for billing notifications.
- * The checkout path stashes the email returned by Autumn when live
- * billing creates or updates the customer, so notification paths can
- * use KV instead of re-fetching the same customer record.
+ * Only Autumn-returned customer emails are eligible recipient
+ * sources. Request-body email can be stashed for customer binding,
+ * but it must not become a notification recipient.
  */
 async function resolveContactEmail (
     env:Env,
     did:string
 ):Promise<string|null> {
-    return readPendingEmail(env, did)
+    return readContactEmail(env, did)
 }
 
 function isProbablyEmail (s:unknown):s is string {
@@ -183,7 +199,6 @@ type AppContext = Context<{
     Variables:Variables;
 }>
 
-const DEFAULT_APP_ORIGIN = 'https://rsss.space'
 const STATE_CHANGING_METHODS = new Set([
     'DELETE',
     'PATCH',
@@ -196,6 +211,10 @@ function productionConfigErrors (env:Env):string[] {
 
     if (env.NODE_ENV === 'production' && !env.AUTUMN_SECRET_KEY) {
         errors.push('missing_autumn_secret')
+    }
+
+    if (!env.APP_ORIGIN) {
+        errors.push('missing_app_origin')
     }
 
     return errors
@@ -212,13 +231,42 @@ function shouldUseSecureSessionCookie (requestUrl:string):boolean {
     return !isLoopbackHostname(new URL(requestUrl).hostname)
 }
 
+function isStateChangingMethod (method:string):boolean {
+    return STATE_CHANGING_METHODS.has(method)
+}
+
+function isCsrfExemptPath (path:string):boolean {
+    return path === '/api/auth/login' ||
+        path === '/api/auth/callback' ||
+        path === '/api/auth/dev-login'
+}
+
+function generateCsrfToken ():string {
+    const bytes = new Uint8Array(32)
+    crypto.getRandomValues(bytes)
+    const binary = String.fromCharCode(...bytes)
+    return btoa(binary)
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '')
+}
+
+function setCsrfCookie (c:AppContext):void {
+    setCookie(c, 'csrf_token', generateCsrfToken(), {
+        httpOnly: false,
+        secure: shouldUseSecureSessionCookie(c.req.url),
+        sameSite: 'Lax',
+        path: '/',
+        maxAge: 30 * 24 * 60 * 60
+    })
+}
+
 export function isAllowedRequestOrigin (
     origin:string,
-    requestUrl:string,
-    appOrigin:string = DEFAULT_APP_ORIGIN
+    _requestUrl:string,
+    appOrigin?:string
 ):boolean {
-    const requestOrigin = new URL(requestUrl).origin
-    return origin === requestOrigin || origin === appOrigin
+    return Boolean(appOrigin) && origin === appOrigin
 }
 
 export function isCrossOriginStateChange (
@@ -226,9 +274,10 @@ export function isCrossOriginStateChange (
     requestUrl:string,
     origin:string|null|undefined,
     fetchSite:string|null|undefined,
-    appOrigin:string = DEFAULT_APP_ORIGIN
+    appOrigin?:string
 ):boolean {
-    if (!STATE_CHANGING_METHODS.has(method)) return false
+    if (!isStateChangingMethod(method)) return false
+    if (!origin && !fetchSite) return true
     if (origin && !isAllowedRequestOrigin(
         origin,
         requestUrl,
@@ -240,13 +289,24 @@ export function isCrossOriginStateChange (
         || (!origin && fetchSite === 'same-site')
 }
 
+export function hasValidCsrfToken (
+    cookieHeader:string|null|undefined,
+    headerToken:string|null|undefined
+):boolean {
+    const cookieToken = cookieHeader?.split(';')
+        .map(part => part.trim())
+        .find(part => part.startsWith('csrf_token='))
+        ?.slice('csrf_token='.length)
+    return Boolean(cookieToken && headerToken && cookieToken === headerToken)
+}
+
 function allowedCorsOrigin (
     origin:string,
     c:Context
 ):string|null {
     const appContext = c as AppContext
     if (!origin) return null
-    const appOrigin = appContext.env.APP_ORIGIN || DEFAULT_APP_ORIGIN
+    const appOrigin = appContext.env.APP_ORIGIN
     return isAllowedRequestOrigin(origin, appContext.req.url, appOrigin) ?
         origin :
         null
@@ -258,16 +318,31 @@ const rejectCrossOriginStateChanges = async (
 ) => {
     const origin = c.req.header('origin')
     const fetchSite = c.req.header('sec-fetch-site')
-    const appOrigin = c.env.APP_ORIGIN || DEFAULT_APP_ORIGIN
+    const appOrigin = c.env.APP_ORIGIN
+    const path = new URL(c.req.url).pathname
 
-    if (isCrossOriginStateChange(
-        c.req.method,
-        c.req.url,
-        origin,
-        fetchSite,
-        appOrigin
-    )) {
+    if (
+        !isCsrfExemptPath(path) &&
+        isCrossOriginStateChange(
+            c.req.method,
+            c.req.url,
+            origin,
+            fetchSite,
+            appOrigin
+        )
+    ) {
         return c.json({ error: 'Cross-origin request rejected' }, 403)
+    }
+
+    if (
+        isStateChangingMethod(c.req.method) &&
+        !isCsrfExemptPath(path) &&
+        !hasValidCsrfToken(
+            c.req.header('cookie'),
+            c.req.header('x-csrf-token')
+        )
+    ) {
+        return c.json({ error: 'CSRF token mismatch' }, 403)
     }
 
     await next()
@@ -300,6 +375,9 @@ app.use('*', async (c, next) => {
             c.env.SESSIONS
         )
         c.set('session', session)
+        if (!session) {
+            deleteCookie(c, 'session', { path: '/' })
+        }
     } else {
         c.set('session', null)
     }
@@ -549,6 +627,7 @@ app.post('/api/auth/callback', async (c) => {
             path: '/',
             maxAge: 30 * 24 * 60 * 60 // 30 days
         })
+        setCsrfCookie(c)
 
         return c.json({
             success: true,
@@ -577,20 +656,12 @@ app.post('/api/auth/logout', async (c) => {
         )
     }
     deleteCookie(c, 'session', { path: '/' })
+    deleteCookie(c, 'csrf_token', { path: '/' })
     return c.json({ success: true })
 })
 
-app.get('/logout', async (c) => {
-    const cookie = getCookie(c, 'session')
-    if (cookie && c.env.SESSION_SECRET) {
-        await destroySessionCookie(
-            cookie,
-            c.env.SESSION_SECRET,
-            c.env.SESSIONS
-        )
-    }
-    deleteCookie(c, 'session', { path: '/' })
-    return c.redirect('/login')
+app.get('/logout', (c) => {
+    return c.text('Method Not Allowed', 405)
 })
 
 const requireAuth = async (c:Context<{
@@ -736,6 +807,7 @@ app.post('/api/auth/dev-login', async (c) => {
         path: '/',
         maxAge: 30 * 24 * 60 * 60
     })
+    setCsrfCookie(c)
 
     return c.json({ success: true, session })
 })
@@ -809,14 +881,15 @@ app.post('/api/billing/checkout', requireAuth, async (c) => {
         }
         await writeCachedBilling(c.env, session.did, billing)
 
-        if (email) {
+        const to = await resolveContactEmail(c.env, session.did)
+        if (to) {
             try {
                 const baseUrl = new URL(c.req.url).origin
                 await sendSubscriptionStarted(
                     c.env,
                     c.env.SESSIONS,
                     {
-                        to: email,
+                        to,
                         did: session.did,
                         planId,
                         baseUrl,
@@ -846,7 +919,7 @@ app.post('/api/billing/checkout', requireAuth, async (c) => {
             email ?? undefined
         )
         if (customer.email) {
-            await stashPendingEmail(
+            await stashContactEmail(
                 c.env,
                 session.did,
                 customer.email
@@ -1099,6 +1172,24 @@ export const dataRouter = new Hono<{
 dataRouter.use('*', requireAuth)
 dataRouter.use('*', requireEntitlement)
 
+function buildDoProxyHeaders (headers:Headers):Headers {
+    const forwarded = new Headers()
+
+    headers.forEach((value, name) => {
+        const normalized = name.toLowerCase()
+
+        if (
+            normalized === 'content-type' ||
+            normalized === 'cookie' ||
+            normalized.startsWith('x-rsss-')
+        ) {
+            forwarded.set(name, value)
+        }
+    })
+
+    return forwarded
+}
+
 /**
  * Proxy requests to user's Durable Object.
  * All data routes under /api go to the user's DO.
@@ -1122,7 +1213,7 @@ dataRouter.all('*', async (c) => {
     const response = await stub.fetch(
         new Request(doUrl.toString(), {
             method: c.req.method,
-            headers: c.req.raw.headers,
+            headers: buildDoProxyHeaders(c.req.raw.headers),
             body: c.req.raw.body
         })
     )

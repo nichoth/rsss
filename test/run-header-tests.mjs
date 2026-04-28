@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process'
 
 const commands = [
     'node test/vite-isolation-headers.mjs',
+    'node test/isolation-headers-static.mjs',
     'esbuild test/server-headers.ts --bundle | tapout'
 ]
 

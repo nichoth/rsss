@@ -557,6 +557,33 @@ interface StoredSession {
     createdAt: number;
 }
 
+function isObjectRecord (value:unknown):value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null
+}
+
+function isOAuthSession (value:unknown):value is OAuthSession {
+    if (!isObjectRecord(value)) return false
+    if (typeof value.did !== 'string') return false
+    if (typeof value.handle !== 'string') return false
+    if (
+        value.avatar !== undefined &&
+        typeof value.avatar !== 'string'
+    ) {
+        return false
+    }
+
+    return true
+}
+
+function isStoredSession (value:unknown):value is StoredSession {
+    if (!isObjectRecord(value)) return false
+    if (!isOAuthSession(value.session)) return false
+    if (typeof value.sessionExpiresAt !== 'number') return false
+    if (typeof value.createdAt !== 'number') return false
+
+    return true
+}
+
 async function signCookiePayload (
     payloadB64: string,
     secret: string
@@ -653,11 +680,13 @@ export async function verifySessionCookie (
         const recordJson = await kv.get(`session:${sid}`)
         if (!recordJson) return null
 
-        const record = JSON.parse(recordJson) as StoredSession
-        if (
-            typeof record.sessionExpiresAt !== 'number' ||
-            record.sessionExpiresAt < Date.now()
-        ) {
+        const record = JSON.parse(recordJson) as unknown
+        if (!isStoredSession(record)) {
+            await kv.delete(`session:${sid}`)
+            return null
+        }
+
+        if (record.sessionExpiresAt < Date.now()) {
             await kv.delete(`session:${sid}`)
             return null
         }

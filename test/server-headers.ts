@@ -26,3 +26,16 @@ test('asset responses receive isolation headers without mutating immutable',
         )
     }
 )
+
+test('image responses do not receive document isolation headers',
+    async (t) => {
+        const fetched = await fetch('data:image/png;base64,')
+        const res = withIsolationHeaders(fetched)
+
+        t.equal(
+            res.headers.get('Cross-Origin-Embedder-Policy'),
+            null,
+            'image response is left to document credentialless policy'
+        )
+    }
+)

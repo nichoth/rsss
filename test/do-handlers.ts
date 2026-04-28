@@ -91,9 +91,17 @@ function createDoHarness () {
     const sql = createSql()
     const refreshed:number[] = []
     const waitUntilPromises:Promise<unknown>[] = []
+    const storage = new Map<string, unknown>()
     const userDo = Object.create(UserDO.prototype) as {
         sql:ReturnType<typeof createSql>
-        ctx:{ waitUntil:(promise:Promise<unknown>) => void }
+        ctx:{
+            storage:{
+                get:<T>(key:string) => Promise<T|undefined>
+                put:(key:string, value:unknown) => Promise<void>
+                delete:(key:string) => Promise<void>
+            }
+            waitUntil:(promise:Promise<unknown>) => void
+        }
         fetchFeed:(feed:FeedRow) => Promise<void>
         createRouter:() => { request:(path:string, init?:RequestInit) =>
             Promise<Response> }
@@ -101,6 +109,17 @@ function createDoHarness () {
 
     userDo.sql = sql
     userDo.ctx = {
+        storage: {
+            async get<T> (key:string) {
+                return storage.get(key) as T|undefined
+            },
+            async put (key:string, value:unknown) {
+                storage.set(key, value)
+            },
+            async delete (key:string) {
+                storage.delete(key)
+            }
+        },
         waitUntil (promise) {
             waitUntilPromises.push(promise)
         }
@@ -113,6 +132,7 @@ function createDoHarness () {
         app: userDo.createRouter(),
         sql,
         refreshed,
+        storage,
         waitUntilPromises
     }
 }
@@ -162,6 +182,20 @@ test('UserDO feed handlers list create and refresh feeds', async t => {
     t.deepEqual(refreshed, [3, 3], 'created feed is refreshed')
 })
 
+test('UserDO manual feed refresh is rate limited per feed', async t => {
+    const { app, refreshed, storage } = createDoHarness()
+    const responses = await Promise.all(Array.from({ length: 100 }, () => {
+        return app.request('/feeds/1/refresh', { method: 'POST' })
+    }))
+    const body = await responses[0].json() as { success:boolean }
+
+    t.equal(responses[0].status, 200, 'first refresh returns 200')
+    t.equal(body.success, true, 'first refresh reports success')
+    t.equal(refreshed.length, 1, 'rapid refreshes fetch the feed once')
+    t.equal(refreshed[0], 1, 'the requested feed is refreshed')
+    t.equal(storage.size, 1, 'manual refresh timestamp is stored')
+})
+
 test(
     'UserDO add feed treats client_op_id duplicate URL as idempotent',
     async t => {
@@ -185,6 +219,39 @@ test(
     }
 )
 
+test('UserDO add feed deduplicates canonical URL variants', async t => {
+    const { app, sql, waitUntilPromises } = createDoHarness()
+
+    const createResponse = await app.request('/feeds', {
+        method: 'POST',
+        body: JSON.stringify({
+            url: 'https://Example.COM/feed/'
+        })
+    })
+    const createBody = await createResponse.json() as { feed:FeedRow }
+
+    const duplicateResponse = await app.request('/feeds', {
+        method: 'POST',
+        body: JSON.stringify({
+            url: 'https://example.com/feed'
+        })
+    })
+
+    t.equal(createResponse.status, 201, 'variant creates the feed')
+    t.equal(
+        createBody.feed.url,
+        'https://example.com/feed',
+        'created feed stores canonical URL'
+    )
+    t.equal(duplicateResponse.status, 409, 'canonical duplicate conflicts')
+    t.equal(sql.feeds.length, 3, 'no duplicate feed row is inserted')
+    t.equal(
+        waitUntilPromises.length,
+        1,
+        'only the created feed schedules a refresh'
+    )
+})
+
 test(
     'UserDO delete feed treats client_op_id missing row as idempotent',
     async t => {
@@ -204,3 +271,30 @@ test(
         t.equal(sql.feeds.length, 2, 'no feed rows are changed')
     }
 )
+
+test('UserDO delete feed clamps future client timestamps', async t => {
+    const { app, sql } = createDoHarness()
+    const originalWarn = console.warn
+    const warnings:unknown[][] = []
+    console.warn = (...args:unknown[]) => {
+        warnings.push(args)
+    }
+    sql.feeds[0].updated_at = '9999-12-31T23:59:58'
+
+    try {
+        const response = await app.request('/feeds/1', {
+            method: 'DELETE',
+            body: JSON.stringify({
+                client_updated_at: '9999-12-31T23:59:59'
+            })
+        })
+        const body = await response.json() as { feed:FeedRow }
+
+        t.equal(response.status, 409, 'clamped write is rejected')
+        t.equal(body.feed.id, 1, 'authoritative feed is returned')
+        t.equal(sql.feeds.length, 2, 'feed row is not deleted')
+        t.equal(warnings.length, 1, 'clamp event is logged')
+    } finally {
+        console.warn = originalWarn
+    }
+})

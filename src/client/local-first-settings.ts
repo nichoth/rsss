@@ -1,10 +1,12 @@
-import { type Signal, signal, batch } from '@preact/signals'
+import { type Signal, signal, batch, effect } from '@preact/signals'
 import { billingStatus } from './billing-status.js'
 
 export const syncSubscriptions:Signal<boolean> = signal(false)
 export const storeContent:Signal<boolean> = signal(false)
+export const pendingSyncSubscriptions:Signal<boolean> = signal(false)
 
 const LS_KEY = 'rsss.localFirst'
+export type SyncSubscriptionsResult = 'applied'|'pending'|'blocked'
 
 export function loadLocalFirstSettings ():void {
     try {
@@ -27,14 +29,46 @@ export function saveLocalFirstSettings ():void {
     }))
 }
 
-export function setSyncSubscriptions (v:boolean):void {
-    if (v && !billingStatus.value?.entitled) return
+export function setSyncSubscriptions (v:boolean):SyncSubscriptionsResult {
     if (!v) {
         batch(() => {
+            pendingSyncSubscriptions.value = false
             syncSubscriptions.value = false
             storeContent.value = false
         })
-    } else {
-        syncSubscriptions.value = true
+        return 'applied'
     }
+
+    const billing = billingStatus.value
+    if (billing === null) {
+        pendingSyncSubscriptions.value = true
+        return 'pending'
+    }
+    if (!billing.entitled) {
+        pendingSyncSubscriptions.value = false
+        return 'blocked'
+    }
+
+    batch(() => {
+        pendingSyncSubscriptions.value = false
+        syncSubscriptions.value = true
+    })
+    return 'applied'
 }
+
+effect(() => {
+    if (!pendingSyncSubscriptions.value) return
+    const billing = billingStatus.value
+    if (billing === null) return
+
+    if (!billing.entitled) {
+        pendingSyncSubscriptions.value = false
+        return
+    }
+
+    batch(() => {
+        pendingSyncSubscriptions.value = false
+        syncSubscriptions.value = true
+    })
+    saveLocalFirstSettings()
+})

@@ -59,6 +59,90 @@ test('validateFeedUrl rejects localhost URLs', async t => {
     }
 })
 
+test('validateFeedUrl rejects private and link-local IP ranges', async t => {
+    const badUrls = [
+        'http://10.0.0.1/feed.xml',
+        'http://172.16.0.1/feed.xml',
+        'http://172.31.255.255/feed.xml',
+        'http://192.168.1.1/feed.xml',
+        'http://169.254.1.1/feed.xml',
+        'http://[fc00::1]/feed.xml',
+        'http://[fdff::1]/feed.xml',
+        'http://[fe80::1]/feed.xml',
+        'http://[::]/feed.xml',
+        'http://[::ffff:127.0.0.1]/feed.xml'
+    ]
+
+    for (const url of badUrls) {
+        try {
+            await validateFeedUrl(url)
+            t.fail(`expected ${url} to be rejected`)
+        } catch (_err) {
+            const err = _err as Error
+            t.equal(err.message, 'Feed URL host is not allowed')
+        }
+    }
+})
+
+test('validateFeedUrl rejects numeric loopback encodings', async t => {
+    const badUrls = [
+        'http://2130706433/',
+        'http://0177.0.0.1/',
+        'http://0x7f.0.0.1/'
+    ]
+
+    for (const url of badUrls) {
+        try {
+            await validateFeedUrl(url)
+            t.fail(`expected ${url} to be rejected`)
+        } catch (_err) {
+            const err = _err as Error
+            t.equal(err.message, 'Feed URL host is not allowed')
+        }
+    }
+})
+
+test('fetchFeedText rejects hostnames resolving to private IPs', async t => {
+    try {
+        await fetchFeedText('https://example.com/feed.xml', {
+            fetchFn: async () => responseFromChunks(['never']),
+            resolveHostname: async () => ['10.0.0.1']
+        })
+        t.fail('expected private resolved IP to be rejected')
+    } catch (_err) {
+        const err = _err as Error
+        t.equal(err.message, 'Feed URL host is not allowed')
+    }
+})
+
+test('fetchFeedText manually validates redirects', async t => {
+    const fetched:string[] = []
+    const redirects:RequestRedirect[] = []
+
+    try {
+        await fetchFeedText('https://example.com/feed.xml', {
+            fetchFn: async (url, init) => {
+                fetched.push(url.toString())
+                redirects.push(init?.redirect || 'follow')
+
+                return new Response(null, {
+                    status: 302,
+                    headers: {
+                        location: 'http://10.0.0.1/feed.xml'
+                    }
+                })
+            },
+            resolveHostname: async () => ['93.184.216.34']
+        })
+        t.fail('expected private redirect location to be rejected')
+    } catch (_err) {
+        const err = _err as Error
+        t.equal(err.message, 'Feed URL host is not allowed')
+        t.deepEqual(fetched, ['https://example.com/feed.xml'])
+        t.deepEqual(redirects, ['manual'])
+    }
+})
+
 test('fetchFeedText rejects bodies larger than the byte limit', async t => {
     const response = responseFromChunks(['12345', '67890', 'x'])
 

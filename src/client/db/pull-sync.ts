@@ -1,4 +1,4 @@
-import type { Sqlite3Db } from './sqlite-init.js'
+import { describeLocalDbError } from './sqlite-init.js'
 import { storeContent } from '../local-first-settings.js'
 import { execDb, queryDb } from './local-db.js'
 import {
@@ -7,6 +7,7 @@ import {
     setSyncError,
     isLocalFirstActive
 } from './sync-status.js'
+import type { Sqlite3Db } from './sqlite-init.js'
 
 export class SyncBillingError extends Error {
     constructor () {
@@ -335,9 +336,7 @@ export async function pullSync (
         } catch (err) {
             await execDb(db, 'ROLLBACK')
             if (trackStatus) {
-                setSyncError(
-                    err instanceof Error ? err.message : String(err)
-                )
+                setSyncError(describeLocalDbError(err))
             }
             throw err
         }

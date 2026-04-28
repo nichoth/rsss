@@ -92,3 +92,32 @@ test('setSyncSubscriptions(true) is a no-op for free (unentitled) users',
             'free users cannot enable local-first')
     }
 )
+
+test('setSyncSubscriptions(true) waits for pending billing status',
+    async (t) => {
+        localStorage.removeItem(LS_KEY)
+        const mod = await import('../src/client/local-first-settings.js')
+        const billing = await import('../src/client/billing-status.js')
+
+        billing.billingStatus.value = null
+        mod.syncSubscriptions.value = false
+        mod.storeContent.value = false
+
+        mod.setSyncSubscriptions(true)
+
+        t.equal(mod.syncSubscriptions.value, false,
+            'local-first is not enabled before billing loads')
+
+        billing.billingStatus.value = {
+            entitled: true,
+            planId: 'local-first',
+            status: 'active',
+            refreshedAt: Date.now(),
+            useLive: false
+        }
+        await new Promise(resolve => setTimeout(resolve, 0))
+
+        t.equal(mod.syncSubscriptions.value, true,
+            'local-first enable applies after billing loads')
+    }
+)

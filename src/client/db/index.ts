@@ -30,6 +30,10 @@ import {
     bootstrapLocalDb
 } from './bootstrap.js'
 import { pushSync, getOutboxCount } from './push-sync.js'
+import {
+    beginLocalFirstDisable,
+    endLocalFirstDisable
+} from './sync.js'
 import type { DbAdapter, Item } from './types.js'
 import type {
     LocalDbErrorCategory,
@@ -59,6 +63,7 @@ export {
     bootstrapItemsCount,
     bootstrapError,
     bootstrapRetryAvailable,
+    bootstrapStorageWarning,
     getBootstrappedDb,
     clearBootstrappedDb
 } from './bootstrap.js'
@@ -269,16 +274,23 @@ export async function disableLocalFirst (
     fetchFn:typeof fetch = fetch
 ):Promise<void> {
     const db = getBootstrappedDb() ?? _cachedDb
-    await pushPendingWritesBeforeRemoval(db, fetchFn)
-    await closeDb(db)
-    clearBootstrappedDb()
-    _resetAdapterCache()
-    await releaseLocalTabLock()
-    await removeOpfsDb(did)
-    batch(() => {
-        setSyncSubscriptions(false)
-    })
-    saveLocalFirstSettings()
+    beginLocalFirstDisable(db)
+    try {
+        await pushPendingWritesBeforeRemoval(db, fetchFn)
+        await closeDb(db)
+        clearBootstrappedDb()
+        _resetAdapterCache()
+        await releaseLocalTabLock()
+        await removeOpfsDb(did)
+        batch(() => {
+            setSyncSubscriptions(false)
+        })
+        saveLocalFirstSettings()
+    } catch (err) {
+        endLocalFirstDisable(db)
+        throw err
+    }
+    endLocalFirstDisable(db)
 }
 
 /**
@@ -292,15 +304,20 @@ export async function resetLocalFirst (
     options:ResetLocalFirstOptions = {}
 ):Promise<void> {
     const db = getBootstrappedDb() ?? _cachedDb
+    beginLocalFirstDisable(db)
     try {
         await pushPendingWritesBeforeRemoval(db, fetchFn)
     } catch (err) {
-        if (!options.allowDataLossOnSyncFailure) throw err
+        if (!options.allowDataLossOnSyncFailure) {
+            endLocalFirstDisable(db)
+            throw err
+        }
     }
     await closeDb(db)
     clearBootstrappedDb()
     _resetAdapterCache()
     await releaseLocalTabLock()
     await removeOpfsDb(did)
+    endLocalFirstDisable(db)
     await bootstrapLocalDb(did, fetchFn)
 }

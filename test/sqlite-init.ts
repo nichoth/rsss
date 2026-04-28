@@ -234,6 +234,7 @@ test('classifyLocalDbError maps common browser and SQLite failures', (t) => {
         'The quota has been exceeded.',
         'QuotaExceededError'
     )
+    const sqliteFull = new Error('SQLITE_FULL: database or disk is full')
     const corrupt = new Error('database disk image is malformed')
     const locked = new Error('database is locked')
     const unavailable = new OPFSUnavailableError()
@@ -243,6 +244,11 @@ test('classifyLocalDbError maps common browser and SQLite failures', (t) => {
         classifyLocalDbError(quota),
         'quota',
         'classifies quota errors'
+    )
+    t.equal(
+        classifyLocalDbError(sqliteFull),
+        'quota',
+        'classifies SQLite full-disk write errors'
     )
     t.equal(
         classifyLocalDbError(corrupt),

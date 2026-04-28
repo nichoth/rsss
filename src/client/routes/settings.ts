@@ -1,11 +1,12 @@
 import { html } from 'htm/preact'
 import { type FunctionComponent } from 'preact'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useRef } from 'preact/hooks'
 import { useComputed } from '@preact/signals'
 import { type AppState, State } from '../state.js'
 import { billingStatus } from '../billing-status.js'
 import {
     syncSubscriptions,
+    pendingSyncSubscriptions,
     storeContent,
     setSyncSubscriptions,
     saveLocalFirstSettings,
@@ -20,6 +21,7 @@ import {
     bootstrapItemsCount,
     bootstrapError,
     bootstrapRetryAvailable,
+    bootstrapStorageWarning,
     disableLocalFirst,
     resetLocalFirst,
     getBootstrappedDb,
@@ -38,6 +40,7 @@ export const SettingsRoute:FunctionComponent<{
 }> = function (props) {
     const { state } = props
     const { feeds } = state
+    const pendingBootstrapDid = useRef<string|null>(null)
 
     useEffect(() => {
         loadLocalFirstSettings()
@@ -54,7 +57,22 @@ export const SettingsRoute:FunctionComponent<{
     const tabLockError = localTabLockError.value
     const billing = useComputed(() => billingStatus.value)
     const isEntitled = Boolean(billing.value?.entitled)
+    const isBillingLoaded = billing.value !== null
+    const syncChecked = syncSubscriptions.value ||
+        pendingSyncSubscriptions.value
     const planLabel = billing.value?.planId ?? 'local-first'
+
+    useEffect(() => {
+        const did = pendingBootstrapDid.current
+        if (!did) return
+        if (pendingSyncSubscriptions.value || !syncSubscriptions.value) return
+
+        pendingBootstrapDid.current = null
+        bootstrapLocalDb(did, fetch, {
+            confirmTerminalReset: confirmTerminalBootstrapReset,
+            confirmLowStorage: confirmLowStorageBootstrap
+        })
+    }, [pendingSyncSubscriptions.value, syncSubscriptions.value])
 
     function handleManageSubscription (e:Event) {
         e.preventDefault()
@@ -75,17 +93,31 @@ export const SettingsRoute:FunctionComponent<{
         ].join('\n'))
     }
 
+    function confirmLowStorageBootstrap (message:string):boolean {
+        return confirm([
+            message,
+            '',
+            'Continue setting up local storage anyway?'
+        ].join('\n'))
+    }
+
     async function handleSyncChange (ev:Event) {
         const checked = (ev.target as HTMLInputElement).checked
         const did = state.user.value?.did
         if (checked) {
-            setSyncSubscriptions(true)
+            const result = setSyncSubscriptions(true)
             saveLocalFirstSettings()
-            if (did) {
+            if (result === 'applied' && did) {
                 bootstrapLocalDb(did, fetch, {
-                    confirmTerminalReset: confirmTerminalBootstrapReset
+                    confirmTerminalReset: confirmTerminalBootstrapReset,
+                    confirmLowStorage: confirmLowStorageBootstrap
                 })
+            } else if (result === 'pending' && did) {
+                pendingBootstrapDid.current = did
             }
+        } else if (!syncSubscriptions.value) {
+            setSyncSubscriptions(false)
+            saveLocalFirstSettings()
         } else {
             if (!did) {
                 setSyncSubscriptions(false)
@@ -142,7 +174,8 @@ export const SettingsRoute:FunctionComponent<{
         const did = state.user.value?.did
         if (!did) return
         bootstrapLocalDb(did, fetch, {
-            confirmTerminalReset: confirmTerminalBootstrapReset
+            confirmTerminalReset: confirmTerminalBootstrapReset,
+            confirmLowStorage: confirmLowStorageBootstrap
         })
     }
 
@@ -279,9 +312,9 @@ export const SettingsRoute:FunctionComponent<{
                 <check-box
                     name="sync-subscriptions"
                     aria-describedby="sync-subscriptions-desc"
-                    checked=${syncSubscriptions.value || undefined}
-                    disabled=${(!isEntitled || !supported || inProgress) ||
-                        undefined}
+                    checked=${syncChecked || undefined}
+                    disabled=${((isBillingLoaded && !isEntitled) ||
+                        !supported || inProgress) || undefined}
                     onChange=${handleSyncChange}
                 >
                     Sync subscriptions and read state to this device
@@ -299,7 +332,8 @@ export const SettingsRoute:FunctionComponent<{
                     name="store-content"
                     aria-describedby="store-content-desc"
                     checked=${storeContent.value || undefined}
-                    disabled=${(!isEntitled || !supported ||
+                    disabled=${((isBillingLoaded && !isEntitled) ||
+                        !supported ||
                         !syncSubscriptions.value || inProgress) ||
                         undefined}
                     onChange=${handleContentChange}
@@ -328,6 +362,11 @@ export const SettingsRoute:FunctionComponent<{
             ${bError && html`
                 <p class="bootstrap-error">
                     Setup failed: ${bError}
+                </p>
+            `}
+            ${bootstrapStorageWarning.value && html`
+                <p class="bootstrap-warning">
+                    ${bootstrapStorageWarning.value}
                 </p>
             `}
             ${bootstrapRetryAvailable.value && !inProgress && html`

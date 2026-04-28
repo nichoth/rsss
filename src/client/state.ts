@@ -455,8 +455,23 @@ State.refreshAfterSync = async function (
 /**
  * API client
  */
+function csrfToken ():string|undefined {
+    return document.cookie.split(';')
+        .map(part => part.trim())
+        .find(part => part.startsWith('csrf_token='))
+        ?.slice('csrf_token='.length)
+}
+
 const api = ky.create({
     prefixUrl: '/api',
+    hooks: {
+        beforeRequest: [
+            request => {
+                const token = csrfToken()
+                if (token) request.headers.set('X-CSRF-Token', token)
+            }
+        ]
+    }
 })
 
 /**
