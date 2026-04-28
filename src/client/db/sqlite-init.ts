@@ -115,7 +115,7 @@ export function classifyLocalDbError (
     if (isExclusiveLockError(err)) return 'locked'
     if (
         name === 'QuotaExceededError' ||
-        /quota|disk full|no space|not enough storage/.test(text)
+        /quota|sqlite_full|disk.*full|no space|not enough storage/.test(text)
     ) {
         return 'quota'
     }
@@ -130,6 +130,14 @@ export function classifyLocalDbError (
     }
 
     return 'unknown'
+}
+
+export function describeLocalDbError (err:unknown):string {
+    const category = classifyLocalDbError(err)
+    if (category === 'unknown') {
+        return err instanceof Error ? err.message : String(err)
+    }
+    return localDbOpenMessage(category, err)
 }
 
 /**

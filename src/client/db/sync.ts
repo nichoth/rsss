@@ -1,4 +1,4 @@
-import type { Sqlite3Db } from './sqlite-init.js'
+import { describeLocalDbError } from './sqlite-init.js'
 import {
     PullSyncAuthError,
     pullSync
@@ -15,6 +15,7 @@ import {
     setSyncError,
     setSyncSyncing
 } from './sync-status.js'
+import type { Sqlite3Db } from './sqlite-init.js'
 
 const inFlightSyncs = new WeakMap<Sqlite3Db, Promise<void>>()
 const inFlightAbortControllers = new WeakMap<Sqlite3Db, AbortController>()
@@ -131,7 +132,7 @@ async function runSyncCycle (
                 () => undefined
             )
             setSyncError(
-                err instanceof Error ? err.message : String(err),
+                describeLocalDbError(err),
                 pending,
                 deadLetters
             )

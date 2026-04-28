@@ -7,6 +7,7 @@ import { SCHEMA_SQL, DEAD_LETTER_OUTBOX_SQL } from
 import { OUTBOX_SQL, SYNC_META_SQL } from
     '../src/client/db/local-schema.js'
 import {
+    classifyLocalDbError,
     getOpfsFilename,
     setSQLiteWorkerClientFactoryForTests,
     setTestMode
@@ -281,6 +282,39 @@ function makeFetch (body:unknown, status = 200):typeof fetch {
     } as Response)
 }
 
+function quotaWriteError ():Error {
+    return new Error('SQLITE_FULL: database or disk is full')
+}
+
+function quotaWriteWorkerClient ():SQLiteWorkerClient {
+    return {
+        probe: async () => {},
+        open: async () => {},
+        exec: async (sql:string) => {
+            if (/INSERT INTO feeds/.test(sql)) {
+                throw quotaWriteError()
+            }
+        },
+        query: async (sql:string) => {
+            if (/COUNT\(\*\).*dead_letter_outbox/s.test(sql)) {
+                return [{ n: 0 }]
+            }
+            if (/COUNT\(\*\).*outbox/s.test(sql)) {
+                return [{ n: 0 }]
+            }
+            if (/last_pull_at/.test(sql)) {
+                return [{ last_pull_at: null }]
+            }
+            if (/pull_cursor/.test(sql)) {
+                return [{ pull_cursor: null }]
+            }
+            return []
+        },
+        close: async () => {},
+        dispose: () => {}
+    } as unknown as SQLiteWorkerClient
+}
+
 const syncPayload = {
     feeds: [
         {
@@ -452,6 +486,68 @@ test('bootstrapLocalDb: server error leaves local-first retryable',
         t.equal(bootstrapRetryAvailable.value, true,
             'server error exposes retry')
         t.equal(getBootstrappedDb(), null, 'no db after failure')
+    }
+)
+
+test('bootstrapLocalDb: quota write error reaches bootstrap UI signal',
+    async (t) => {
+        clearBootstrappedDb()
+        setupSupportedLocalFirst()
+        setTestMode(false)
+        setSQLiteWorkerClientFactoryForTests(quotaWriteWorkerClient)
+        bootstrapError.value = null
+        bootstrapRetryAvailable.value = true
+
+        try {
+            await bootstrapLocalDb(
+                'did:test:bootstrap-quota-write',
+                makeFetch(syncPayload)
+            )
+
+            t.equal(bootstrapRetryAvailable.value, false,
+                'quota is treated as a terminal bootstrap failure')
+            t.ok(
+                /local storage is full/i.test(bootstrapError.value ?? ''),
+                'bootstrap UI signal explains the quota failure'
+            )
+        } finally {
+            teardownPersistentLocalFirst()
+        }
+    }
+)
+
+test('runSync: quota write error reaches steady-state UI signal',
+    async (t) => {
+        clearBootstrappedDb()
+        setupSupportedLocalFirst()
+        setTestMode(false)
+        setSQLiteWorkerClientFactoryForTests(quotaWriteWorkerClient)
+        syncError.value = null
+        syncStatus.value = 'idle'
+
+        try {
+            await getAdapter('did:test:sync-quota-write')
+            const db = getLocalDb('did:test:sync-quota-write')
+            t.ok(db, 'local db is cached')
+            if (!db) return
+
+            isLocalFirstActive.value = true
+            const err = await catchError(() => (
+                runSync(db, makeFetch(syncPayload))
+            ))
+
+            t.equal(classifyLocalDbError(err), 'quota',
+                'the SQLite write error is classified as quota')
+            t.equal(syncStatus.value, 'error',
+                'steady-state sync status becomes error')
+            t.ok(
+                /local storage is full/i.test(syncError.value ?? ''),
+                'steady-state UI signal explains the quota failure'
+            )
+        } finally {
+            isLocalFirstActive.value = false
+            teardownPersistentLocalFirst()
+        }
     }
 )
 

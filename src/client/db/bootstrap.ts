@@ -4,6 +4,7 @@ import {
     saveLocalFirstSettings
 } from '../local-first-settings.js'
 import {
+    describeLocalDbError,
     LocalDbOpenError,
     openLocalDb,
     removeOpfsDb
@@ -164,7 +165,7 @@ export async function bootstrapLocalDb (
         if (err instanceof Error && err.message === LOCAL_TAB_LOCK_ERROR) {
             setLocalTabBlocked()
         }
-        const msg = err instanceof Error ? err.message : String(err)
+        const msg = describeLocalDbError(err)
         const isTransient = isTransientBootstrapError(err)
         batch(() => {
             bootstrapError.value = msg

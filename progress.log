@@ -410,6 +410,10 @@ Thread: https://ampcode.com/threads/unknown
   `classifyLocalDbError`; adapter selection stores user-facing recovery state
   in `localDbError`. Quota/corruption should return `remoteAdapter` with a
   visible Settings error instead of silently falling back.
+- **Local DB error messages**: Bootstrap and steady-state sync should pass
+  SQLite/OPFS write failures through `describeLocalDbError()` before writing
+  UI signals such as `bootstrapError` or `syncError`, so quota/corruption
+  failures do not leak raw SQLite text.
 - **OPFS removal ordering**: Disable/reset/bootstrap-failure cleanup should
   close the active local SQLite handle with `closeDb(db)` before calling
   `removeOpfsDb(did)`.
@@ -2915,4 +2919,32 @@ Thread: https://ampcode.com/threads/unknown
     `test/bootstrap.ts` beside the destructive local data flow tests.
   - Use the existing persistent OPFS test harness in `test/bootstrap.ts`
     when asserting removal ordering or exact file deletion behavior.
+---
+## 2026-04-27 22:00 PDT - US-114
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Covered SQLite quota write failures end to end.
+  - Added a regression for SQLite `SQLITE_FULL` write errors being
+    classified as `quota`.
+  - Added bootstrap and steady-state sync regressions that mock a local
+    SQLite write failure and assert quota errors reach UI signals.
+  - Added shared `describeLocalDbError()` formatting so bootstrap and
+    `runSync` show the local-storage recovery message instead of raw SQLite
+    text.
+- Files changed:
+  - `src/client/db/sqlite-init.ts`
+  - `src/client/db/bootstrap.ts`
+  - `src/client/db/pull-sync.ts`
+  - `src/client/db/sync.ts`
+  - `test/sqlite-init.ts`
+  - `test/bootstrap.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - SQLite quota failures can surface as `SQLITE_FULL: database or disk is
+    full`, not only browser `QuotaExceededError`.
+  - Local-first UI error signals should use `describeLocalDbError()` for
+    SQLite/OPFS write failures so quota and corruption messages stay
+    consistent across bootstrap and steady-state sync.
+  - Tapout browser test commands share a fixed local port; run focused
+    browser suites serially instead of in parallel.
 ---
