@@ -240,7 +240,8 @@ function isStateChangingMethod (method:string):boolean {
 function isCsrfExemptPath (path:string):boolean {
     return path === '/api/auth/login' ||
         path === '/api/auth/callback' ||
-        path === '/api/auth/dev-login'
+        path === '/api/auth/dev-login' ||
+        path === '/api/auth/logout'
 }
 
 function generateCsrfToken ():string {

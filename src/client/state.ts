@@ -896,15 +896,26 @@ State.openCustomerPortal = async function (
 State.logout = async function (
     state:AppState
 ):Promise<void> {
+    let serverLogoutOk = false
     try {
-        await api.post('auth/logout')
-    } catch {
-        // Ignore logout errors
+        const res = await api.post('auth/logout', {
+            throwHttpErrors: false
+        })
+        serverLogoutOk = res.ok
+        if (!res.ok) {
+            debug('logout request failed:', res.status)
+        }
+    } catch (err) {
+        debug('logout request error:', err)
     }
     batch(() => {
         state.user.value = null
         state.feeds.value = []
         state.items.value = []
+        state.authError.value = serverLogoutOk ?
+            null :
+            'Logout may not have completed. Please clear cookies' +
+                ' if you continue to see your account.'
     })
     resetBilling()
     state._setRoute('/login')
