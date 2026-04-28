@@ -299,8 +299,7 @@ export const SettingsRoute:FunctionComponent<{
             ` : html`
                 <p>
                     You're on the <strong>Free</strong> plan. RSSS
-                    works while you're online; your data lives on
-                    our servers.
+                    works while you're online only.
                 </p>
                 <button
                     class="btn-upgrade"
@@ -315,7 +314,7 @@ export const SettingsRoute:FunctionComponent<{
             <h2>Local Storage</h2>
             ${!isEntitled && html`
                 <p class="upgrade-note">
-                    Local storage is part of the Local-first plan.
+                    Local storage is part of the Local-first plan.${NBSP}
                     <a href="/signup" onClick=${handleUpgrade}>Upgrade</a>
                     ${NBSP}to keep your feeds on this device and work offline.
                 </p>
