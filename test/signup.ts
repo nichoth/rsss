@@ -29,7 +29,7 @@ function hasCookieAttribute (
 }
 
 test(
-    'POST /api/auth/dev-login sets Secure for HTTPS session cookies',
+    'POST /api/auth/dev-login rejects non-loopback hosts',
     async t => {
         const env = makeEnv({ NODE_ENV: 'development' })
         const res = await app.request(
@@ -42,12 +42,67 @@ test(
             env,
             executionCtx
         )
-        const cookie = res.headers.get('set-cookie')
+        const body = await res.json() as { error?:string }
 
-        t.equal(res.status, 200, 'returns 200')
-        t.ok(
-            hasCookieAttribute(cookie, 'secure'),
-            'sets Secure for non-loopback hosts'
+        t.equal(res.status, 403, 'returns 403')
+        t.equal(
+            body.error,
+            'Not allowed on non-loopback host',
+            'rejects public hosts even in development'
+        )
+    }
+)
+
+test(
+    'POST /api/auth/dev-login requires SESSION_SECRET',
+    async t => {
+        const env = makeEnv({ NODE_ENV: 'development' })
+        delete (env as Partial<typeof env>).SESSION_SECRET
+
+        const res = await app.request(
+            'http://127.0.0.1/api/auth/dev-login',
+            {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({})
+            },
+            env,
+            executionCtx
+        )
+        const body = await res.json() as { error?:string }
+
+        t.equal(res.status, 500, 'returns 500')
+        t.equal(
+            body.error,
+            'SESSION_SECRET is not configured',
+            'does not fall back to a hardcoded secret'
+        )
+    }
+)
+
+test(
+    'POST /api/auth/dev-login treats unset NODE_ENV as production',
+    async t => {
+        const env = makeEnv()
+        delete (env as Partial<typeof env>).NODE_ENV
+
+        const res = await app.request(
+            'http://127.0.0.1/api/auth/dev-login',
+            {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({})
+            },
+            env,
+            executionCtx
+        )
+        const body = await res.json() as { error?:string }
+
+        t.equal(res.status, 403, 'returns 403')
+        t.equal(
+            body.error,
+            'Not allowed in production',
+            'unset NODE_ENV is not treated as development'
         )
     }
 )

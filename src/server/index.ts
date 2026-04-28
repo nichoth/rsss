@@ -695,6 +695,20 @@ app.post('/api/auth/dev-login', async (c) => {
         )
     }
 
+    if (!isLoopbackHostname(new URL(c.req.url).hostname)) {
+        return c.json(
+            { error: 'Not allowed on non-loopback host' },
+            403
+        )
+    }
+
+    if (!c.env.SESSION_SECRET) {
+        return c.json(
+            { error: 'SESSION_SECRET is not configured' },
+            500
+        )
+    }
+
     const body = await c.req.json<{
         did?:string;
         handle?:string
@@ -705,12 +719,8 @@ app.post('/api/auth/dev-login', async (c) => {
         handle: body.handle || 'test.bsky.social'
     }
 
-    const secret = (
-        c.env.SESSION_SECRET
-            || 'dev-secret-key-32-chars-long!!'
-    )
     const sessionCookie = await createSessionCookie(
-        session, secret, c.env.SESSIONS
+        session, c.env.SESSION_SECRET, c.env.SESSIONS
     )
 
     // Track this user in KV for admin tools

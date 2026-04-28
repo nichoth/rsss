@@ -129,6 +129,10 @@ Thread: https://ampcode.com/threads/unknown
 
 ## Codebase Patterns
 
+- **Dev-login defense in depth**: `/api/auth/dev-login` must require
+  `NODE_ENV === 'development'`, a loopback request hostname, and an explicit
+  `SESSION_SECRET`. Server-side regression coverage for this route lives in
+  `test/signup.ts`.
 - **Worker secret bindings**: Production secrets such as
   `AUTUMN_SECRET_KEY` must be configured with `wrangler secret put`, not
   `wrangler.jsonc` `vars`. Static deployment checks belong in
@@ -2064,4 +2068,24 @@ Thread: https://ampcode.com/threads/unknown
     and list them in `test/run-all-tests.mjs`.
   - Production-only config failures can be exposed through `/api/health`
     without changing local or test environment behavior.
+---
+
+## 2026-04-27 17:24 PDT - US-081
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Locked down the development login route.
+  - Removed the hardcoded session-secret fallback.
+  - Required `/api/auth/dev-login` requests to be both development-mode and
+    loopback-host requests.
+  - Added regression coverage for non-loopback rejection, missing
+    `SESSION_SECRET`, and unset `NODE_ENV`.
+- Files changed:
+  - `src/server/index.ts`
+  - `test/signup.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Treat dev-only auth helpers as defense-in-depth surfaces: check both
+    environment and request hostname before issuing session cookies.
+  - Missing secrets can be tested by deleting the property from the
+    `makeEnv()` result before calling `app.request()`.
 ---
