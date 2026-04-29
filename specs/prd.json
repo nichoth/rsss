@@ -1777,6 +1777,117 @@
       "priority": 116,
       "passes": true,
       "notes": ""
+    },
+    {
+      "id": "US-117",
+      "title": "Add thumbnail_url column to items schema and Item type",
+      "description": "As a developer, I need a place to store each post's thumbnail URL so the client can render it without re-fetching anything.",
+      "acceptanceCriteria": [
+        "Add `thumbnail_url TEXT` (nullable, no default) to the `items` CREATE TABLE in `src/shared/schema.ts` between `pub_date` and `is_read`",
+        "Bump `USER_DO_MIGRATION_VERSION` in `src/server/durable-objects/index.ts` from 2 to 3",
+        "Add new private method `migrateAddItemThumbnail()` modeled on `migrateAddFeedFailureColumns` (PRAGMA table_info guard, then `ALTER TABLE items ADD COLUMN thumbnail_url TEXT`) and call it from `initDatabase()` alongside the existing migrations",
+        "Add `thumbnail_url:string|null` to the `Item` interface in `src/client/db/types.ts`",
+        "Client OPFS-backed SQLite path picks the column up on fresh installs (TABLES_SQL is shared); existing local DBs survive the schema change without errors -- match whatever pattern was used for `last_error` / `last_status`",
+        "`npm run typecheck` passes",
+        "`npm run test:db` passes"
+      ],
+      "priority": 117,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-118",
+      "title": "Extract feed-provided image hints during RSS and Atom parsing",
+      "description": "As a developer, I need parseRss and parseAtom in the Durable Object to surface a candidate image URL per item so we have a fallback when OG fetching fails or is unavailable.",
+      "acceptanceCriteria": [
+        "Add `imageUrl:string | null` to the `ParsedFeedItem` interface in `src/server/durable-objects/index.ts`",
+        "Add private helper `extractFirstImgSrc(html)` using a single `<img ... src=\"...\">` regex (no DOM parser added)",
+        "Add private helper `resolveImageUrl(candidate, itemLink, feedLink)` that resolves relatives via `new URL(candidate, base)`, drops non-http(s) results, and returns `null` on parse failure",
+        "Add private helper `getRssItemImage(item)` that tries in order: `media:thumbnail @_url`, first `media:content` with `@_medium=\"image\"` or `@_type` starting with `image/` (read `@_url`), first `enclosure` with `@_type` starting with `image/` (read `@_url`), then first `<img src>` in `content:encoded` / `encoded` / `content` / `description`",
+        "Add private helper `getAtomEntryImage(entry)` that tries in order: `media:thumbnail @_url`, first `<link rel=\"enclosure\" type=\"image/*\">` `@_href`, then first `<img src>` in `content` / `summary`",
+        "Update both `items.push(...)` calls in `parseRss` (around `:1180`) and `parseAtom` (around `:1245`) to populate `imageUrl: this.resolveImageUrl(getter(node), entryLink, feedLink)`",
+        "Add tests in `test/feed-parser.ts` covering each branch: media:thumbnail, media:content (image), enclosure (image), img-in-description, atom link rel=enclosure, atom img-in-content, relative URL resolution, and non-image enclosure ignored",
+        "`npm run typecheck` and `npm run lint` pass",
+        "Tests pass"
+      ],
+      "priority": 118,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-119",
+      "title": "Add fetchOgImage helper that reuses feed-fetch SSRF protections",
+      "description": "As a developer, I need a server-side helper that fetches an article URL, reads up to </head>, and extracts og:image (with twitter:image fallback), reusing the SSRF pipeline that fetchFeedText already enforces.",
+      "acceptanceCriteria": [
+        "New exported function `fetchOgImage(url, options)` lives in `src/server/feed-fetch.ts` (or a new `src/server/og-fetch.ts` if that file gets crowded -- pick one)",
+        "Reuses the existing `validateFeedUrl`, DoH hostname check, redirect cap (3), 15s timeout, and bounded body reader from feed-fetch.ts -- factor shared internals if needed, do not duplicate the SSRF logic weakly",
+        "Reads the response only up to `</head>` or 256 KiB, whichever comes first",
+        "Skips parsing when `Content-Type` is not `text/html` or `application/xhtml+xml`",
+        "Looks for, in order: `property=\"og:image\"`, `property=\"og:image:secure_url\"`, `property=\"og:image:url\"`, `name=\"twitter:image\"` (regex/scanner, no HTML parser dependency)",
+        "Resolves the resulting URL against the article URL via `new URL(candidate, articleUrl)`; drops non-http(s) values; drops `http:` results so mixed-content blocking does not happen on https pages",
+        "Returns `null` on any failure (network, non-2xx, blocked host, timeout, parse miss, wrong content-type) -- never throws to the caller",
+        "New test file `test/og-fetch.ts` (or extend `test/feed-fetch-security.ts`) covers: og:image hit, og:image:secure_url fallback, twitter:image fallback, no-meta page, redirect followed, redirect-loop capped, blocked host, non-HTML content-type, http-only result dropped",
+        "`npm run typecheck` and `npm run lint` pass",
+        "Tests pass"
+      ],
+      "priority": 119,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-120",
+      "title": "Wire OG fetching into feed ingestion with concurrency cap and time budget",
+      "description": "As a developer, I need fetchFeed in the Durable Object to compute thumbnail_url for newly inserted items by trying og:image first then falling back to the parser-supplied imageUrl.",
+      "acceptanceCriteria": [
+        "In `fetchFeed` in `src/server/durable-objects/index.ts`, detect which `INSERT OR IGNORE` calls actually inserted (check `this.sql.exec(...).rowsWritten` or equivalent, or query last_insert_rowid) and collect those new rows along with their `link` and parser-supplied `imageUrl`",
+        "For each newly inserted item with a non-null `link`, call `fetchOgImage(item.link)`; if it returns null, fall back to the parser-supplied `imageUrl`; if both are null, leave thumbnail_url null",
+        "OG fetches run concurrently via `Promise.allSettled` with a small concurrency cap (4) so a single feed cannot stampede one origin",
+        "An overall wall-time budget per `fetchFeed` call (10 seconds) caps total OG-fetch time; any item whose fetch is still pending at the deadline falls back to parser-supplied imageUrl",
+        "Persist via `UPDATE items SET thumbnail_url = ? WHERE id = ? AND thumbnail_url IS NULL` so existing non-null values are never overwritten and pre-feature rows stay null",
+        "OG-fetch failures are logged but never set `feeds.last_error` or `feeds.last_status` (per-item OG failures must not surface as feed-level errors)",
+        "Existing feed-related tests in the repo still pass; add a smoke test (in `test/feed-parser.ts` or a new test) that with a mocked `fetchOgImage` returning a URL, the resulting item row has the expected `thumbnail_url`",
+        "`npm run typecheck` and `npm run lint` pass",
+        "Tests pass"
+      ],
+      "priority": 120,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-121",
+      "title": "Surface thumbnail_url through items API and sync paths",
+      "description": "As a developer, I need the server-to-client items payload and bidirectional sync to include thumbnail_url so the client can render it.",
+      "acceptanceCriteria": [
+        "Add `items.thumbnail_url` to the `ITEM_SYNC_COLUMNS` constant in `src/server/durable-objects/index.ts` (after `items.pub_date`)",
+        "Audit every other `SELECT ... FROM items` in `src/server/durable-objects/index.ts` (getItems, item-by-route, push/pull sync, etc.) and add `thumbnail_url` to the column list",
+        "Client DB adapter writes `thumbnail_url` when persisting synced rows locally (mirror whatever pattern handles the other nullable string columns)",
+        "Existing tests in `test/sync.ts`, `test/db-adapter.ts`, `test/local-adapter.ts`, `test/api-router.ts`, `test/pull-sync.ts`, and `test/push-sync.ts` still pass",
+        "Add at least one assertion (in `test/sync.ts` or `test/db-adapter.ts`) that `thumbnail_url` round-trips: a server row with a non-null thumbnail_url ends up with the same value on the client",
+        "`npm run typecheck` passes",
+        "Tests pass"
+      ],
+      "priority": 121,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-122",
+      "title": "Render thumbnail at the left of each item row when available",
+      "description": "As a user, I want to see a small image at the left of each post row when the post has one, so I can recognize articles at a glance.",
+      "acceptanceCriteria": [
+        "In `src/client/components/item-row.ts`, render an `<img class=\"item-thumbnail\">` before `.item-main` inside the existing `<a class=\"item-link\">` when `item.thumbnail_url` is non-null and non-empty",
+        "Image attributes: `loading=\"lazy\"`, `decoding=\"async\"`, `referrerpolicy=\"no-referrer\"`, `alt=\"\"` (decorative -- title carries the accessible label)",
+        "`onError` handler hides the element (e.g. sets a local signal that conditionally renders the img), so a dead URL does not leave a broken-image icon in the row",
+        "In `src/client/components/item-row.css`, style `.item-thumbnail` as a fixed 80x80 box with `object-fit: cover`, using nested selectors inside `.item-row { ... }` per the project style guide -- no new top-level class blocks",
+        "Border-radius and any colors must reference variables from `_variables.css`; do not introduce new hardcoded colors or font sizes below 1rem",
+        "Rows where `item.thumbnail_url` is null render byte-for-byte the same DOM and CSS as before this feature: no placeholder, no reserved column, no shifted text",
+        "All TypeScript follows project conventions: no space between `:` and type annotation, lines under 80 columns, ternaries split across lines per CLAUDE.md style",
+        "`npm run typecheck`, `npm run lint`, and `npm run stylelint` pass",
+        "Verify in browser using dev-browser skill: subscribe to a feed known to expose og:image (any typical blog), let it ingest, confirm thumbnails render at 80x80 on the left and that rows without thumbnails are visually unchanged from before"
+      ],
+      "priority": 122,
+      "passes": false,
+      "notes": ""
     }
   ]
 }
