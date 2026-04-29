@@ -1,3 +1,9 @@
+## Codebase Patterns
+
+- Server-side URL fetch helpers in `src/server/feed-fetch.ts` should share
+  `fetchValidatedResponse` so URL validation, DNS pre-resolution, manual
+  redirect handling, timeout, and blocked-host checks stay consistent.
+
 ## 2026-04-27 21:47 PDT - US-113
 Thread: https://ampcode.com/threads/unknown
 - What was implemented: Added re-entrant online sync coverage.
@@ -3057,4 +3063,28 @@ Thread: https://ampcode.com/threads/unknown
   - Node's `Request` constructor requires `duplex: 'half'` when forwarding a
     streaming body; keep proxy tests aligned with stripped DO paths while
     looking up fixture statuses by API route.
+---
+## 2026-04-28 18:21 PDT - US-119
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added an SSRF-safe Open Graph image fetch helper.
+  - Added `fetchOgImage` in `src/server/feed-fetch.ts`.
+  - Factored shared fetch handling so feed and OG fetches both use the same
+    URL validation, DNS checks, manual redirect cap, timeout, and response
+    status handling.
+  - Added bounded head reading up to `</head>` or 256 KiB and meta scanning
+    for `og:image`, `og:image:secure_url`, `og:image:url`, and
+    `twitter:image`.
+  - Added focused tests for successful extraction, fallback ordering,
+    redirects, redirect cap, blocked hosts, non-HTML responses, no metadata,
+    and mixed-content image rejection.
+- Files changed:
+  - `src/server/feed-fetch.ts`
+  - `test/feed-fetch-security.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Server article-image fetches should return `null` on fetch, validation,
+    parse, or content-type failures so feed ingestion can keep going.
+  - OG image extraction intentionally rejects `http:` image URLs, even when
+    found on valid pages, to avoid mixed-content blocking in the client.
 ---

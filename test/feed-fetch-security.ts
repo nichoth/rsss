@@ -1,5 +1,6 @@
 import { test } from '@substrate-system/tapzero'
 import {
+    fetchOgImage,
     fetchFeedText,
     validateFeedUrl
 } from '../src/server/feed-fetch.js'
@@ -16,6 +17,18 @@ function responseFromChunks (chunks:string[]):Response {
     })
 
     return new Response(stream, { status: 200 })
+}
+
+function htmlResponse (html:string, init:ResponseInit = {}):Response {
+    const headers = new Headers(init.headers)
+    if (!headers.has('content-type')) {
+        headers.set('content-type', 'text/html; charset=utf-8')
+    }
+
+    return new Response(html, {
+        ...init,
+        headers
+    })
 }
 
 test('validateFeedUrl accepts http and https URLs', async t => {
@@ -178,4 +191,128 @@ test('fetchFeedText rejects responses without a stream', async t => {
         const err = _err as Error
         t.equal(err.message, 'Feed response has no readable body')
     }
+})
+
+test('fetchOgImage extracts og:image from an article head', async t => {
+    const image = await fetchOgImage('https://example.com/post', {
+        fetchFn: async () => htmlResponse(
+            '<html><head><meta property="og:image" ' +
+            'content="/img/card.jpg"></head><body>ignored</body></html>'
+        ),
+        resolveHostname: async () => ['93.184.216.34']
+    })
+
+    t.equal(image, 'https://example.com/img/card.jpg')
+})
+
+test('fetchOgImage falls back through secure_url and twitter image',
+    async t => {
+        const secure = await fetchOgImage('https://example.com/post', {
+            fetchFn: async () => htmlResponse(
+                '<head><meta property="og:image:secure_url" ' +
+                'content="https://cdn.example.com/secure.jpg"></head>'
+            ),
+            resolveHostname: async () => ['93.184.216.34']
+        })
+        const twitter = await fetchOgImage('https://example.com/post', {
+            fetchFn: async () => htmlResponse(
+                '<head><meta name="twitter:image" ' +
+                'content="https://cdn.example.com/twitter.jpg"></head>'
+            ),
+            resolveHostname: async () => ['93.184.216.34']
+        })
+
+        t.equal(secure, 'https://cdn.example.com/secure.jpg')
+        t.equal(twitter, 'https://cdn.example.com/twitter.jpg')
+    }
+)
+
+test('fetchOgImage returns null when no image metadata exists', async t => {
+    const image = await fetchOgImage('https://example.com/post', {
+        fetchFn: async () => htmlResponse('<head><title>Post</title></head>'),
+        resolveHostname: async () => ['93.184.216.34']
+    })
+
+    t.equal(image, null)
+})
+
+test('fetchOgImage follows safe redirects manually', async t => {
+    const fetched:string[] = []
+
+    const image = await fetchOgImage('https://example.com/post', {
+        fetchFn: async (url, init) => {
+            fetched.push(`${url} ${init?.redirect || 'follow'}`)
+
+            if (url.toString() === 'https://example.com/post') {
+                return new Response(null, {
+                    status: 302,
+                    headers: { location: '/canonical' }
+                })
+            }
+
+            return htmlResponse(
+                '<head><meta property="og:image" ' +
+                'content="https://example.com/card.jpg"></head>'
+            )
+        },
+        resolveHostname: async () => ['93.184.216.34']
+    })
+
+    t.equal(image, 'https://example.com/card.jpg')
+    t.deepEqual(fetched, [
+        'https://example.com/post manual',
+        'https://example.com/canonical manual'
+    ])
+})
+
+test('fetchOgImage returns null after too many redirects', async t => {
+    let calls = 0
+
+    const image = await fetchOgImage('https://example.com/post', {
+        fetchFn: async () => {
+            calls++
+            return new Response(null, {
+                status: 302,
+                headers: { location: '/loop' }
+            })
+        },
+        resolveHostname: async () => ['93.184.216.34']
+    })
+
+    t.equal(image, null)
+    t.equal(calls, 4)
+})
+
+test('fetchOgImage returns null for blocked hosts', async t => {
+    const image = await fetchOgImage('http://127.0.0.1/post', {
+        fetchFn: async () => {
+            t.fail('blocked host should not be fetched')
+            return htmlResponse('')
+        }
+    })
+
+    t.equal(image, null)
+})
+
+test('fetchOgImage returns null for non-html responses', async t => {
+    const image = await fetchOgImage('https://example.com/post', {
+        fetchFn: async () => new Response('{"image":"x"}', {
+            headers: { 'content-type': 'application/json' }
+        }),
+        resolveHostname: async () => ['93.184.216.34']
+    })
+
+    t.equal(image, null)
+})
+
+test('fetchOgImage drops http image results', async t => {
+    const image = await fetchOgImage('https://example.com/post', {
+        fetchFn: async () => htmlResponse(
+            '<head><meta property="og:image" ' +
+            'content="http://cdn.example.com/card.jpg"></head>'
+        ),
+        resolveHostname: async () => ['93.184.216.34']
+    })
+
+    t.equal(image, null)
 })

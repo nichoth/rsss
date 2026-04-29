@@ -1,4 +1,5 @@
 const MAX_FEED_BYTES = 5 * 1024 * 1024
+const MAX_HEAD_BYTES = 256 * 1024
 const FEED_FETCH_TIMEOUT_MS = 15_000
 const MAX_FEED_REDIRECTS = 3
 const DNS_JSON_URL = 'https://cloudflare-dns.com/dns-query'
@@ -16,6 +17,12 @@ export class FeedFetchError extends Error {
 }
 
 export interface FetchFeedTextOptions {
+    fetchFn?:typeof fetch
+    maxBytes?:number
+    resolveHostname?:ResolveHostname
+}
+
+export interface FetchOgImageOptions {
     fetchFn?:typeof fetch
     maxBytes?:number
     resolveHostname?:ResolveHostname
@@ -49,9 +56,43 @@ export async function fetchFeedText (
     feedUrl:string,
     options:FetchFeedTextOptions = {}
 ):Promise<string> {
-    let url = await validateFeedUrl(feedUrl)
+    const result = await fetchValidatedResponse(feedUrl, options)
+
+    return readBoundedText(result.response, options.maxBytes || MAX_FEED_BYTES)
+}
+
+export async function fetchOgImage (
+    articleUrl:string,
+    options:FetchOgImageOptions = {}
+):Promise<string|null> {
+    try {
+        const result = await fetchValidatedResponse(articleUrl, options)
+        const contentType = result.response.headers.get('content-type') || ''
+
+        if (!isHtmlContentType(contentType)) return null
+
+        const head = await readHeadText(
+            result.response,
+            options.maxBytes || MAX_HEAD_BYTES
+        )
+        const candidate = findMetaImage(head)
+        if (!candidate) return null
+
+        const imageUrl = new URL(candidate, result.url)
+        if (imageUrl.protocol !== 'https:') return null
+
+        return imageUrl.toString()
+    } catch {
+        return null
+    }
+}
+
+async function fetchValidatedResponse (
+    inputUrl:string,
+    options:FetchFeedTextOptions
+):Promise<{ response:Response; url:string }> {
+    let url = await validateFeedUrl(inputUrl)
     const fetchFn = options.fetchFn || fetch
-    const maxBytes = options.maxBytes || MAX_FEED_BYTES
     const resolveHostname = options.resolveHostname ||
         (options.fetchFn ? undefined : resolveHostnameWithDoh)
 
@@ -93,7 +134,7 @@ export async function fetchFeedText (
             )
         }
 
-        return readBoundedText(response, maxBytes)
+        return { response, url }
     }
 }
 
@@ -339,4 +380,104 @@ async function readBoundedText (
     }
 
     return text + decoder.decode()
+}
+
+async function readHeadText (
+    response:Response,
+    maxBytes:number
+):Promise<string> {
+    if (!response.body) {
+        throw new FeedFetchError(
+            'Feed response has no readable body',
+            502
+        )
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let total = 0
+    let text = ''
+
+    try {
+        while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            if (!value) continue
+
+            total += value.byteLength
+            if (total > maxBytes) {
+                await reader.cancel()
+                break
+            }
+
+            text += decoder.decode(value, { stream: true })
+            const headEnd = text.search(/<\/head\s*>/i)
+            if (headEnd !== -1) {
+                await reader.cancel()
+                text = text.slice(0, headEnd)
+                break
+            }
+        }
+    } finally {
+        reader.releaseLock()
+    }
+
+    return text + decoder.decode()
+}
+
+function isHtmlContentType (contentType:string):boolean {
+    const type = contentType.split(';', 1)[0]?.trim().toLowerCase()
+
+    return type === 'text/html' ||
+        type === 'application/xhtml+xml'
+}
+
+function findMetaImage (html:string):string|null {
+    const keys = [
+        { attr: 'property', value: 'og:image' },
+        { attr: 'property', value: 'og:image:secure_url' },
+        { attr: 'property', value: 'og:image:url' },
+        { attr: 'name', value: 'twitter:image' }
+    ]
+
+    for (const key of keys) {
+        const value = findMetaContent(html, key.attr, key.value)
+        if (value) return value
+    }
+
+    return null
+}
+
+function findMetaContent (
+    html:string,
+    keyAttr:string,
+    keyValue:string
+):string|null {
+    const metaTags = html.match(/<meta\b[^>]*>/gi) || []
+
+    for (const tag of metaTags) {
+        const attrs = readTagAttributes(tag)
+        if (attrs.get(keyAttr)?.toLowerCase() !== keyValue) continue
+
+        const content = attrs.get('content')?.trim()
+        if (content) return content
+    }
+
+    return null
+}
+
+function readTagAttributes (tag:string):Map<string, string> {
+    const attrs = new Map<string, string>()
+    const attrPattern = /([^\s"'=<>`]+)\s*=\s*("[^"]*"|'[^']*'|[^\s"'=<>`]+)/g
+    let match:RegExpExecArray|null
+
+    while ((match = attrPattern.exec(tag))) {
+        const name = match[1]?.toLowerCase()
+        const rawValue = match[2]
+        if (!name || !rawValue) continue
+
+        attrs.set(name, rawValue.replace(/^['"]|['"]$/g, ''))
+    }
+
+    return attrs
 }
