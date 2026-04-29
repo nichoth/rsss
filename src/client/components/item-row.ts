@@ -1,5 +1,5 @@
 import { type FunctionComponent } from 'preact'
-import { useCallback } from 'preact/hooks'
+import { useCallback, useEffect, useState } from 'preact/hooks'
 import { html } from 'htm/preact'
 import { decodeEntities, formatDate, stripHtml } from '../util.js'
 import { MailOpened } from './mail-opened.js'
@@ -22,6 +22,15 @@ export const ItemRow:FunctionComponent<{
 }> = function ItemRow ({ item, state }) {
     const isUnread = !item.is_read
     const isStarred = !!item.is_starred
+    const [hiddenThumbnail, setHiddenThumbnail] = useState(false)
+    const thumbnailUrl = item.thumbnail_url?.trim()
+    const showThumbnail = Boolean(
+        thumbnailUrl && !hiddenThumbnail
+    )
+
+    useEffect(() => {
+        setHiddenThumbnail(false)
+    }, [thumbnailUrl])
 
     const toggleRead = useCallback((ev:MouseEvent) => {
         ev.preventDefault()
@@ -39,10 +48,30 @@ export const ItemRow:FunctionComponent<{
         )
     }, [])
 
+    const handleThumbnailError = useCallback(() => {
+        setHiddenThumbnail(true)
+    }, [])
+
     const route = itemToRoute(item)
     return html`
         <div class="item-row ${isUnread ? 'unread' : ''}">
-            <a class="item-link" href=${route}>
+            <a
+                class="item-link ${showThumbnail ?
+                    'with-thumbnail' :
+                    ''}"
+                href=${route}
+            >
+                ${showThumbnail && html`
+                    <img
+                        class="item-thumbnail"
+                        src=${thumbnailUrl}
+                        loading="lazy"
+                        decoding="async"
+                        referrerpolicy="no-referrer"
+                        alt=""
+                        onError=${handleThumbnailError}
+                    />
+                `}
                 <div class="item-main">
                     <h3 class="item-title">
                         ${item.title ?

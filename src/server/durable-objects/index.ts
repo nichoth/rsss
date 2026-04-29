@@ -16,6 +16,7 @@ import {
 import {
     FeedFetchError,
     fetchFeedText,
+    fetchOgImage,
     validateFeedUrl
 } from '../feed-fetch.js'
 
@@ -55,6 +56,7 @@ interface ParsedFeedItem {
     content:string | null
     author:string | null
     pubDate:string | null
+    imageUrl:string | null
 }
 
 interface ParsedFeed {
@@ -65,6 +67,12 @@ interface ParsedFeed {
     items:ParsedFeedItem[]
 }
 
+interface NewFeedItem {
+    id:number
+    link:string | null
+    imageUrl:string | null
+}
+
 const FEED_XML_PARSER = new XMLParser({
     attributeNamePrefix: '@_',
     cdataPropName: '#cdata',
@@ -73,13 +81,15 @@ const FEED_XML_PARSER = new XMLParser({
     trimValues: true
 })
 const FEED_REFRESH_CONCURRENCY = 8
+const OG_IMAGE_FETCH_CONCURRENCY = 4
+const OG_IMAGE_FETCH_BUDGET_MS = 10_000
 const FEED_REFRESH_INTERVAL_MS = 10 * 60 * 1000
 const MANUAL_REFRESH_LIMIT_MS = 60 * 1000
 const MANUAL_REFRESH_STORAGE_PREFIX = 'manual_refresh:'
 const ALARM_REFRESH_CURSOR_KEY = 'alarm_refresh_cursor'
 const PENDING_DELETION_KEY = 'pending_deletion'
 const MIGRATION_STATE_KEY = 'schema_migration'
-const USER_DO_MIGRATION_VERSION = 2
+const USER_DO_MIGRATION_VERSION = 3
 const SYNC_PAGE_LIMIT = 500
 const MAX_PARSED_FEED_ITEMS = 1000
 const MAX_FEED_TITLE_LENGTH = 8 * 1024
@@ -91,10 +101,14 @@ const FEED_SYNC_COLUMNS = `
     id, url, title, description, site_url, last_fetched, last_error,
     last_status, created_at, updated_at
 `
-const ITEM_SYNC_COLUMNS = `
+const ITEM_COLUMNS = `
     items.id, items.feed_id, items.guid, items.title, items.link,
     items.description, items.content, items.author, items.pub_date,
-    items.is_read, items.is_starred, items.created_at, items.updated_at,
+    items.thumbnail_url, items.is_read, items.is_starred, items.created_at,
+    items.updated_at
+`
+const ITEM_SYNC_COLUMNS = `
+    ${ITEM_COLUMNS},
     feeds.title AS feed_title
 `
 
@@ -322,6 +336,7 @@ export class UserDO extends DurableObject<Env> {
         if (migrationState?.migration_v !== USER_DO_MIGRATION_VERSION) {
             this.migrateAddUpdatedAt()
             this.migrateAddFeedFailureColumns()
+            this.migrateAddItemThumbnail()
             await this.ctx.storage.put(MIGRATION_STATE_KEY, {
                 migration_v: USER_DO_MIGRATION_VERSION
             })
@@ -376,6 +391,17 @@ export class UserDO extends DurableObject<Env> {
         }
         if (!hasLastStatus) {
             this.sql.exec('ALTER TABLE feeds ADD COLUMN last_status INTEGER')
+        }
+    }
+
+    private migrateAddItemThumbnail () {
+        const columns = this.sql.exec('PRAGMA table_info(items)').toArray()
+        const hasThumbnailUrl = columns.some((col: unknown) =>
+            (col as { name:string }).name === 'thumbnail_url'
+        )
+
+        if (!hasThumbnailUrl) {
+            this.sql.exec('ALTER TABLE items ADD COLUMN thumbnail_url TEXT')
         }
     }
 
@@ -634,7 +660,7 @@ export class UserDO extends DurableObject<Env> {
             const limit = parseInt(c.req.query('limit') || '50', 10)
             const offset = parseInt(c.req.query('offset') || '0', 10)
 
-            let query = 'SELECT items.*, feeds.title as feed_title ' +
+            let query = `SELECT ${ITEM_SYNC_COLUMNS} ` +
                 'FROM items JOIN feeds ON items.feed_id = feeds.id WHERE 1=1'
             const params: (string | number)[] = []
 
@@ -708,7 +734,7 @@ export class UserDO extends DurableObject<Env> {
                 .join(' OR ')
 
             const item = this.sql.exec(
-                `SELECT items.*, feeds.title as feed_title
+                `SELECT ${ITEM_SYNC_COLUMNS}
                  FROM items
                  JOIN feeds ON items.feed_id = feeds.id
                  WHERE items.link IS NOT NULL
@@ -750,7 +776,7 @@ export class UserDO extends DurableObject<Env> {
             )
 
             const item = this.sql.exec(
-                'SELECT * FROM items WHERE id = ?', id
+                `SELECT ${ITEM_COLUMNS} FROM items WHERE id = ?`, id
             ).one() as Record<string, unknown> | null
             if (!item) {
                 return c.json({ error: 'Item not found' }, 404)
@@ -781,7 +807,7 @@ export class UserDO extends DurableObject<Env> {
             }
 
             const updated = this.sql.exec(
-                'SELECT * FROM items WHERE id = ?', id
+                `SELECT ${ITEM_COLUMNS} FROM items WHERE id = ?`, id
             ).one()
             return c.json({ item: updated })
         })
@@ -804,14 +830,16 @@ export class UserDO extends DurableObject<Env> {
                 let newerItems:unknown[]
                 if (body.feed_id !== undefined) {
                     newerItems = this.sql.exec(
-                        'SELECT * FROM items WHERE feed_id = ?' +
+                        `SELECT ${ITEM_COLUMNS} FROM items ` +
+                        'WHERE feed_id = ?' +
                         ' AND updated_at > ?',
                         body.feed_id,
                         clientUpdatedAt
                     ).toArray()
                 } else {
                     newerItems = this.sql.exec(
-                        'SELECT * FROM items WHERE updated_at > ?',
+                        `SELECT ${ITEM_COLUMNS} FROM items ` +
+                        'WHERE updated_at > ?',
                         clientUpdatedAt
                     ).toArray()
                 }
@@ -974,6 +1002,7 @@ export class UserDO extends DurableObject<Env> {
      * Send an SSE event to all connected subscribers for this user.
      */
     private broadcast (event:string, data:unknown):void {
+        if (!this.subscribers) return
         if (this.subscribers.size === 0) return
 
         const payload = `event: ${event}\n` +
@@ -1059,14 +1088,18 @@ export class UserDO extends DurableObject<Env> {
             }
 
             // Insert new items
+            const newItems:NewFeedItem[] = []
             for (const item of parsedFeed.items) {
                 const guid = item.guid || item.link || item.title || ''
                 if (!guid) continue
 
                 try {
-                    this.sql.exec(
+                    const result = this.sql.exec(
                         `INSERT OR IGNORE INTO items
-                            (feed_id, guid, title, link, description, content, author, pub_date)
+                            (
+                                feed_id, guid, title, link, description,
+                                content, author, pub_date
+                            )
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
                         feed.id,
                         guid,
@@ -1077,6 +1110,23 @@ export class UserDO extends DurableObject<Env> {
                         item.author,
                         item.pubDate
                     )
+
+                    if (this.rowsWritten(result) > 0) {
+                        const row = this.sql.exec(
+                            `SELECT id FROM items
+                            WHERE feed_id = ? AND guid = ?`,
+                            feed.id,
+                            guid
+                        ).one() as { id:number } | null
+
+                        if (row) {
+                            newItems.push({
+                                id: row.id,
+                                link: item.link,
+                                imageUrl: item.imageUrl
+                            })
+                        }
+                    }
                 } catch (err) {
                     if (isDuplicateInsertError(err)) continue
 
@@ -1098,6 +1148,8 @@ export class UserDO extends DurableObject<Env> {
                     return
                 }
             }
+
+            await this.updateNewItemThumbnails(newItems)
 
             if (parsedFeed.isTooLarge) {
                 this.sql.exec(
@@ -1123,6 +1175,132 @@ export class UserDO extends DurableObject<Env> {
             )
         } finally {
             this.broadcast('feed-updated', { feedId: feed.id })
+        }
+    }
+
+    private rowsWritten (result:unknown):number {
+        if (!result || typeof result !== 'object') return 0
+
+        const rowsWritten = (result as { rowsWritten?:unknown }).rowsWritten
+
+        return typeof rowsWritten === 'number' ? rowsWritten : 0
+    }
+
+    private async updateNewItemThumbnails (
+        items:NewFeedItem[]
+    ):Promise<void> {
+        if (items.length === 0) return
+
+        let nextItemIndex = 0
+        const controller = new AbortController()
+        const deadline = Date.now() + OG_IMAGE_FETCH_BUDGET_MS
+        const timeout = setTimeout(() => {
+            controller.abort()
+        }, OG_IMAGE_FETCH_BUDGET_MS)
+        const workerCount = Math.min(
+            OG_IMAGE_FETCH_CONCURRENCY,
+            items.length
+        )
+        const workers = Array.from({ length: workerCount }, async () => {
+            while (Date.now() < deadline) {
+                const item = items[nextItemIndex]
+                nextItemIndex++
+                if (!item) return
+
+                await this.updateNewItemThumbnail(
+                    item,
+                    deadline,
+                    controller.signal
+                )
+            }
+        })
+        const results = await Promise.allSettled(workers)
+
+        clearTimeout(timeout)
+
+        for (const result of results) {
+            if (result.status === 'rejected') {
+                console.error('Error updating item thumbnail:', result.reason)
+            }
+        }
+    }
+
+    private async updateNewItemThumbnail (
+        item:NewFeedItem,
+        deadline:number,
+        signal:AbortSignal
+    ):Promise<void> {
+        try {
+            const thumbnailUrl = await this.resolveNewItemThumbnail(
+                item,
+                deadline,
+                signal
+            )
+            if (!thumbnailUrl) return
+
+            this.sql.exec(
+                `UPDATE items SET thumbnail_url = ?
+                WHERE id = ? AND thumbnail_url IS NULL`,
+                thumbnailUrl,
+                item.id
+            )
+        } catch (err) {
+            console.error('Error updating item thumbnail:', err)
+        }
+    }
+
+    private async resolveNewItemThumbnail (
+        item:NewFeedItem,
+        deadline:number,
+        signal:AbortSignal
+    ):Promise<string | null> {
+        if (!item.link) return item.imageUrl
+
+        const ogImage = await this.fetchOgImageBeforeDeadline(
+            item.link,
+            deadline,
+            signal
+        )
+
+        return ogImage || item.imageUrl
+    }
+
+    private async fetchOgImageBeforeDeadline (
+        link:string,
+        deadline:number,
+        signal:AbortSignal
+    ):Promise<string | null> {
+        const remainingMs = deadline - Date.now()
+        if (remainingMs <= 0) return null
+
+        let timeout:ReturnType<typeof setTimeout>|null = null
+        const timedOut = Symbol('og-timeout')
+        const timeoutPromise = new Promise<typeof timedOut>((resolve) => {
+            timeout = setTimeout(() => {
+                resolve(timedOut)
+            }, remainingMs)
+        })
+
+        try {
+            const result = await Promise.race([
+                fetchOgImage(link, {
+                    signal,
+                    onError: (err) => {
+                        console.error(
+                            `Error fetching og image for ${link}:`,
+                            err
+                        )
+                    }
+                }),
+                timeoutPromise
+            ])
+
+            return result === timedOut ? null : result
+        } catch (err) {
+            console.error(`Error fetching og image for ${link}:`, err)
+            return null
+        } finally {
+            if (timeout) clearTimeout(timeout)
         }
     }
 
@@ -1177,15 +1355,16 @@ export class UserDO extends DurableObject<Env> {
             const item = this.asObject(itemNode)
             if (!item) continue
 
+            const itemLink = this.getText(item, ['link'])
             items.push({
                 guid: this.getText(item, ['guid', 'id']) ||
-                    this.getText(item, ['link']),
+                    itemLink,
                 title: this.capText(
                     this.getText(item, ['title', 'media:title']),
                     MAX_FEED_TITLE_LENGTH,
                     markTooLarge
                 ),
-                link: this.getText(item, ['link']),
+                link: itemLink,
                 description: this.capText(
                     this.getText(item, ['description']),
                     MAX_FEED_DESCRIPTION_LENGTH,
@@ -1205,7 +1384,12 @@ export class UserDO extends DurableObject<Env> {
                     'dc:creator',
                     'creator'
                 ]),
-                pubDate: this.parseDate(this.getText(item, ['pubDate']))
+                pubDate: this.parseDate(this.getText(item, ['pubDate'])),
+                imageUrl: this.resolveImageUrl(
+                    this.getRssItemImage(item),
+                    itemLink,
+                    link
+                )
             })
         }
 
@@ -1241,6 +1425,7 @@ export class UserDO extends DurableObject<Env> {
             if (!entry) continue
 
             const author = this.asObject(this.getChild(entry, ['author']))
+            const entryLink = this.getLinkHref(this.getChild(entry, ['link']))
 
             items.push({
                 guid: this.getText(entry, ['id']),
@@ -1249,7 +1434,7 @@ export class UserDO extends DurableObject<Env> {
                     MAX_FEED_TITLE_LENGTH,
                     markTooLarge
                 ),
-                link: this.getLinkHref(this.getChild(entry, ['link'])),
+                link: entryLink,
                 description: this.capText(
                     this.getText(entry, ['summary']),
                     MAX_FEED_DESCRIPTION_LENGTH,
@@ -1264,11 +1449,132 @@ export class UserDO extends DurableObject<Env> {
                 pubDate: this.parseDate(
                     this.getText(entry, ['published']) ||
                     this.getText(entry, ['updated'])
+                ),
+                imageUrl: this.resolveImageUrl(
+                    this.getAtomEntryImage(entry),
+                    entryLink,
+                    link
                 )
             })
         }
 
         return { title, description, link, isTooLarge, items }
+    }
+
+    private extractFirstImgSrc (html:string | null):string | null {
+        if (!html) return null
+
+        const match = html.match(/<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/i)
+        return match?.[1]?.trim() || null
+    }
+
+    private resolveImageUrl (
+        candidate:string | null,
+        itemLink:string | null,
+        feedLink:string | null
+    ):string | null {
+        if (!candidate) return null
+
+        const base = itemLink || feedLink
+
+        try {
+            const url = base ? new URL(candidate, base) : new URL(candidate)
+
+            if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+                return null
+            }
+
+            return url.href
+        } catch {
+            return null
+        }
+    }
+
+    private getRssItemImage (item:XmlObject):string | null {
+        const thumbnail = this.firstAttr(
+            this.getChild(item, ['media:thumbnail']),
+            '@_url'
+        )
+        if (thumbnail) return thumbnail
+
+        const mediaContent = this.firstMediaImageAttr(
+            this.getChild(item, ['media:content']),
+            '@_url'
+        )
+        if (mediaContent) return mediaContent
+
+        const enclosure = this.firstMediaImageAttr(
+            this.getChild(item, ['enclosure']),
+            '@_url'
+        )
+        if (enclosure) return enclosure
+
+        return this.extractFirstImgSrc(this.getText(item, [
+            'content:encoded',
+            'encoded',
+            'content',
+            'description'
+        ]))
+    }
+
+    private getAtomEntryImage (entry:XmlObject):string | null {
+        const thumbnail = this.firstAttr(
+            this.getChild(entry, ['media:thumbnail']),
+            '@_url'
+        )
+        if (thumbnail) return thumbnail
+
+        for (const linkValue of this.asArray(this.getChild(entry, ['link']))) {
+            const link = this.asObject(linkValue)
+            if (!link) continue
+
+            const rel = this.textValue(link['@_rel'])
+            const type = this.textValue(link['@_type'])
+            const href = this.textValue(link['@_href'])
+            if (rel === 'enclosure' && this.isImageType(type) && href) {
+                return href
+            }
+        }
+
+        return this.extractFirstImgSrc(this.getText(entry, [
+            'content',
+            'summary'
+        ]))
+    }
+
+    private firstAttr (
+        value:XmlValue | undefined,
+        attrName:string
+    ):string | null {
+        for (const candidate of this.asArray(value)) {
+            const node = this.asObject(candidate)
+            const attr = node ? this.textValue(node[attrName]) : null
+            if (attr) return attr
+        }
+
+        return null
+    }
+
+    private firstMediaImageAttr (
+        value:XmlValue | undefined,
+        attrName:string
+    ):string | null {
+        for (const candidate of this.asArray(value)) {
+            const node = this.asObject(candidate)
+            if (!node) continue
+
+            const medium = this.textValue(node['@_medium'])
+            const type = this.textValue(node['@_type'])
+            const attr = this.textValue(node[attrName])
+            const isImage = medium === 'image' || this.isImageType(type)
+            if (isImage && attr) return attr
+        }
+
+        return null
+    }
+
+    private isImageType (value:string | null):boolean {
+        return value?.toLowerCase().startsWith('image/') ?? false
     }
 
     private capText (

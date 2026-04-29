@@ -14,6 +14,7 @@ interface ParsedFeed {
         content:string|null
         author:string|null
         pubDate:string|null
+        imageUrl:string|null
     }>
 }
 
@@ -23,6 +24,10 @@ function parseFeed (xml:string):ParsedFeed {
     }
 
     return parser.parseFeed(xml)
+}
+
+function nextTask ():Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, 0))
 }
 
 function itemXml (index:number, content = 'body'):string {
@@ -78,6 +83,127 @@ test('parseFeed reads RSS namespaced item fields', t => {
     t.equal(feed.items[0]?.title, 'Namespaced title', 'media:title is parsed')
     t.equal(feed.items[0]?.author, 'Jane Author', 'dc:creator is parsed')
     t.equal(feed.items[0]?.content, '<p>Full text</p>', 'content is parsed')
+})
+
+test('parseFeed extracts RSS media and enclosure image hints', t => {
+    const feed = parseFeed(`
+        <rss version="2.0"
+            xmlns:media="http://search.yahoo.com/mrss/">
+            <channel>
+                <title>Example RSS</title>
+                <link>https://example.com/feed/</link>
+                <item>
+                    <guid>item-1</guid>
+                    <link>https://example.com/posts/1</link>
+                    <media:thumbnail url="/thumb.jpg" />
+                </item>
+                <item>
+                    <guid>item-2</guid>
+                    <link>https://example.com/posts/2</link>
+                    <media:content
+                        medium="image"
+                        url="https://cdn.example.com/media.jpg" />
+                </item>
+                <item>
+                    <guid>item-3</guid>
+                    <link>https://example.com/posts/3</link>
+                    <enclosure
+                        type="image/png"
+                        url="https://cdn.example.com/enclosure.png" />
+                </item>
+                <item>
+                    <guid>item-4</guid>
+                    <link>https://example.com/posts/4</link>
+                    <enclosure
+                        type="audio/mpeg"
+                        url="https://cdn.example.com/audio.mp3" />
+                    <description><![CDATA[
+                        <p><img alt="" src="../inline.webp"></p>
+                    ]]></description>
+                </item>
+            </channel>
+        </rss>
+    `)
+
+    t.equal(
+        feed.items[0]?.imageUrl,
+        'https://example.com/thumb.jpg',
+        'RSS media:thumbnail is resolved against item link'
+    )
+    t.equal(
+        feed.items[1]?.imageUrl,
+        'https://cdn.example.com/media.jpg',
+        'RSS media:content image is extracted'
+    )
+    t.equal(
+        feed.items[2]?.imageUrl,
+        'https://cdn.example.com/enclosure.png',
+        'RSS image enclosure is extracted'
+    )
+    t.equal(
+        feed.items[3]?.imageUrl,
+        'https://example.com/inline.webp',
+        'RSS non-image enclosure is ignored before img fallback'
+    )
+})
+
+test('parseFeed extracts Atom enclosure and content image hints', t => {
+    const feed = parseFeed(`
+        <feed xmlns="http://www.w3.org/2005/Atom"
+            xmlns:media="http://search.yahoo.com/mrss/">
+            <title>Example Atom</title>
+            <link href="https://example.com/feed/" rel="alternate" />
+            <entry>
+                <id>tag:example.com,2026:1</id>
+                <link href="https://example.com/atom/1" rel="alternate" />
+                <media:thumbnail url="/atom-thumb.jpg" />
+            </entry>
+            <entry>
+                <id>tag:example.com,2026:2</id>
+                <link href="https://example.com/atom/2" rel="alternate" />
+                <link
+                    rel="enclosure"
+                    type="image/jpeg"
+                    href="https://cdn.example.com/atom.jpg" />
+            </entry>
+            <entry>
+                <id>tag:example.com,2026:3</id>
+                <link href="https://example.com/atom/3" rel="alternate" />
+                <content><![CDATA[
+                    <figure><img src="//cdn.example.com/content.png"></figure>
+                ]]></content>
+            </entry>
+            <entry>
+                <id>tag:example.com,2026:4</id>
+                <link href="https://example.com/atom/4" rel="alternate" />
+                <link
+                    rel="enclosure"
+                    type="video/mp4"
+                    href="https://cdn.example.com/video.mp4" />
+            </entry>
+        </feed>
+    `)
+
+    t.equal(
+        feed.items[0]?.imageUrl,
+        'https://example.com/atom-thumb.jpg',
+        'Atom media:thumbnail is resolved'
+    )
+    t.equal(
+        feed.items[1]?.imageUrl,
+        'https://cdn.example.com/atom.jpg',
+        'Atom image enclosure is extracted'
+    )
+    t.equal(
+        feed.items[2]?.imageUrl,
+        'https://cdn.example.com/content.png',
+        'Atom content img is extracted'
+    )
+    t.equal(
+        feed.items[3]?.imageUrl,
+        null,
+        'Atom non-image enclosure is ignored'
+    )
 })
 
 test('parseFeed reads Atom entries with attributes', t => {
@@ -229,6 +355,387 @@ test('fetchFeed records feed too large when parsed rows are truncated',
             'feed row records the truncation warning'
         )
     })
+
+test('fetchFeed stores og image for newly inserted items', async t => {
+    const userDo = Object.create(UserDO.prototype) as {
+        sql:{
+            exec:(query:string, ...params:unknown[]) => {
+                toArray:() => unknown[]
+                one?:() => unknown
+                rowsWritten?:number
+            }
+        }
+        fetchFeed:(feed:{
+            id:number
+            url:string
+            title:string|null
+            description:string|null
+            site_url:string|null
+            last_fetched:string|null
+            last_error:string|null
+            last_status:number|null
+            created_at:string
+            updated_at:string
+        }) => Promise<void>
+    }
+    const originalFetch = globalThis.fetch
+    let articleFetches = 0
+    let thumbnailUpdate:null | {
+        thumbnail:unknown
+        id:unknown
+    } = null
+
+    userDo.sql = {
+        exec (query:string, ...params:unknown[]) {
+            if (query.includes('UPDATE feeds SET') &&
+                query.includes('last_error = NULL')) {
+                return { toArray: () => [] }
+            }
+
+            if (query.includes('INSERT OR IGNORE INTO items')) {
+                return { rowsWritten: 1, toArray: () => [] }
+            }
+
+            if (query.includes('SELECT id FROM items')) {
+                return {
+                    toArray: () => [],
+                    one: () => ({ id: 42 })
+                }
+            }
+
+            if (query.includes('UPDATE items SET thumbnail_url = ?')) {
+                thumbnailUpdate = {
+                    thumbnail: params[0],
+                    id: params[1]
+                }
+                return { toArray: () => [] }
+            }
+
+            throw new Error(`Unexpected SQL: ${query}`)
+        }
+    }
+
+    globalThis.fetch = async (url) => {
+        const urlText = String(url)
+
+        if (urlText.startsWith('https://cloudflare-dns.com/')) {
+            return new Response(JSON.stringify({
+                Answer: [{ data: '93.184.216.34' }]
+            }))
+        }
+
+        if (urlText === 'https://example.com/post/1') {
+            articleFetches++
+            return new Response(
+                '<head><meta property="og:image" ' +
+                    'content="https://cdn.example.com/og.jpg"></head>',
+                { headers: { 'content-type': 'text/html' } }
+            )
+        }
+
+        return new Response(`
+            <rss version="2.0"
+                xmlns:media="http://search.yahoo.com/mrss/">
+                <channel>
+                    <title>Example RSS</title>
+                    <link>https://example.com/</link>
+                    <item>
+                        <guid>item-1</guid>
+                        <title>Item 1</title>
+                        <link>https://example.com/post/1</link>
+                        <media:thumbnail
+                            url="https://cdn.example.com/parser.jpg" />
+                    </item>
+                </channel>
+            </rss>
+        `)
+    }
+
+    try {
+        await userDo.fetchFeed({
+            id: 5,
+            url: 'https://example.com/feed.xml',
+            title: null,
+            description: null,
+            site_url: null,
+            last_fetched: null,
+            last_error: null,
+            last_status: null,
+            created_at: '2026-04-27 00:00:00',
+            updated_at: '2026-04-27 00:00:00'
+        })
+    } finally {
+        globalThis.fetch = originalFetch
+    }
+
+    t.equal(articleFetches, 1, 'article URL is fetched for og:image')
+    t.deepEqual(
+        thumbnailUpdate,
+        {
+            thumbnail: 'https://cdn.example.com/og.jpg',
+            id: 42
+        },
+        'new item thumbnail_url is set from og:image'
+    )
+})
+
+test('fetchFeed caps concurrent og image requests at four', async t => {
+    const userDo = Object.create(UserDO.prototype) as {
+        sql:{
+            exec:(query:string, ...params:unknown[]) => {
+                toArray:() => unknown[]
+                one?:() => unknown
+                rowsWritten?:number
+            }
+        }
+        fetchFeed:(feed:{
+            id:number
+            url:string
+            title:string|null
+            description:string|null
+            site_url:string|null
+            last_fetched:string|null
+            last_error:string|null
+            last_status:number|null
+            created_at:string
+            updated_at:string
+        }) => Promise<void>
+    }
+    const originalFetch = globalThis.fetch
+    let nextItemId = 100
+    let activeArticleFetches = 0
+    let maxActiveArticleFetches = 0
+    let thumbnailUpdates = 0
+
+    userDo.sql = {
+        exec (query:string) {
+            if (query.includes('UPDATE feeds SET') &&
+                query.includes('last_error = NULL')) {
+                return { toArray: () => [] }
+            }
+
+            if (query.includes('INSERT OR IGNORE INTO items')) {
+                return { rowsWritten: 1, toArray: () => [] }
+            }
+
+            if (query.includes('SELECT id FROM items')) {
+                const id = nextItemId++
+
+                return {
+                    toArray: () => [],
+                    one: () => ({ id })
+                }
+            }
+
+            if (query.includes('UPDATE items SET thumbnail_url = ?')) {
+                thumbnailUpdates++
+                return { toArray: () => [] }
+            }
+
+            throw new Error(`Unexpected SQL: ${query}`)
+        }
+    }
+
+    globalThis.fetch = async (url) => {
+        const urlText = String(url)
+
+        if (urlText.startsWith('https://cloudflare-dns.com/')) {
+            return new Response(JSON.stringify({
+                Answer: [{ data: '93.184.216.34' }]
+            }))
+        }
+
+        if (urlText.startsWith('https://example.com/post/')) {
+            activeArticleFetches++
+            maxActiveArticleFetches = Math.max(
+                maxActiveArticleFetches,
+                activeArticleFetches
+            )
+            await nextTask()
+            activeArticleFetches--
+
+            return new Response(
+                '<head><meta property="og:image" ' +
+                    `content="${urlText}/og.jpg"></head>`,
+                { headers: { 'content-type': 'text/html' } }
+            )
+        }
+
+        return new Response(rssFeed(
+            Array.from({ length: 9 }, (_value, index) => `
+                <item>
+                    <guid>item-${index}</guid>
+                    <title>Item ${index}</title>
+                    <link>https://example.com/post/${index}</link>
+                </item>
+            `).join('')
+        ))
+    }
+
+    try {
+        await userDo.fetchFeed({
+            id: 6,
+            url: 'https://example.com/feed.xml',
+            title: null,
+            description: null,
+            site_url: null,
+            last_fetched: null,
+            last_error: null,
+            last_status: null,
+            created_at: '2026-04-27 00:00:00',
+            updated_at: '2026-04-27 00:00:00'
+        })
+    } finally {
+        globalThis.fetch = originalFetch
+    }
+
+    t.equal(
+        maxActiveArticleFetches,
+        4,
+        'at most four og image fetches run at once'
+    )
+    t.equal(thumbnailUpdates, 9, 'all inserted thumbnails are updated')
+})
+
+test('fetchFeed logs og failures without feed-level errors', async t => {
+    const userDo = Object.create(UserDO.prototype) as {
+        sql:{
+            exec:(query:string, ...params:unknown[]) => {
+                toArray:() => unknown[]
+                one?:() => unknown
+                rowsWritten?:number
+            }
+        }
+        fetchFeed:(feed:{
+            id:number
+            url:string
+            title:string|null
+            description:string|null
+            site_url:string|null
+            last_fetched:string|null
+            last_error:string|null
+            last_status:number|null
+            created_at:string
+            updated_at:string
+        }) => Promise<void>
+    }
+    const originalFetch = globalThis.fetch
+    const originalError = console.error
+    let loggedOgFailure = false
+    let feedErrorUpdate:null | {
+        error:unknown
+        status:unknown
+        id:unknown
+    } = null
+    let thumbnailUpdate:null | {
+        thumbnail:unknown
+        id:unknown
+    } = null
+
+    userDo.sql = {
+        exec (query:string, ...params:unknown[]) {
+            if (query.includes('UPDATE feeds SET') &&
+                query.includes('last_error = NULL')) {
+                return { toArray: () => [] }
+            }
+
+            if (query.includes('INSERT OR IGNORE INTO items')) {
+                return { rowsWritten: 1, toArray: () => [] }
+            }
+
+            if (query.includes('SELECT id FROM items')) {
+                return {
+                    toArray: () => [],
+                    one: () => ({ id: 77 })
+                }
+            }
+
+            if (query.includes('UPDATE items SET thumbnail_url = ?')) {
+                thumbnailUpdate = {
+                    thumbnail: params[0],
+                    id: params[1]
+                }
+                return { toArray: () => [] }
+            }
+
+            if (query.includes('last_error = ?') &&
+                query.includes('last_status = ?')) {
+                feedErrorUpdate = {
+                    error: params[0],
+                    status: params[1],
+                    id: params[2]
+                }
+                return { toArray: () => [] }
+            }
+
+            throw new Error(`Unexpected SQL: ${query}`)
+        }
+    }
+
+    console.error = (...args:unknown[]) => {
+        loggedOgFailure = loggedOgFailure ||
+            args.some(arg => String(arg).includes('post/1'))
+    }
+    globalThis.fetch = async (url) => {
+        const urlText = String(url)
+
+        if (urlText.startsWith('https://cloudflare-dns.com/')) {
+            return new Response(JSON.stringify({
+                Answer: [{ data: '93.184.216.34' }]
+            }))
+        }
+
+        if (urlText === 'https://example.com/post/1') {
+            return new Response('server error', { status: 500 })
+        }
+
+        return new Response(`
+            <rss version="2.0"
+                xmlns:media="http://search.yahoo.com/mrss/">
+                <channel>
+                    <title>Example RSS</title>
+                    <link>https://example.com/</link>
+                    <item>
+                        <guid>item-1</guid>
+                        <title>Item 1</title>
+                        <link>https://example.com/post/1</link>
+                        <media:thumbnail
+                            url="https://cdn.example.com/parser.jpg" />
+                    </item>
+                </channel>
+            </rss>
+        `)
+    }
+
+    try {
+        await userDo.fetchFeed({
+            id: 7,
+            url: 'https://example.com/feed.xml',
+            title: null,
+            description: null,
+            site_url: null,
+            last_fetched: null,
+            last_error: null,
+            last_status: null,
+            created_at: '2026-04-27 00:00:00',
+            updated_at: '2026-04-27 00:00:00'
+        })
+    } finally {
+        globalThis.fetch = originalFetch
+        console.error = originalError
+    }
+
+    t.equal(loggedOgFailure, true, 'og fetch failure is logged')
+    t.equal(feedErrorUpdate, null, 'feed error status is not set')
+    t.deepEqual(
+        thumbnailUpdate,
+        {
+            thumbnail: 'https://cdn.example.com/parser.jpg',
+            id: 77
+        },
+        'parser image is used after og failure'
+    )
+})
 
 test('fetchFeed records non-duplicate item insert failures', async t => {
     const userDo = Object.create(UserDO.prototype) as {

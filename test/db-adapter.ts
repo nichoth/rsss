@@ -6,6 +6,7 @@ import type {
     ItemsResponse,
     CountsResponse
 } from '../src/client/db/types.js'
+import { TABLES_SQL } from '../src/shared/schema.js'
 import { linkMatchesItemRoute } from '../src/shared/item-route.js'
 
 /**
@@ -151,6 +152,7 @@ function addMockItem (
         content: null,
         author: null,
         pub_date: now,
+        thumbnail_url: null,
         is_read: 0,
         is_starred: 0,
         created_at: now,
@@ -163,6 +165,30 @@ function addMockItem (
 }
 
 // ============ Feed Operations Tests ============
+
+test('schema - items table includes thumbnail_url after pub_date', t => {
+    const pubDateIndex = TABLES_SQL.indexOf('pub_date TEXT')
+    const thumbnailIndex = TABLES_SQL.indexOf('thumbnail_url TEXT')
+    const isReadIndex = TABLES_SQL.indexOf('is_read INTEGER DEFAULT 0')
+
+    t.ok(thumbnailIndex !== -1, 'items table should include thumbnail_url')
+    t.ok(
+        pubDateIndex < thumbnailIndex && thumbnailIndex < isReadIndex,
+        'thumbnail_url should be between pub_date and is_read'
+    )
+})
+
+test('types - Item includes nullable thumbnail_url', t => {
+    const item = addMockItem(createMockAdapter(), 1, {
+        thumbnail_url: 'https://example.com/thumb.jpg'
+    })
+
+    t.equal(
+        item.thumbnail_url,
+        'https://example.com/thumb.jpg',
+        'item exposes thumbnail_url'
+    )
+})
 
 test('adapter - addFeed creates a new feed', async t => {
     const adapter = createMockAdapter()

@@ -33,6 +33,12 @@
         padding-top: 0;
         width: 80%;
 
+        &.item-link.with-thumbnail {
+            display: flex;
+            align-items: flex-start;
+            gap: 1rem;
+        }
+
         &.icon {
             padding: 0;
             display: flex;
@@ -41,15 +47,22 @@
         }
     }
 
+    & .item-thumbnail {
+        width: 80px;
+        height: 80px;
+        flex: 0 0 80px;
+        object-fit: cover;
+    }
+
     &:hover {
         background: var(--color-bg);
     }
 
     &.unread {
-        background: #fffbeb;
+        background: var(--color-warning-bg);
 
         &:hover {
-            background: #fef3c7;
+            background: var(--color-warning-bg-hover);
         }
     }
 }

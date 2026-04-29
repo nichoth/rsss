@@ -42,6 +42,7 @@ const ITEM = {
     content: '<p>full content</p>',
     author: 'Alice',
     pub_date: '2026-01-01 00:00:00',
+    thumbnail_url: 'https://cdn.example.com/item-10.jpg',
     is_read: 0,
     is_starred: 0,
     created_at: '2026-01-01 00:00:00',
@@ -143,6 +144,33 @@ test('full sync upserts feeds and items', async (t) => {
         )
         t.equal(item?.title, 'An Item', 'item upserted')
         t.equal(item?.content, '<p>full content</p>', 'content stored')
+    } finally {
+        db.close()
+    }
+})
+
+test('full sync stores item thumbnail_url', async (t) => {
+    storeContent.value = true
+    const db = await openLocalDb('did:test:pull-thumbnail')
+    try {
+        const syncData = {
+            feeds: [FEED],
+            items: [ITEM],
+            syncedAt: '2026-01-02 00:00:00',
+            latestUpdatedAt: '2026-01-01 00:00:00',
+            isFullSync: true
+        }
+        await pullSync(db, makeFetch(syncData))
+
+        const item = queryOne<{ thumbnail_url:string|null }>(
+            db,
+            'SELECT thumbnail_url FROM items WHERE id = 10'
+        )
+        t.equal(
+            item?.thumbnail_url,
+            'https://cdn.example.com/item-10.jpg',
+            'thumbnail_url is stored locally'
+        )
     } finally {
         db.close()
     }

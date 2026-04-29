@@ -23,6 +23,7 @@ export interface Item {
     content:string|null
     author:string|null
     pub_date:string|null
+    thumbnail_url:string|null
     is_read:number
     is_starred:number
     created_at:string
