@@ -31,6 +31,7 @@ export const TABLES_SQL = `
         content TEXT,
         author TEXT,
         pub_date TEXT,
+        thumbnail_url TEXT,
         is_read INTEGER DEFAULT 0,
         is_starred INTEGER DEFAULT 0,
         created_at TEXT DEFAULT (datetime('now')),

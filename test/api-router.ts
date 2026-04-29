@@ -83,9 +83,12 @@ function makeDataEnv (
             get: () => ({
                 fetch: async (request:Request) => {
                     const path = new URL(request.url).pathname
+                    const apiPath = `/api${path}`
                     proxied.push(`${request.method} ${path}`)
                     return new Response(null, {
-                        status: statusForRoute(`${request.method} ${path}`)
+                        status: statusForRoute(
+                            `${request.method} ${apiPath}`
+                        )
                     })
                 }
             })

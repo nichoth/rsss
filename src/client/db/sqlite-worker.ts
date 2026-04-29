@@ -43,6 +43,14 @@ interface WorkerScope {
     postMessage:(message:SqliteWorkerResponse) => void
 }
 
+type SqliteWorkerFactory = (options:{
+    locateFile:(filename:string) => string
+}) => Promise<SqliteWorkerNamespace>
+
+interface SqliteWorkerModule {
+    default:SqliteWorkerFactory
+}
+
 const workerScope = globalThis as unknown as WorkerScope
 let sqlitePromise:Promise<SqliteWorkerNamespace>|null = null
 let db:WorkerDb|null = null
@@ -166,9 +174,12 @@ function applySchema (targetDb:WorkerDb):void {
 async function initSqliteInWorker ():Promise<SqliteWorkerNamespace> {
     if (!sqlitePromise) {
         sqlitePromise = import('@sqlite.org/sqlite-wasm')
-            .then((sqlite3Module) => sqlite3Module.default({
-                locateFile: () => sqliteWasmUrl
-            }))
+            .then((sqlite3Module) => {
+                const module = sqlite3Module as unknown as SqliteWorkerModule
+                return module.default({
+                    locateFile: () => sqliteWasmUrl
+                })
+            })
             .then((sqlite) => sqlite as unknown as SqliteWorkerNamespace)
     }
 

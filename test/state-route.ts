@@ -27,6 +27,7 @@ function item (
         content: null,
         author: null,
         pub_date: null,
+        thumbnail_url: null,
         is_read: 0,
         is_starred: 0,
         created_at: '2024-01-01 00:00:00',

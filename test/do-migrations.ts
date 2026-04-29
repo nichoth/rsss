@@ -35,7 +35,10 @@ function createConstructorContext (storedVersion:number | null) {
                         ])
                     }
                     if (query.includes('PRAGMA table_info(items)')) {
-                        return result([{ name: 'updated_at' }])
+                        return result([
+                            { name: 'updated_at' },
+                            { name: 'thumbnail_url' }
+                        ])
                     }
                     return result()
                 }
@@ -65,7 +68,7 @@ function createConstructorContext (storedVersion:number | null) {
 
 test('UserDO skips migration introspection when version is current',
     async t => {
-        const currentMigrationVersion = 2
+        const currentMigrationVersion = 3
         const setup = createConstructorContext(currentMigrationVersion)
 
         const userDo = new UserDO(setup.ctx, {} as never)
@@ -105,12 +108,40 @@ test('UserDO reruns migrations when stored version is stale', async t => {
     t.ok(userDo, 'Durable Object constructed successfully')
     t.equal(
         introspectionQueries.length,
-        3,
+        4,
         'stale migration version runs all column checks'
     )
     t.deepEqual(
         setup.writes,
-        [{ migration_v: 2 }],
+        [{ migration_v: 3 }],
         'current migration version is persisted'
+    )
+})
+
+test('UserDO migrates missing item thumbnail column', async t => {
+    const setup = createConstructorContext(2)
+    const originalExec = setup.ctx.storage.sql.exec.bind(
+        setup.ctx.storage.sql
+    )
+
+    setup.ctx.storage.sql.exec = ((query:string) => {
+        if (query.includes('PRAGMA table_info(items)')) {
+            return result([{ name: 'updated_at' }])
+        }
+
+        return originalExec(query)
+    }) as typeof setup.ctx.storage.sql.exec
+
+    const userDo = new UserDO(setup.ctx, {} as never)
+    await setup.ready()
+
+    t.ok(userDo, 'Durable Object constructed successfully')
+    t.ok(
+        setup.statements.some(query => {
+            return query.includes(
+                'ALTER TABLE items ADD COLUMN thumbnail_url TEXT'
+            )
+        }),
+        'missing thumbnail_url column is added'
     )
 })

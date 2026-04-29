@@ -79,7 +79,7 @@ const MANUAL_REFRESH_STORAGE_PREFIX = 'manual_refresh:'
 const ALARM_REFRESH_CURSOR_KEY = 'alarm_refresh_cursor'
 const PENDING_DELETION_KEY = 'pending_deletion'
 const MIGRATION_STATE_KEY = 'schema_migration'
-const USER_DO_MIGRATION_VERSION = 2
+const USER_DO_MIGRATION_VERSION = 3
 const SYNC_PAGE_LIMIT = 500
 const MAX_PARSED_FEED_ITEMS = 1000
 const MAX_FEED_TITLE_LENGTH = 8 * 1024
@@ -322,6 +322,7 @@ export class UserDO extends DurableObject<Env> {
         if (migrationState?.migration_v !== USER_DO_MIGRATION_VERSION) {
             this.migrateAddUpdatedAt()
             this.migrateAddFeedFailureColumns()
+            this.migrateAddItemThumbnail()
             await this.ctx.storage.put(MIGRATION_STATE_KEY, {
                 migration_v: USER_DO_MIGRATION_VERSION
             })
@@ -376,6 +377,17 @@ export class UserDO extends DurableObject<Env> {
         }
         if (!hasLastStatus) {
             this.sql.exec('ALTER TABLE feeds ADD COLUMN last_status INTEGER')
+        }
+    }
+
+    private migrateAddItemThumbnail () {
+        const columns = this.sql.exec('PRAGMA table_info(items)').toArray()
+        const hasThumbnailUrl = columns.some((col: unknown) =>
+            (col as { name:string }).name === 'thumbnail_url'
+        )
+
+        if (!hasThumbnailUrl) {
+            this.sql.exec('ALTER TABLE items ADD COLUMN thumbnail_url TEXT')
         }
     }
 
@@ -974,6 +986,7 @@ export class UserDO extends DurableObject<Env> {
      * Send an SSE event to all connected subscribers for this user.
      */
     private broadcast (event:string, data:unknown):void {
+        if (!this.subscribers) return
         if (this.subscribers.size === 0) return
 
         const payload = `event: ${event}\n` +

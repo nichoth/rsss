@@ -1343,13 +1343,18 @@ dataRouter.all('*', async (c) => {
         ` -> DO(${session.did})`
     )
 
+    const proxyInit:RequestInit & { duplex?:'half' } = {
+        method: c.req.method,
+        headers: buildDoProxyHeaders(c.req.raw.headers)
+    }
+    if (c.req.raw.body) {
+        proxyInit.body = c.req.raw.body
+        proxyInit.duplex = 'half'
+    }
+
     // Forward the request to the DO
     const response = await stub.fetch(
-        new Request(doUrl.toString(), {
-            method: c.req.method,
-            headers: buildDoProxyHeaders(c.req.raw.headers),
-            body: c.req.raw.body
-        })
+        new Request(doUrl.toString(), proxyInit)
     )
 
     console.log(

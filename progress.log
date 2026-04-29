@@ -258,10 +258,17 @@ Thread: https://ampcode.com/threads/unknown
   should import `DEAD_LETTER_ATTEMPT_LIMIT` from `push-sync.ts` instead of
   hardcoding `9` or `10`, so retry-cap regressions track the configured
   limit.
+- **Shared item schema columns**: Adding a persistent item column requires
+  updating `TABLES_SQL`, bumping `USER_DO_MIGRATION_VERSION`, adding a
+  guarded DO migration, and extending the canonical client `Item` type.
 - **Worker-to-DO proxy headers**: `dataRouter` must build a fresh DO
   `Request` with an explicit allowlist. Forward only `content-type`,
   `cookie`, and `x-rsss-*` headers; never pass through client auth headers
   such as `Authorization`.
+- **Worker-to-DO streaming proxy bodies**: When `dataRouter` forwards a
+  request with `c.req.raw.body`, build a `RequestInit` with
+  `duplex: 'half'` so Node-based tests and runtimes that enforce streaming
+  request semantics do not throw.
 - **dataRouter route test matrix**: Entitlement proxy tests should key route
   fixtures by `METHOD path`, not path alone, because routes such as
   `/api/feeds` support multiple methods with different expected statuses.
@@ -2993,4 +3000,40 @@ Thread: https://ampcode.com/threads/unknown
     `/api/sync`, `/api/feeds`, and `/api/items` paths.
   - Test proxy fixtures must use `METHOD path` keys because GET, POST, and
     DELETE routes can share the same path while expecting different statuses.
+---
+
+## 2026-04-28 17:46 PDT - US-117
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added thumbnail_url schema support.
+  - Added nullable items.thumbnail_url to the shared SQLite schema between
+    pub_date and is_read.
+  - Bumped the Durable Object schema migration version to 3 and added an
+    idempotent items thumbnail_url migration for existing user databases.
+  - Extended the canonical client Item type and affected test fixtures.
+  - Kept the SQLite worker import typed through the local async factory
+    shape so typecheck accepts the locateFile option.
+  - Made DO broadcast tolerate constructor-bypassing test harness instances
+    with no subscriber set, matching normal zero-subscriber behavior.
+  - Made dataRouter proxy request construction work with streaming request
+    bodies in Node-based tests by setting `duplex: 'half'`.
+- Files changed:
+  - src/shared/schema.ts
+  - src/server/durable-objects/index.ts
+  - src/server/index.ts
+  - src/client/db/types.ts
+  - src/client/db/sqlite-worker.ts
+  - test/api-router.ts
+  - test/db-adapter.ts
+  - test/do-migrations.ts
+  - test/state-route.ts
+  - specs/prd.json
+  - progress.log
+- **Learnings for future iterations:**
+  - Shared item columns need both fresh-schema and existing-DO migration
+    coverage; test the column order in TABLES_SQL and the ALTER TABLE path.
+  - New required Item fields should be added to shared fixture builders, not
+    only production code, because typecheck covers browser route tests too.
+  - Node's `Request` constructor requires `duplex: 'half'` when forwarding a
+    streaming body; keep proxy tests aligned with stripped DO paths while
+    looking up fixture statuses by API route.
 ---

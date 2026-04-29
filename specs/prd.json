@@ -1792,7 +1792,7 @@
         "`npm run test:db` passes"
       ],
       "priority": 117,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
