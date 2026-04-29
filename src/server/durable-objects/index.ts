@@ -55,6 +55,7 @@ interface ParsedFeedItem {
     content:string | null
     author:string | null
     pubDate:string | null
+    imageUrl:string | null
 }
 
 interface ParsedFeed {
@@ -1190,15 +1191,16 @@ export class UserDO extends DurableObject<Env> {
             const item = this.asObject(itemNode)
             if (!item) continue
 
+            const itemLink = this.getText(item, ['link'])
             items.push({
                 guid: this.getText(item, ['guid', 'id']) ||
-                    this.getText(item, ['link']),
+                    itemLink,
                 title: this.capText(
                     this.getText(item, ['title', 'media:title']),
                     MAX_FEED_TITLE_LENGTH,
                     markTooLarge
                 ),
-                link: this.getText(item, ['link']),
+                link: itemLink,
                 description: this.capText(
                     this.getText(item, ['description']),
                     MAX_FEED_DESCRIPTION_LENGTH,
@@ -1218,7 +1220,12 @@ export class UserDO extends DurableObject<Env> {
                     'dc:creator',
                     'creator'
                 ]),
-                pubDate: this.parseDate(this.getText(item, ['pubDate']))
+                pubDate: this.parseDate(this.getText(item, ['pubDate'])),
+                imageUrl: this.resolveImageUrl(
+                    this.getRssItemImage(item),
+                    itemLink,
+                    link
+                )
             })
         }
 
@@ -1254,6 +1261,7 @@ export class UserDO extends DurableObject<Env> {
             if (!entry) continue
 
             const author = this.asObject(this.getChild(entry, ['author']))
+            const entryLink = this.getLinkHref(this.getChild(entry, ['link']))
 
             items.push({
                 guid: this.getText(entry, ['id']),
@@ -1262,7 +1270,7 @@ export class UserDO extends DurableObject<Env> {
                     MAX_FEED_TITLE_LENGTH,
                     markTooLarge
                 ),
-                link: this.getLinkHref(this.getChild(entry, ['link'])),
+                link: entryLink,
                 description: this.capText(
                     this.getText(entry, ['summary']),
                     MAX_FEED_DESCRIPTION_LENGTH,
@@ -1277,11 +1285,132 @@ export class UserDO extends DurableObject<Env> {
                 pubDate: this.parseDate(
                     this.getText(entry, ['published']) ||
                     this.getText(entry, ['updated'])
+                ),
+                imageUrl: this.resolveImageUrl(
+                    this.getAtomEntryImage(entry),
+                    entryLink,
+                    link
                 )
             })
         }
 
         return { title, description, link, isTooLarge, items }
+    }
+
+    private extractFirstImgSrc (html:string | null):string | null {
+        if (!html) return null
+
+        const match = html.match(/<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/i)
+        return match?.[1]?.trim() || null
+    }
+
+    private resolveImageUrl (
+        candidate:string | null,
+        itemLink:string | null,
+        feedLink:string | null
+    ):string | null {
+        if (!candidate) return null
+
+        const base = itemLink || feedLink
+
+        try {
+            const url = base ? new URL(candidate, base) : new URL(candidate)
+
+            if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+                return null
+            }
+
+            return url.href
+        } catch {
+            return null
+        }
+    }
+
+    private getRssItemImage (item:XmlObject):string | null {
+        const thumbnail = this.firstAttr(
+            this.getChild(item, ['media:thumbnail']),
+            '@_url'
+        )
+        if (thumbnail) return thumbnail
+
+        const mediaContent = this.firstMediaImageAttr(
+            this.getChild(item, ['media:content']),
+            '@_url'
+        )
+        if (mediaContent) return mediaContent
+
+        const enclosure = this.firstMediaImageAttr(
+            this.getChild(item, ['enclosure']),
+            '@_url'
+        )
+        if (enclosure) return enclosure
+
+        return this.extractFirstImgSrc(this.getText(item, [
+            'content:encoded',
+            'encoded',
+            'content',
+            'description'
+        ]))
+    }
+
+    private getAtomEntryImage (entry:XmlObject):string | null {
+        const thumbnail = this.firstAttr(
+            this.getChild(entry, ['media:thumbnail']),
+            '@_url'
+        )
+        if (thumbnail) return thumbnail
+
+        for (const linkValue of this.asArray(this.getChild(entry, ['link']))) {
+            const link = this.asObject(linkValue)
+            if (!link) continue
+
+            const rel = this.textValue(link['@_rel'])
+            const type = this.textValue(link['@_type'])
+            const href = this.textValue(link['@_href'])
+            if (rel === 'enclosure' && this.isImageType(type) && href) {
+                return href
+            }
+        }
+
+        return this.extractFirstImgSrc(this.getText(entry, [
+            'content',
+            'summary'
+        ]))
+    }
+
+    private firstAttr (
+        value:XmlValue | undefined,
+        attrName:string
+    ):string | null {
+        for (const candidate of this.asArray(value)) {
+            const node = this.asObject(candidate)
+            const attr = node ? this.textValue(node[attrName]) : null
+            if (attr) return attr
+        }
+
+        return null
+    }
+
+    private firstMediaImageAttr (
+        value:XmlValue | undefined,
+        attrName:string
+    ):string | null {
+        for (const candidate of this.asArray(value)) {
+            const node = this.asObject(candidate)
+            if (!node) continue
+
+            const medium = this.textValue(node['@_medium'])
+            const type = this.textValue(node['@_type'])
+            const attr = this.textValue(node[attrName])
+            const isImage = medium === 'image' || this.isImageType(type)
+            if (isImage && attr) return attr
+        }
+
+        return null
+    }
+
+    private isImageType (value:string | null):boolean {
+        return value?.toLowerCase().startsWith('image/') ?? false
     }
 
     private capText (

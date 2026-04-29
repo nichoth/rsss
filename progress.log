@@ -17,6 +17,27 @@ Thread: https://ampcode.com/threads/unknown
     window should let that startup cycle settle before installing a hanging
     `/api/sync` fetch stub.
 ---
+## 2026-04-28 18:17 PDT - US-118
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Extracted parser-provided image hints from RSS and
+  Atom feeds.
+  - Added `imageUrl` to parsed feed items.
+  - Added RSS extraction for `media:thumbnail`, image `media:content`, image
+    enclosures, and first inline `<img src>` fallback.
+  - Added Atom extraction for `media:thumbnail`, image enclosure links, and
+    first inline `<img src>` fallback.
+  - Resolved candidate URLs against item/feed links and rejected non-http(s)
+    image URLs.
+- Files changed:
+  - `src/server/durable-objects/index.ts`
+  - `test/feed-parser.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Feed parser image-hint tests can keep using the existing private-parser
+    shim in `test/feed-parser.ts`; storage and thumbnail persistence remain
+    separate later stories.
+---
 ## 2026-04-27 15:56 PDT - US-071
 Thread: https://ampcode.com/threads/unknown
 - What was implemented: Preserved local item state during add-feed
