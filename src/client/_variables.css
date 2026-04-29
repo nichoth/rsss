@@ -10,6 +10,8 @@
     --color-primary-hover: #1d4ed8;
     --color-accent: #f59e0b;
     --color-warning: #b45309;
+    --color-warning-bg: #fffbeb;
+    --color-warning-bg-hover: #fef3c7;
     --color-error: #dc2626;
     --color-placeholder: #dcdcdc;
     --color-success: #16a34a;

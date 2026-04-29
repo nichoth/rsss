@@ -3,6 +3,8 @@
 - Server-side URL fetch helpers in `src/server/feed-fetch.ts` should share
   `fetchValidatedResponse` so URL validation, DNS pre-resolution, manual
   redirect handling, timeout, and blocked-host checks stay consistent.
+- Component image fallback UI should follow the `UserIcon` pattern: use
+  `useState` plus `onError` to stop rendering broken `<img>` elements.
 - Durable Object feed ingestion should only do post-insert enrichment for
   item rows whose `INSERT OR IGNORE` reports `rowsWritten > 0`; existing item
   rows must not be reprocessed or have their non-null `thumbnail_url`
@@ -10,6 +12,33 @@
 - Item fields that must leave the Durable Object should be added to
   `ITEM_COLUMNS` / `ITEM_SYNC_COLUMNS`, then mirrored in both local sync
   item upsert paths: `pull-sync.ts` and `push-sync.ts`.
+
+## 2026-04-28 19:03 PDT - US-122
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Rendered optional item thumbnails in feed rows.
+  - Added `ItemRow` rendering for non-empty `thumbnail_url` values before
+    `.item-main`, with lazy/async/no-referrer/decorative image attributes.
+  - Added broken-image fallback state so errored thumbnails are removed from
+    the row.
+  - Styled `.item-thumbnail` as a fixed 80x80 object-fit cover box with
+    nested selectors inside `.item-row`.
+  - Moved the existing unread row amber colors to global CSS variables.
+  - Added focused component coverage for thumbnail attributes, no-placeholder
+    rows, and broken-image removal.
+- Files changed:
+  - `src/client/components/item-row.ts`
+  - `src/client/components/item-row.css`
+  - `src/client/_variables.css`
+  - `test/item-row.ts`
+  - `test/index.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `UserIcon` already established the local image fallback pattern:
+    `useState(false)` plus `onError` to stop rendering a failed image.
+  - Item row thumbnail styles should stay nested under `.item-row`; rows
+    without thumbnails should not receive layout-only placeholder markup.
+---
 
 ## 2026-04-28 18:53 PDT - US-121
 Thread: https://ampcode.com/threads/unknown

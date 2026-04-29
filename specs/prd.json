@@ -1886,7 +1886,7 @@
         "Verify in browser using dev-browser skill: subscribe to a feed known to expose og:image (any typical blog), let it ingest, confirm thumbnails render at 80x80 on the left and that rows without thumbnails are visually unchanged from before"
       ],
       "priority": 122,
-      "passes": false,
+      "passes": true,
       "notes": ""
     }
   ]
