@@ -16,6 +16,7 @@ import {
 import {
     FeedFetchError,
     fetchFeedText,
+    fetchOgImage,
     validateFeedUrl
 } from '../feed-fetch.js'
 
@@ -66,6 +67,12 @@ interface ParsedFeed {
     items:ParsedFeedItem[]
 }
 
+interface NewFeedItem {
+    id:number
+    link:string | null
+    imageUrl:string | null
+}
+
 const FEED_XML_PARSER = new XMLParser({
     attributeNamePrefix: '@_',
     cdataPropName: '#cdata',
@@ -74,6 +81,8 @@ const FEED_XML_PARSER = new XMLParser({
     trimValues: true
 })
 const FEED_REFRESH_CONCURRENCY = 8
+const OG_IMAGE_FETCH_CONCURRENCY = 4
+const OG_IMAGE_FETCH_BUDGET_MS = 10_000
 const FEED_REFRESH_INTERVAL_MS = 10 * 60 * 1000
 const MANUAL_REFRESH_LIMIT_MS = 60 * 1000
 const MANUAL_REFRESH_STORAGE_PREFIX = 'manual_refresh:'
@@ -1073,14 +1082,18 @@ export class UserDO extends DurableObject<Env> {
             }
 
             // Insert new items
+            const newItems:NewFeedItem[] = []
             for (const item of parsedFeed.items) {
                 const guid = item.guid || item.link || item.title || ''
                 if (!guid) continue
 
                 try {
-                    this.sql.exec(
+                    const result = this.sql.exec(
                         `INSERT OR IGNORE INTO items
-                            (feed_id, guid, title, link, description, content, author, pub_date)
+                            (
+                                feed_id, guid, title, link, description,
+                                content, author, pub_date
+                            )
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
                         feed.id,
                         guid,
@@ -1091,6 +1104,23 @@ export class UserDO extends DurableObject<Env> {
                         item.author,
                         item.pubDate
                     )
+
+                    if (this.rowsWritten(result) > 0) {
+                        const row = this.sql.exec(
+                            `SELECT id FROM items
+                            WHERE feed_id = ? AND guid = ?`,
+                            feed.id,
+                            guid
+                        ).one() as { id:number } | null
+
+                        if (row) {
+                            newItems.push({
+                                id: row.id,
+                                link: item.link,
+                                imageUrl: item.imageUrl
+                            })
+                        }
+                    }
                 } catch (err) {
                     if (isDuplicateInsertError(err)) continue
 
@@ -1112,6 +1142,8 @@ export class UserDO extends DurableObject<Env> {
                     return
                 }
             }
+
+            await this.updateNewItemThumbnails(newItems)
 
             if (parsedFeed.isTooLarge) {
                 this.sql.exec(
@@ -1137,6 +1169,132 @@ export class UserDO extends DurableObject<Env> {
             )
         } finally {
             this.broadcast('feed-updated', { feedId: feed.id })
+        }
+    }
+
+    private rowsWritten (result:unknown):number {
+        if (!result || typeof result !== 'object') return 0
+
+        const rowsWritten = (result as { rowsWritten?:unknown }).rowsWritten
+
+        return typeof rowsWritten === 'number' ? rowsWritten : 0
+    }
+
+    private async updateNewItemThumbnails (
+        items:NewFeedItem[]
+    ):Promise<void> {
+        if (items.length === 0) return
+
+        let nextItemIndex = 0
+        const controller = new AbortController()
+        const deadline = Date.now() + OG_IMAGE_FETCH_BUDGET_MS
+        const timeout = setTimeout(() => {
+            controller.abort()
+        }, OG_IMAGE_FETCH_BUDGET_MS)
+        const workerCount = Math.min(
+            OG_IMAGE_FETCH_CONCURRENCY,
+            items.length
+        )
+        const workers = Array.from({ length: workerCount }, async () => {
+            while (Date.now() < deadline) {
+                const item = items[nextItemIndex]
+                nextItemIndex++
+                if (!item) return
+
+                await this.updateNewItemThumbnail(
+                    item,
+                    deadline,
+                    controller.signal
+                )
+            }
+        })
+        const results = await Promise.allSettled(workers)
+
+        clearTimeout(timeout)
+
+        for (const result of results) {
+            if (result.status === 'rejected') {
+                console.error('Error updating item thumbnail:', result.reason)
+            }
+        }
+    }
+
+    private async updateNewItemThumbnail (
+        item:NewFeedItem,
+        deadline:number,
+        signal:AbortSignal
+    ):Promise<void> {
+        try {
+            const thumbnailUrl = await this.resolveNewItemThumbnail(
+                item,
+                deadline,
+                signal
+            )
+            if (!thumbnailUrl) return
+
+            this.sql.exec(
+                `UPDATE items SET thumbnail_url = ?
+                WHERE id = ? AND thumbnail_url IS NULL`,
+                thumbnailUrl,
+                item.id
+            )
+        } catch (err) {
+            console.error('Error updating item thumbnail:', err)
+        }
+    }
+
+    private async resolveNewItemThumbnail (
+        item:NewFeedItem,
+        deadline:number,
+        signal:AbortSignal
+    ):Promise<string | null> {
+        if (!item.link) return item.imageUrl
+
+        const ogImage = await this.fetchOgImageBeforeDeadline(
+            item.link,
+            deadline,
+            signal
+        )
+
+        return ogImage || item.imageUrl
+    }
+
+    private async fetchOgImageBeforeDeadline (
+        link:string,
+        deadline:number,
+        signal:AbortSignal
+    ):Promise<string | null> {
+        const remainingMs = deadline - Date.now()
+        if (remainingMs <= 0) return null
+
+        let timeout:ReturnType<typeof setTimeout>|null = null
+        const timedOut = Symbol('og-timeout')
+        const timeoutPromise = new Promise<typeof timedOut>((resolve) => {
+            timeout = setTimeout(() => {
+                resolve(timedOut)
+            }, remainingMs)
+        })
+
+        try {
+            const result = await Promise.race([
+                fetchOgImage(link, {
+                    signal,
+                    onError: (err) => {
+                        console.error(
+                            `Error fetching og image for ${link}:`,
+                            err
+                        )
+                    }
+                }),
+                timeoutPromise
+            ])
+
+            return result === timedOut ? null : result
+        } catch (err) {
+            console.error(`Error fetching og image for ${link}:`, err)
+            return null
+        } finally {
+            if (timeout) clearTimeout(timeout)
         }
     }
 

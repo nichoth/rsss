@@ -20,12 +20,15 @@ export interface FetchFeedTextOptions {
     fetchFn?:typeof fetch
     maxBytes?:number
     resolveHostname?:ResolveHostname
+    signal?:AbortSignal
 }
 
 export interface FetchOgImageOptions {
     fetchFn?:typeof fetch
     maxBytes?:number
     resolveHostname?:ResolveHostname
+    signal?:AbortSignal
+    onError?:(err:unknown) => void
 }
 
 export async function validateFeedUrl (feedUrl:string):Promise<string> {
@@ -82,7 +85,8 @@ export async function fetchOgImage (
         if (imageUrl.protocol !== 'https:') return null
 
         return imageUrl.toString()
-    } catch {
+    } catch (err) {
+        options.onError?.(err)
         return null
     }
 }
@@ -104,7 +108,8 @@ async function fetchValidatedResponse (
                 'User-Agent': 'RSSS/1.0 RSS Reader'
             },
             redirect: 'manual',
-            signal: AbortSignal.timeout(FEED_FETCH_TIMEOUT_MS)
+            signal: options.signal ||
+                AbortSignal.timeout(FEED_FETCH_TIMEOUT_MS)
         })
 
         if (isRedirect(response)) {

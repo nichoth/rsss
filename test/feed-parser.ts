@@ -26,6 +26,10 @@ function parseFeed (xml:string):ParsedFeed {
     return parser.parseFeed(xml)
 }
 
+function nextTask ():Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, 0))
+}
+
 function itemXml (index:number, content = 'body'):string {
     return `
         <item>
@@ -351,6 +355,387 @@ test('fetchFeed records feed too large when parsed rows are truncated',
             'feed row records the truncation warning'
         )
     })
+
+test('fetchFeed stores og image for newly inserted items', async t => {
+    const userDo = Object.create(UserDO.prototype) as {
+        sql:{
+            exec:(query:string, ...params:unknown[]) => {
+                toArray:() => unknown[]
+                one?:() => unknown
+                rowsWritten?:number
+            }
+        }
+        fetchFeed:(feed:{
+            id:number
+            url:string
+            title:string|null
+            description:string|null
+            site_url:string|null
+            last_fetched:string|null
+            last_error:string|null
+            last_status:number|null
+            created_at:string
+            updated_at:string
+        }) => Promise<void>
+    }
+    const originalFetch = globalThis.fetch
+    let articleFetches = 0
+    let thumbnailUpdate:null | {
+        thumbnail:unknown
+        id:unknown
+    } = null
+
+    userDo.sql = {
+        exec (query:string, ...params:unknown[]) {
+            if (query.includes('UPDATE feeds SET') &&
+                query.includes('last_error = NULL')) {
+                return { toArray: () => [] }
+            }
+
+            if (query.includes('INSERT OR IGNORE INTO items')) {
+                return { rowsWritten: 1, toArray: () => [] }
+            }
+
+            if (query.includes('SELECT id FROM items')) {
+                return {
+                    toArray: () => [],
+                    one: () => ({ id: 42 })
+                }
+            }
+
+            if (query.includes('UPDATE items SET thumbnail_url = ?')) {
+                thumbnailUpdate = {
+                    thumbnail: params[0],
+                    id: params[1]
+                }
+                return { toArray: () => [] }
+            }
+
+            throw new Error(`Unexpected SQL: ${query}`)
+        }
+    }
+
+    globalThis.fetch = async (url) => {
+        const urlText = String(url)
+
+        if (urlText.startsWith('https://cloudflare-dns.com/')) {
+            return new Response(JSON.stringify({
+                Answer: [{ data: '93.184.216.34' }]
+            }))
+        }
+
+        if (urlText === 'https://example.com/post/1') {
+            articleFetches++
+            return new Response(
+                '<head><meta property="og:image" ' +
+                    'content="https://cdn.example.com/og.jpg"></head>',
+                { headers: { 'content-type': 'text/html' } }
+            )
+        }
+
+        return new Response(`
+            <rss version="2.0"
+                xmlns:media="http://search.yahoo.com/mrss/">
+                <channel>
+                    <title>Example RSS</title>
+                    <link>https://example.com/</link>
+                    <item>
+                        <guid>item-1</guid>
+                        <title>Item 1</title>
+                        <link>https://example.com/post/1</link>
+                        <media:thumbnail
+                            url="https://cdn.example.com/parser.jpg" />
+                    </item>
+                </channel>
+            </rss>
+        `)
+    }
+
+    try {
+        await userDo.fetchFeed({
+            id: 5,
+            url: 'https://example.com/feed.xml',
+            title: null,
+            description: null,
+            site_url: null,
+            last_fetched: null,
+            last_error: null,
+            last_status: null,
+            created_at: '2026-04-27 00:00:00',
+            updated_at: '2026-04-27 00:00:00'
+        })
+    } finally {
+        globalThis.fetch = originalFetch
+    }
+
+    t.equal(articleFetches, 1, 'article URL is fetched for og:image')
+    t.deepEqual(
+        thumbnailUpdate,
+        {
+            thumbnail: 'https://cdn.example.com/og.jpg',
+            id: 42
+        },
+        'new item thumbnail_url is set from og:image'
+    )
+})
+
+test('fetchFeed caps concurrent og image requests at four', async t => {
+    const userDo = Object.create(UserDO.prototype) as {
+        sql:{
+            exec:(query:string, ...params:unknown[]) => {
+                toArray:() => unknown[]
+                one?:() => unknown
+                rowsWritten?:number
+            }
+        }
+        fetchFeed:(feed:{
+            id:number
+            url:string
+            title:string|null
+            description:string|null
+            site_url:string|null
+            last_fetched:string|null
+            last_error:string|null
+            last_status:number|null
+            created_at:string
+            updated_at:string
+        }) => Promise<void>
+    }
+    const originalFetch = globalThis.fetch
+    let nextItemId = 100
+    let activeArticleFetches = 0
+    let maxActiveArticleFetches = 0
+    let thumbnailUpdates = 0
+
+    userDo.sql = {
+        exec (query:string) {
+            if (query.includes('UPDATE feeds SET') &&
+                query.includes('last_error = NULL')) {
+                return { toArray: () => [] }
+            }
+
+            if (query.includes('INSERT OR IGNORE INTO items')) {
+                return { rowsWritten: 1, toArray: () => [] }
+            }
+
+            if (query.includes('SELECT id FROM items')) {
+                const id = nextItemId++
+
+                return {
+                    toArray: () => [],
+                    one: () => ({ id })
+                }
+            }
+
+            if (query.includes('UPDATE items SET thumbnail_url = ?')) {
+                thumbnailUpdates++
+                return { toArray: () => [] }
+            }
+
+            throw new Error(`Unexpected SQL: ${query}`)
+        }
+    }
+
+    globalThis.fetch = async (url) => {
+        const urlText = String(url)
+
+        if (urlText.startsWith('https://cloudflare-dns.com/')) {
+            return new Response(JSON.stringify({
+                Answer: [{ data: '93.184.216.34' }]
+            }))
+        }
+
+        if (urlText.startsWith('https://example.com/post/')) {
+            activeArticleFetches++
+            maxActiveArticleFetches = Math.max(
+                maxActiveArticleFetches,
+                activeArticleFetches
+            )
+            await nextTask()
+            activeArticleFetches--
+
+            return new Response(
+                '<head><meta property="og:image" ' +
+                    `content="${urlText}/og.jpg"></head>`,
+                { headers: { 'content-type': 'text/html' } }
+            )
+        }
+
+        return new Response(rssFeed(
+            Array.from({ length: 9 }, (_value, index) => `
+                <item>
+                    <guid>item-${index}</guid>
+                    <title>Item ${index}</title>
+                    <link>https://example.com/post/${index}</link>
+                </item>
+            `).join('')
+        ))
+    }
+
+    try {
+        await userDo.fetchFeed({
+            id: 6,
+            url: 'https://example.com/feed.xml',
+            title: null,
+            description: null,
+            site_url: null,
+            last_fetched: null,
+            last_error: null,
+            last_status: null,
+            created_at: '2026-04-27 00:00:00',
+            updated_at: '2026-04-27 00:00:00'
+        })
+    } finally {
+        globalThis.fetch = originalFetch
+    }
+
+    t.equal(
+        maxActiveArticleFetches,
+        4,
+        'at most four og image fetches run at once'
+    )
+    t.equal(thumbnailUpdates, 9, 'all inserted thumbnails are updated')
+})
+
+test('fetchFeed logs og failures without feed-level errors', async t => {
+    const userDo = Object.create(UserDO.prototype) as {
+        sql:{
+            exec:(query:string, ...params:unknown[]) => {
+                toArray:() => unknown[]
+                one?:() => unknown
+                rowsWritten?:number
+            }
+        }
+        fetchFeed:(feed:{
+            id:number
+            url:string
+            title:string|null
+            description:string|null
+            site_url:string|null
+            last_fetched:string|null
+            last_error:string|null
+            last_status:number|null
+            created_at:string
+            updated_at:string
+        }) => Promise<void>
+    }
+    const originalFetch = globalThis.fetch
+    const originalError = console.error
+    let loggedOgFailure = false
+    let feedErrorUpdate:null | {
+        error:unknown
+        status:unknown
+        id:unknown
+    } = null
+    let thumbnailUpdate:null | {
+        thumbnail:unknown
+        id:unknown
+    } = null
+
+    userDo.sql = {
+        exec (query:string, ...params:unknown[]) {
+            if (query.includes('UPDATE feeds SET') &&
+                query.includes('last_error = NULL')) {
+                return { toArray: () => [] }
+            }
+
+            if (query.includes('INSERT OR IGNORE INTO items')) {
+                return { rowsWritten: 1, toArray: () => [] }
+            }
+
+            if (query.includes('SELECT id FROM items')) {
+                return {
+                    toArray: () => [],
+                    one: () => ({ id: 77 })
+                }
+            }
+
+            if (query.includes('UPDATE items SET thumbnail_url = ?')) {
+                thumbnailUpdate = {
+                    thumbnail: params[0],
+                    id: params[1]
+                }
+                return { toArray: () => [] }
+            }
+
+            if (query.includes('last_error = ?') &&
+                query.includes('last_status = ?')) {
+                feedErrorUpdate = {
+                    error: params[0],
+                    status: params[1],
+                    id: params[2]
+                }
+                return { toArray: () => [] }
+            }
+
+            throw new Error(`Unexpected SQL: ${query}`)
+        }
+    }
+
+    console.error = (...args:unknown[]) => {
+        loggedOgFailure = loggedOgFailure ||
+            args.some(arg => String(arg).includes('post/1'))
+    }
+    globalThis.fetch = async (url) => {
+        const urlText = String(url)
+
+        if (urlText.startsWith('https://cloudflare-dns.com/')) {
+            return new Response(JSON.stringify({
+                Answer: [{ data: '93.184.216.34' }]
+            }))
+        }
+
+        if (urlText === 'https://example.com/post/1') {
+            return new Response('server error', { status: 500 })
+        }
+
+        return new Response(`
+            <rss version="2.0"
+                xmlns:media="http://search.yahoo.com/mrss/">
+                <channel>
+                    <title>Example RSS</title>
+                    <link>https://example.com/</link>
+                    <item>
+                        <guid>item-1</guid>
+                        <title>Item 1</title>
+                        <link>https://example.com/post/1</link>
+                        <media:thumbnail
+                            url="https://cdn.example.com/parser.jpg" />
+                    </item>
+                </channel>
+            </rss>
+        `)
+    }
+
+    try {
+        await userDo.fetchFeed({
+            id: 7,
+            url: 'https://example.com/feed.xml',
+            title: null,
+            description: null,
+            site_url: null,
+            last_fetched: null,
+            last_error: null,
+            last_status: null,
+            created_at: '2026-04-27 00:00:00',
+            updated_at: '2026-04-27 00:00:00'
+        })
+    } finally {
+        globalThis.fetch = originalFetch
+        console.error = originalError
+    }
+
+    t.equal(loggedOgFailure, true, 'og fetch failure is logged')
+    t.equal(feedErrorUpdate, null, 'feed error status is not set')
+    t.deepEqual(
+        thumbnailUpdate,
+        {
+            thumbnail: 'https://cdn.example.com/parser.jpg',
+            id: 77
+        },
+        'parser image is used after og failure'
+    )
+})
 
 test('fetchFeed records non-duplicate item insert failures', async t => {
     const userDo = Object.create(UserDO.prototype) as {

@@ -3,6 +3,10 @@
 - Server-side URL fetch helpers in `src/server/feed-fetch.ts` should share
   `fetchValidatedResponse` so URL validation, DNS pre-resolution, manual
   redirect handling, timeout, and blocked-host checks stay consistent.
+- Durable Object feed ingestion should only do post-insert enrichment for
+  item rows whose `INSERT OR IGNORE` reports `rowsWritten > 0`; existing item
+  rows must not be reprocessed or have their non-null `thumbnail_url`
+  overwritten.
 
 ## 2026-04-27 21:47 PDT - US-113
 Thread: https://ampcode.com/threads/unknown
@@ -22,6 +26,30 @@ Thread: https://ampcode.com/threads/unknown
     `state.user.value` is set; online-event tests that need to own the sync
     window should let that startup cycle settle before installing a hanging
     `/api/sync` fetch stub.
+---
+## 2026-04-28 18:44 PDT - US-120
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Wired Open Graph thumbnail enrichment into Durable
+  Object feed ingestion.
+  - Newly inserted items are collected via `rowsWritten > 0`, then enriched
+    by trying `fetchOgImage(item.link)` before falling back to the
+    parser-provided `imageUrl`.
+  - OG lookups run through a four-worker pool with a 10 second overall
+    budget, and updates use `WHERE thumbnail_url IS NULL`.
+  - Added focused feed ingestion coverage for OG thumbnail persistence, the
+    concurrency cap, and per-item OG failure logging without feed-level
+    status changes.
+- Files changed:
+  - `src/server/durable-objects/index.ts`
+  - `src/server/feed-fetch.ts`
+  - `test/feed-parser.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Feed ingestion tests can exercise private Durable Object methods with
+    `Object.create(UserDO.prototype)` and a small fake `sql.exec` surface.
+  - `fetchOgImage` can now receive an optional `AbortSignal`; use it when a
+    caller has a larger operation-level deadline.
 ---
 ## 2026-04-28 18:17 PDT - US-118
 Thread: https://ampcode.com/threads/unknown
