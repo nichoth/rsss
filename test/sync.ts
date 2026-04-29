@@ -87,7 +87,18 @@ test('item objects have required fields', async t => {
     t.ok('is_read' in item, 'item should have is_read')
     t.ok('is_starred' in item, 'item should have is_starred')
     t.ok('updated_at' in item, 'item should have updated_at')
+    t.ok('thumbnail_url' in item, 'item should have thumbnail_url')
     t.ok('feed_title' in item, 'item should have feed_title')
+})
+
+test('sync response preserves thumbnail_url values', async t => {
+    const result = simulateSyncEndpoint(mockFeeds, mockItems)
+
+    t.equal(
+        result.items[0].thumbnail_url,
+        'https://cdn.example.com/post-1.jpg',
+        'thumbnail_url round-trips through the sync payload'
+    )
 })
 
 // ============ Client-side Sync Logic Tests ============

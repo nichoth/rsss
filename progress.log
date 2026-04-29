@@ -7,6 +7,39 @@
   item rows whose `INSERT OR IGNORE` reports `rowsWritten > 0`; existing item
   rows must not be reprocessed or have their non-null `thumbnail_url`
   overwritten.
+- Item fields that must leave the Durable Object should be added to
+  `ITEM_COLUMNS` / `ITEM_SYNC_COLUMNS`, then mirrored in both local sync
+  item upsert paths: `pull-sync.ts` and `push-sync.ts`.
+
+## 2026-04-28 18:53 PDT - US-121
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Surfaced `thumbnail_url` through item payloads and
+  local sync persistence.
+  - Added `items.thumbnail_url` to the Durable Object item column constants.
+  - Replaced item response `SELECT *` usage with explicit item columns for
+    list, route lookup, item updates, conflict rows, and sync rows.
+  - Stored `thumbnail_url` during pull-sync item upserts and push-sync
+    conflict reconciliation.
+  - Added regressions for sync payload shape, pull-sync persistence, and
+    push-sync conflict persistence.
+- Files changed:
+  - `src/server/durable-objects/index.ts`
+  - `src/client/db/pull-sync.ts`
+  - `src/client/db/push-sync.ts`
+  - `test/mock.ts`
+  - `test/sync.ts`
+  - `test/pull-sync.ts`
+  - `test/push-sync.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Durable Object item payloads now share `ITEM_COLUMNS` /
+    `ITEM_SYNC_COLUMNS`; add new item response fields there instead of
+    returning `items.*`.
+  - Server item conflict rows and client-side conflict reconciliation need
+    the same nullable item fields as pull-sync, or local state will drop
+    values after 409 handling.
+---
 
 ## 2026-04-27 21:47 PDT - US-113
 Thread: https://ampcode.com/threads/unknown

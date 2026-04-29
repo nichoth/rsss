@@ -101,10 +101,14 @@ const FEED_SYNC_COLUMNS = `
     id, url, title, description, site_url, last_fetched, last_error,
     last_status, created_at, updated_at
 `
-const ITEM_SYNC_COLUMNS = `
+const ITEM_COLUMNS = `
     items.id, items.feed_id, items.guid, items.title, items.link,
     items.description, items.content, items.author, items.pub_date,
-    items.is_read, items.is_starred, items.created_at, items.updated_at,
+    items.thumbnail_url, items.is_read, items.is_starred, items.created_at,
+    items.updated_at
+`
+const ITEM_SYNC_COLUMNS = `
+    ${ITEM_COLUMNS},
     feeds.title AS feed_title
 `
 
@@ -656,7 +660,7 @@ export class UserDO extends DurableObject<Env> {
             const limit = parseInt(c.req.query('limit') || '50', 10)
             const offset = parseInt(c.req.query('offset') || '0', 10)
 
-            let query = 'SELECT items.*, feeds.title as feed_title ' +
+            let query = `SELECT ${ITEM_SYNC_COLUMNS} ` +
                 'FROM items JOIN feeds ON items.feed_id = feeds.id WHERE 1=1'
             const params: (string | number)[] = []
 
@@ -730,7 +734,7 @@ export class UserDO extends DurableObject<Env> {
                 .join(' OR ')
 
             const item = this.sql.exec(
-                `SELECT items.*, feeds.title as feed_title
+                `SELECT ${ITEM_SYNC_COLUMNS}
                  FROM items
                  JOIN feeds ON items.feed_id = feeds.id
                  WHERE items.link IS NOT NULL
@@ -772,7 +776,7 @@ export class UserDO extends DurableObject<Env> {
             )
 
             const item = this.sql.exec(
-                'SELECT * FROM items WHERE id = ?', id
+                `SELECT ${ITEM_COLUMNS} FROM items WHERE id = ?`, id
             ).one() as Record<string, unknown> | null
             if (!item) {
                 return c.json({ error: 'Item not found' }, 404)
@@ -803,7 +807,7 @@ export class UserDO extends DurableObject<Env> {
             }
 
             const updated = this.sql.exec(
-                'SELECT * FROM items WHERE id = ?', id
+                `SELECT ${ITEM_COLUMNS} FROM items WHERE id = ?`, id
             ).one()
             return c.json({ item: updated })
         })
@@ -826,14 +830,16 @@ export class UserDO extends DurableObject<Env> {
                 let newerItems:unknown[]
                 if (body.feed_id !== undefined) {
                     newerItems = this.sql.exec(
-                        'SELECT * FROM items WHERE feed_id = ?' +
+                        `SELECT ${ITEM_COLUMNS} FROM items ` +
+                        'WHERE feed_id = ?' +
                         ' AND updated_at > ?',
                         body.feed_id,
                         clientUpdatedAt
                     ).toArray()
                 } else {
                     newerItems = this.sql.exec(
-                        'SELECT * FROM items WHERE updated_at > ?',
+                        `SELECT ${ITEM_COLUMNS} FROM items ` +
+                        'WHERE updated_at > ?',
                         clientUpdatedAt
                     ).toArray()
                 }

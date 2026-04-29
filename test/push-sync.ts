@@ -797,6 +797,7 @@ test(
                 content: null,
                 author: null,
                 pub_date: null,
+                thumbnail_url: 'https://cdn.example.com/wrapped.jpg',
                 is_read: 0,
                 is_starred: 0,
                 created_at: '2026-01-01 00:00:00',
@@ -805,9 +806,15 @@ test(
 
             await pushSync(db, makeFetch(409, { item: serverItem }))
 
-            const item = queryOne<{ title:string; updated_at:string }>(
+            const item = queryOne<{
+                title:string
+                thumbnail_url:string|null
+                updated_at:string
+            }>(
                 db,
-                'SELECT title, updated_at FROM items WHERE id = ?',
+                `SELECT title, thumbnail_url, updated_at
+                 FROM items
+                 WHERE id = ?`,
                 [itemId]
             )
             t.equal(
@@ -819,6 +826,11 @@ test(
                 item?.updated_at,
                 '2026-01-05 00:00:00',
                 'server updated_at upserted'
+            )
+            t.equal(
+                item?.thumbnail_url,
+                'https://cdn.example.com/wrapped.jpg',
+                'server thumbnail_url upserted'
             )
 
             const remaining = queryAll(db, 'SELECT * FROM outbox')

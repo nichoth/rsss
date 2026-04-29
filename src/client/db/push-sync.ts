@@ -296,8 +296,9 @@ async function upsertItemFromServer (
     await execDb(db, {
         sql: `INSERT INTO items
             (id, feed_id, guid, title, link, description, content,
-             author, pub_date, is_read, is_starred, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             author, pub_date, thumbnail_url, is_read, is_starred,
+             created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 feed_id = excluded.feed_id,
                 guid = excluded.guid,
@@ -307,6 +308,7 @@ async function upsertItemFromServer (
                 content = excluded.content,
                 author = excluded.author,
                 pub_date = excluded.pub_date,
+                thumbnail_url = excluded.thumbnail_url,
                 is_read = excluded.is_read,
                 is_starred = excluded.is_starred,
                 updated_at = excluded.updated_at`,
@@ -320,6 +322,7 @@ async function upsertItemFromServer (
             (item.content as string|null) ?? null,
             (item.author as string|null) ?? null,
             (item.pub_date as string|null) ?? null,
+            (item.thumbnail_url as string|null) ?? null,
             (item.is_read as number) ?? 0,
             (item.is_starred as number) ?? 0,
             item.created_at as string,
