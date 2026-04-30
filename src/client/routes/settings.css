@@ -92,7 +92,7 @@
         font-size: 1rem;
     }
 
-    & .reset-local-data {
+    & .sync-local-data {
         margin-top: 1.5rem;
         padding-top: 1rem;
         border-top: 1px solid var(--color-border-subtle);
@@ -100,23 +100,23 @@
         align-items: center;
         gap: 1rem;
 
-        & .reset-desc {
+        & .sync-desc {
             margin: 0;
             color: var(--color-text-secondary);
         }
     }
 }
 
-.btn-reset {
+.btn-sync {
     background-color: transparent;
-    color: var(--color-error);
-    border: 1px solid var(--color-error);
+    color: var(--color-primary);
+    border: 1px solid var(--color-primary);
     padding: 0.4rem 0.8rem;
     cursor: pointer;
     flex-shrink: 0;
 
     &:hover {
-        background-color: var(--color-error);
+        background-color: var(--color-primary);
         color: var(--color-surface);
     }
 

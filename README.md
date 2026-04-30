@@ -20,13 +20,14 @@ See [rsss.space](https://rsss.space/).
 - [Develop](#develop)
 - [Architecture](#architecture)
   * [Local First](#local-first)
-  * [Sync (remote local)](#sync-remote--local)
+  * [Sync (remote/local)](#sync-remotelocal)
   * [Worker (Hono) - Main entry point](#worker-hono---main-entry-point)
   * [Durable Object per user (UserDO)](#durable-object-per-user-userdo)
   * [Frontend](#frontend)
 - [Files](#files)
 - [Running Locally](#running-locally)
 - [Deploy](#deploy)
+  * [Rotate `SESSION_SECRET`](#rotate-session_secret)
 - [Notes](#notes)
   * [Generate a Secret](#generate-a-secret)
   * [Local Durable Object](#local-durable-object)
@@ -63,7 +64,7 @@ cross-origin-isolated worker.
 * RSSS ships a web app manifest for installability, but v1 does not
   register a service worker or cache the app shell offline.
 
-### Sync (remote <-> local)
+### Sync (remote/local)
 
 - **Bootstrap** (`bootstrapLocalDb`) seeds the OPFS database on first
   use by paging through `/api/sync` and writing rows into SQLite.

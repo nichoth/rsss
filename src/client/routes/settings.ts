@@ -24,15 +24,15 @@ import {
     bootstrapRetryAvailable,
     bootstrapStorageWarning,
     disableLocalFirst,
-    resetLocalFirst,
     getBootstrappedDb,
     getLocalDb,
     getOutboxCount,
     localTabLockError,
     localDbError,
-    LocalFirstSyncFailureError,
     purgeStoredContent
 } from '../db/index.js'
+import { runSyncCycle } from '../db/sync-cycle.js'
+import { syncStatus, syncError } from '../db/sync-status.js'
 import './settings.css'
 import { NBSP } from '../constants.js'
 
@@ -201,51 +201,15 @@ export const SettingsRoute:FunctionComponent<{
         })
     }
 
-    async function handleReset () {
+    async function handleSync () {
         const did = state.user.value?.did
         if (!did) return
         const db = getBootstrappedDb() ?? getLocalDb(did)
-        const pending = db ? await getOutboxCount(db) : 0
-        const lines = [
-            'This will wipe and re-download all local data.'
-        ]
-        if (pending > 0) {
-            lines.push(
-                `${pending} pending offline change` +
-                (pending === 1 ? '' : 's') +
-                ' will be synced before wiping.'
-            )
-            lines.push(
-                'If sync fails, reset will be cancelled unless you ' +
-                'confirm discarding pending changes.'
-            )
-        }
-        lines.push('Continue?')
-        if (!confirm(lines.join('\n'))) return
+        if (!db) return
         try {
-            await resetLocalFirst(did)
-        } catch (err) {
-            if (!(err instanceof LocalFirstSyncFailureError)) {
-                alert(err instanceof Error ? err.message : 'Reset failed')
-                return
-            }
-
-            const confirmed = confirm([
-                err.message,
-                '',
-                'Reset anyway and discard pending local changes?'
-            ].join('\n'))
-            if (!confirmed) return
-
-            try {
-                await resetLocalFirst(did, fetch, {
-                    allowDataLossOnSyncFailure: true
-                })
-            } catch (resetErr) {
-                alert(resetErr instanceof Error ?
-                    resetErr.message :
-                    'Reset failed')
-            }
+            await runSyncCycle(db)
+        } catch {
+            // runSyncCycle surfaces failures via the syncError signal.
         }
     }
 
@@ -400,20 +364,25 @@ export const SettingsRoute:FunctionComponent<{
                     ${dbError.message}
                 </p>
             `}
-            ${syncSubscriptions.value && !inProgress &&
-                (!dbError || dbError.canReset) && html`
-                <div class="reset-local-data">
+            ${syncSubscriptions.value && !inProgress && !dbError && html`
+                <div class="sync-local-data">
                     <button
-                        class="btn-reset"
-                        onClick=${handleReset}
+                        class="btn-sync"
+                        onClick=${handleSync}
+                        disabled=${syncStatus.value === 'syncing' ||
+                            undefined}
                     >
-                        Reset local data
+                        ${syncStatus.value === 'syncing' ?
+                            'Syncing...' :
+                            'Sync'}
                     </button>
-                    <p class="reset-desc">
-                        Sync pending changes, then wipe local data and
-                        re-download from server.
+                    <p class="sync-desc">
+                        Pull updates from the server.
                     </p>
                 </div>
+                ${syncError.value && html`
+                    <p class="bootstrap-error">${syncError.value}</p>
+                `}
             `}
         </section>
 
