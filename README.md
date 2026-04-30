@@ -4,7 +4,7 @@ __Really Simple Syndication Service__
 
 See [rsss.space](https://rsss.space/).
 
-## Example feeds
+## Example Feeds
 
 * https://brittanyellich.com/index.xml
 * https://www.404media.co/rss/

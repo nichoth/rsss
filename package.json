@@ -50,6 +50,7 @@
     "@substrate-system/icons": "^0.1.29",
     "@substrate-system/routes": "^5.0.0",
     "@substrate-system/state": "^0.0.4",
+    "@substrate-system/toast": "^0.0.10",
     "@substrate-system/tool-tip": "^0.0.5",
     "@types/dompurify": "^3.0.5",
     "autumn-js": "^1.2.12",
