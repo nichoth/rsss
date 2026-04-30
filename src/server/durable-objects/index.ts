@@ -679,7 +679,8 @@ export class UserDO extends DurableObject<Env> {
                 params.push(isStarred === 'true' ? 1 : 0)
             }
 
-            query += ' ORDER BY pub_date DESC, created_at DESC LIMIT ? OFFSET ?'
+            query += ' ORDER BY items.pub_date DESC, items.created_at DESC' +
+                ' LIMIT ? OFFSET ?'
             params.push(limit, offset)
 
             const items = this.sql.exec(query, ...params).toArray()
@@ -739,7 +740,7 @@ export class UserDO extends DurableObject<Env> {
                  JOIN feeds ON items.feed_id = feeds.id
                  WHERE items.link IS NOT NULL
                  AND (${routeQuery})
-                 ORDER BY pub_date DESC, created_at DESC
+                 ORDER BY items.pub_date DESC, items.created_at DESC
                  LIMIT 1`,
                 ...routeCandidates
             ).one()
