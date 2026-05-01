@@ -1957,7 +1957,7 @@
         "Typecheck passes"
       ],
       "priority": 126,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

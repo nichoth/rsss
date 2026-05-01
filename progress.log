@@ -3259,3 +3259,40 @@ Thread: https://ampcode.com/threads/unknown
   - `@substrate-system/tapzero` does not expose `t.pass()`; use an assertion
     like `t.equal(value, expected, msg)` instead.
 ---
+
+## 2026-05-01 - US-126
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Cached item images via Cache Storage during pull-sync.
+  - Created `src/client/db/image-cache.ts` with `cacheItemImages(db, item,
+    policy, fetchFn?, cacheStorage?)` that: parses `<img src>` URLs from
+    `item.content` and `item.description`, resolves effective cache mode
+    (`policy?.cache_mode ?? defaultCacheMode.value`), skips when mode is
+    `'text'`, skips URLs already recorded in `cached_images`, fetches new
+    URLs, stores responses in a `rsss-images-v1` Cache Storage bucket, and
+    records a `cached_images` row via `recordCachedImage`. Fetch and cache
+    errors are caught per-URL and logged without aborting the loop.
+  - Hooked `cacheItemImages` into `src/client/db/pull-sync.ts`: upserted
+    items are collected per sync page (when `storeContent` is on), and after
+    each COMMIT the function is called outside the transaction with a
+    per-feed `feed_cache_policy` lookup (cached in a Map to avoid redundant
+    queries).
+  - Created `test/image-cache.ts` with 16 assertions: text mode skips,
+    text_images mode caches and records, already-cached URLs skipped, fetch
+    errors do not write rows, null policy falls back to defaultCacheMode,
+    duplicate URLs are deduplicated.
+  - Registered `image-cache.js` in `test/index.ts`.
+- Files changed:
+  - `src/client/db/image-cache.ts` (new)
+  - `src/client/db/pull-sync.ts`
+  - `test/image-cache.ts` (new)
+  - `test/index.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Inject both `fetchFn` and `cacheStorage` as optional parameters on
+    image-caching helpers so tests can mock them without touching globals.
+  - Do not use `new URL()` for side-effects (ESLint `no-new`); a
+    `!/^https?:\/\//i.test(url)` guard is simpler and avoids the issue.
+  - Image caching must happen OUTSIDE the pull-sync SQLite transaction so
+    network fetches do not hold the write lock open.
+---

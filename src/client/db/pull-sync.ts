@@ -1,6 +1,10 @@
 import { describeLocalDbError } from './sqlite-init.js'
 import { storeContent } from '../local-first-settings.js'
-import { execDb, queryDb } from './local-db.js'
+import { execDb, queryDb, queryOneDb } from './local-db.js'
+import {
+    cacheItemImages,
+    type FeedCachePolicyRow
+} from './image-cache.js'
 import {
     setSyncSyncing,
     setSyncDone,
@@ -299,6 +303,7 @@ export async function pullSync (
         const data = (await res.json()) as SyncResponse
 
         await execDb(db, 'BEGIN')
+        const itemsToCache:Array<Record<string, unknown>> = []
         try {
             let feedCount = 0
             for (const feed of data.feeds) {
@@ -319,6 +324,7 @@ export async function pullSync (
                 await upsertItem(db, item, keepContent)
                 itemCount++
                 opts.onItemUpserted?.(itemCount)
+                if (keepContent) itemsToCache.push(item)
             }
 
             if (data.hasMore) {
@@ -342,6 +348,39 @@ export async function pullSync (
                 setSyncError(describeLocalDbError(err))
             }
             throw err
+        }
+
+        if (keepContent && itemsToCache.length > 0) {
+            const policyByFeed = new Map<number, FeedCachePolicyRow|null>()
+            for (const item of itemsToCache) {
+                const feedId = item.feed_id as number
+                if (!policyByFeed.has(feedId)) {
+                    const p = await queryOneDb<FeedCachePolicyRow>(
+                        db,
+                        'SELECT cache_mode FROM feed_cache_policy' +
+                        ' WHERE feed_id = ?',
+                        [feedId]
+                    )
+                    policyByFeed.set(feedId, p ?? null)
+                }
+                try {
+                    await cacheItemImages(
+                        db,
+                        item as {
+                            id?:number|null
+                            feed_id:number
+                            content?:string|null
+                            description?:string|null
+                        },
+                        policyByFeed.get(feedId) ?? null
+                    )
+                } catch (err) {
+                    console.error(
+                        '[pull-sync] image cache error',
+                        err instanceof Error ? err.message : ''
+                    )
+                }
+            }
         }
     }
 
