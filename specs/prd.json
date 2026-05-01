@@ -2053,7 +2053,7 @@
         "Verify in browser using dev-browser skill: clear cache for one feed, confirm its storage drops to 0 while another feed's cache is unchanged"
       ],
       "priority": 131,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

@@ -33,7 +33,8 @@ import {
     getOutboxCount,
     localTabLockError,
     localDbError,
-    purgeStoredContent
+    purgeStoredContent,
+    clearFeedCache
 } from '../db/index.js'
 import { runSyncCycle } from '../db/sync-cycle.js'
 import { syncStatus, syncError } from '../db/sync-status.js'
@@ -332,6 +333,29 @@ export const SettingsRoute:FunctionComponent<{
                 Math.round(days * 86400) :
                 null
             saveFeedPolicy(feedId, { max_age_seconds: secs })
+        }
+    }
+
+    function handleClearFeedCache (feedId:number, feedTitle:string) {
+        return async (e:Event) => {
+            e.preventDefault()
+            if (!confirm(
+                `Clear cached content for "${feedTitle}"? ` +
+                'This will free space but article content will need ' +
+                'to be re-fetched.'
+            )) return
+            const db = getLocalDbForUser()
+            if (!db) return
+            try {
+                await clearFeedCache(db, feedId)
+                const ids = feeds.value.map(f => f.id)
+                await loadStorageUsage(db, ids)
+            } catch (err) {
+                console.error(
+                    '[settings] clear feed cache failed',
+                    err instanceof Error ? err.message : ''
+                )
+            }
         }
     }
 
@@ -700,6 +724,15 @@ export const SettingsRoute:FunctionComponent<{
                                             />
                                         </label>
                                     </div>
+                                    <button
+                                        class="btn-clear-cache"
+                                        onClick=${handleClearFeedCache(
+                                            feed.id,
+                                            feed.title || feed.url
+                                        )}
+                                    >
+                                        Clear cache
+                                    </button>
                                 </details>
                                 <button
                                     class="btn-delete"

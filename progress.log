@@ -3427,3 +3427,40 @@ Thread: https://ampcode.com/threads/unknown
     operation that changes cached content (clear, evict).
   - The `_resetStorageUsage()` helper is exported for test isolation.
 ---
+
+## 2026-05-01 - US-131
+- What was implemented: Clear-cache action per feed.
+  - Added `clearFeedCache(db, feedId, cacheStorage)` to `content-storage.ts`:
+    queries `cached_images` URLs for the feed, nulls `content` and `description`
+    on all items for that feed, calls `deleteByFeed` to remove image rows, evicts
+    each URL from the `rsss-images-v1` Cache Storage bucket, and returns the evicted
+    URL list.
+  - Exported `clearFeedCache` from `src/client/db/index.ts`.
+  - Added `handleClearFeedCache(feedId, feedTitle)` handler in `settings.ts` with a
+    `confirm()` dialog; after clearing, calls `loadStorageUsage` to refresh the per-feed
+    and account-total storage display.
+  - Added a "Clear cache" button inside `<details class="feed-cache-controls">` in the
+    settings feed list template.
+  - Added `handleClearFeedCache` and `loadStorageUsage` import to `feed-reader.ts`;
+    added a "Clear cache" button inside the `<details class="feed-cache-controls">` panel.
+  - Created `test/content-storage.ts` with 5 tests: nulls text only for the target feed,
+    removes cached_images rows, returns the evicted URL list, is idempotent, returns
+    empty array when no images.
+  - Registered `test/content-storage.ts` in `test/index.ts`.
+- Files changed:
+  - `src/client/db/content-storage.ts`
+  - `src/client/db/index.ts`
+  - `src/client/routes/settings.ts`
+  - `src/client/routes/feed-reader.ts`
+  - `test/content-storage.ts` (new)
+  - `test/index.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `clearFeedCache` accepts a `cacheStorage` parameter (defaults to `caches`) so tests
+    can mock the Cache Storage API without a real browser environment.
+  - Always call `loadStorageUsage(db, feedIds)` after mutating cached content to keep
+    the `feedStorageBytes` and `totalStorageBytes` signals current.
+  - The `handleClearFeedCache` pattern (confirm + clear + refresh) is identical in both
+    settings.ts and feed-reader.ts; future eviction actions should follow the same shape.
+---

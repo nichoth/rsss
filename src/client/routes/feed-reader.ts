@@ -18,8 +18,10 @@ import {
 } from '../db/feed-cache-policy.js'
 import {
     getBootstrappedDb,
-    getLocalDb
+    getLocalDb,
+    clearFeedCache
 } from '../db/index.js'
+import { loadStorageUsage } from '../db/storage-usage.js'
 import { ItemRow } from '../components/item-row.js'
 import { Sidebar } from '../components/sidebar.js'
 import Debug from '@substrate-system/debug'
@@ -145,6 +147,29 @@ export const FeedReader:FunctionComponent<{
                 Math.round(days * 86400) :
                 null
             saveFeedPolicy(feedId, { max_age_seconds: secs })
+        }
+    }
+
+    function handleClearFeedCache (feedId:number, feedTitle:string) {
+        return async (e:Event) => {
+            e.preventDefault()
+            if (!confirm(
+                `Clear cached content for "${feedTitle}"? ` +
+                'This will free space but article content will need ' +
+                'to be re-fetched.'
+            )) return
+            const db = getDb()
+            if (!db) return
+            try {
+                await clearFeedCache(db, feedId)
+                const ids = feeds.value.map(f => f.id)
+                await loadStorageUsage(db, ids)
+            } catch (err) {
+                console.error(
+                    '[feed-reader] clear feed cache failed',
+                    err instanceof Error ? err.message : ''
+                )
+            }
         }
     }
 
@@ -292,6 +317,16 @@ export const FeedReader:FunctionComponent<{
                                                 />
                                             </label>
                                         </div>
+                                        <button
+                                            class="btn-clear-cache"
+                                            onClick=${handleClearFeedCache(
+                                                selectedFeed.id,
+                                                selectedFeed.title ||
+                                                    selectedFeed.url
+                                            )}
+                                        >
+                                            Clear cache
+                                        </button>
                                     </details>
                                 `
                             })()}
