@@ -1284,21 +1284,12 @@ export class UserDO extends DurableObject<Env> {
 
         try {
             const result = await Promise.race([
-                fetchOgImage(link, {
-                    signal,
-                    onError: (err) => {
-                        console.error(
-                            `Error fetching og image for ${link}:`,
-                            err
-                        )
-                    }
-                }),
+                fetchOgImage(link, { signal }),
                 timeoutPromise
             ])
 
             return result === timedOut ? null : result
-        } catch (err) {
-            console.error(`Error fetching og image for ${link}:`, err)
+        } catch (_err) {
             return null
         } finally {
             if (timeout) clearTimeout(timeout)

@@ -267,6 +267,7 @@ test('fetchOgImage follows safe redirects manually', async t => {
 
 test('fetchOgImage returns null after too many redirects', async t => {
     let calls = 0
+    let caughtMessage:string|null = null
 
     const image = await fetchOgImage('https://example.com/post', {
         fetchFn: async () => {
@@ -276,12 +277,42 @@ test('fetchOgImage returns null after too many redirects', async t => {
                 headers: { location: '/loop' }
             })
         },
-        resolveHostname: async () => ['93.184.216.34']
+        resolveHostname: async () => ['93.184.216.34'],
+        onError: (err) => {
+            caughtMessage = (err as Error).message
+        }
     })
 
     t.equal(image, null)
-    t.equal(calls, 4)
+    t.equal(calls, 6)
+    t.equal(caughtMessage, 'Article redirected too many times')
 })
+
+test('fetchFeedText still caps at three redirects with feed wording',
+    async t => {
+        let calls = 0
+        let caughtMessage:string|null = null
+
+        try {
+            await fetchFeedText('https://example.com/feed.xml', {
+                fetchFn: async () => {
+                    calls++
+                    return new Response(null, {
+                        status: 302,
+                        headers: { location: '/loop' }
+                    })
+                },
+                resolveHostname: async () => ['93.184.216.34']
+            })
+            t.fail('expected redirect cap to throw')
+        } catch (_err) {
+            caughtMessage = (_err as Error).message
+        }
+
+        t.equal(calls, 4)
+        t.equal(caughtMessage, 'Feed redirected too many times')
+    }
+)
 
 test('fetchOgImage returns null for blocked hosts', async t => {
     const image = await fetchOgImage('http://127.0.0.1/post', {

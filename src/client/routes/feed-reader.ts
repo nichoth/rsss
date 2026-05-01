@@ -10,9 +10,12 @@ import {
 } from '../state.js'
 import { ItemRow } from '../components/item-row.js'
 import { Sidebar } from '../components/sidebar.js'
-// import Debug from '@substrate-system/debug'
-// const debug = Debug('rsss:view')
+import Debug from '@substrate-system/debug'
+const debug = Debug('rsss:view')
 
+/**
+ * This is the home route.
+ */
 export const FeedReader:FunctionComponent<{
     state:AppState;
     splats:string[];
@@ -27,6 +30,8 @@ export const FeedReader:FunctionComponent<{
         showUnreadOnly,
         pageSize,
     } = state
+
+    debug('state.feeds', state.feeds.value)
 
     // Extract feed URL from splats (everything after /feed/)
     const feedUrl = useMemo(() => splats.join('/'), [splats.join('/')])
