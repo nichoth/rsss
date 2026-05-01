@@ -282,6 +282,17 @@
     color: var(--color-text-secondary);
 }
 
+.feed-storage {
+    font-size: 1rem;
+    color: var(--color-text-secondary);
+}
+
+.cache-total {
+    font-size: 1rem;
+    color: var(--color-text-secondary);
+    margin: 0 0 1rem;
+}
+
 .feed-controls {
     flex-shrink: 0;
     display: flex;

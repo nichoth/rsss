@@ -44,6 +44,12 @@ import {
     resolveEffectivePolicy,
     type FeedCachePolicyRow
 } from '../db/feed-cache-policy.js'
+import {
+    feedStorageBytes,
+    totalStorageBytes,
+    loadStorageUsage
+} from '../db/storage-usage.js'
+import { formatBytes } from '../util.js'
 import './settings.css'
 import { NBSP } from '../constants.js'
 
@@ -70,6 +76,16 @@ export const SettingsRoute:FunctionComponent<{
         if (!db || feeds.value.length === 0) return
         const ids = feeds.value.map(f => f.id)
         loadFeedPolicies(db, ids).catch(() => {})
+    }, [feeds.value, syncSubscriptions.value])
+
+    useEffect(() => {
+        const did = state.user.value?.did
+        const db = did ?
+            (getBootstrappedDb() ?? getLocalDb(did)) :
+            null
+        if (!db || feeds.value.length === 0) return
+        const ids = feeds.value.map(f => f.id)
+        loadStorageUsage(db, ids).catch(() => {})
     }, [feeds.value, syncSubscriptions.value])
 
     const supported = localFirstSupported.value
@@ -506,6 +522,9 @@ export const SettingsRoute:FunctionComponent<{
 
         <section class="settings-section cache-section">
             <h2>Cache</h2>
+            <p class="cache-total">
+                Total storage used: ${formatBytes(totalStorageBytes.value)}
+            </p>
             <p class="section-desc">
                 These defaults apply to feeds with no override.
             </p>
@@ -588,6 +607,7 @@ export const SettingsRoute:FunctionComponent<{
                         policy.max_age_seconds / 86400
                     )) :
                     ''
+                const storedBytes = feedStorageBytes.value[feed.id] ?? 0
                 return html`
                         <li
                             class="settings-feed-item"
@@ -607,6 +627,9 @@ export const SettingsRoute:FunctionComponent<{
                                     ${modeLabel}${eff.isDefault.cacheMode ?
                                         ' (default)' :
                                         ''}
+                                </span>
+                                <span class="feed-storage">
+                                    ${formatBytes(storedBytes)} cached
                                 </span>
                             </div>
                             <div class="feed-controls">

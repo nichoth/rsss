@@ -3395,3 +3395,35 @@ Thread: https://ampcode.com/threads/unknown
     load the policy for the newly selected feed when the user navigates to a
     different feed-reader route.
 ---
+
+## 2026-05-01 - US-130
+- What was implemented: Added per-feed and account-total storage display to /settings.
+  - Added `formatBytes(n:number):string` to `src/client/util.ts` using decimal
+    (1 KB = 1000 bytes) to match the cache-size settings convention.
+  - Created `src/client/db/storage-usage.ts` with:
+    - `getTextBytesForFeed(db, feedId)` — sums `LENGTH(content) + LENGTH(description)` for items in a feed.
+    - `getTextBytesTotal(db)` — account-wide text bytes.
+    - `loadStorageUsage(db, feedIds)` — populates `feedStorageBytes` and `totalStorageBytes` signals.
+  - Updated `src/client/routes/settings.ts` to call `loadStorageUsage` in a `useEffect`,
+    show "Total storage used: X" in the cache section header, and show "X cached" per
+    feed row via `.feed-storage`.
+  - Added `.feed-storage` and `.cache-total` styles to `settings.css` using existing variables.
+  - Created `test/storage-usage.ts` with 10 tests covering `formatBytes` and both query
+    functions; registered in `test/index.ts`.
+- Files changed:
+  - `src/client/util.ts`
+  - `src/client/db/storage-usage.ts` (new)
+  - `src/client/routes/settings.ts`
+  - `src/client/routes/settings.css`
+  - `test/storage-usage.ts` (new)
+  - `test/index.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `formatBytes` is now in `src/client/util.ts`; import from there for any future
+    human-readable byte formatting (US-131 clear-cache, US-134 account cap input).
+  - `feedStorageBytes` and `totalStorageBytes` are module-level signals in
+    `storage-usage.ts`; call `loadStorageUsage(db, ids)` to refresh them after any
+    operation that changes cached content (clear, evict).
+  - The `_resetStorageUsage()` helper is exported for test isolation.
+---

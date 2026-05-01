@@ -2033,7 +2033,7 @@
         "Verify in browser using dev-browser skill: with at least two feeds cached, confirm per-feed numbers and the account total are non-zero and add up correctly"
       ],
       "priority": 130,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
