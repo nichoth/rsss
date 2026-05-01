@@ -2108,6 +2108,182 @@
       "priority": 134,
       "passes": false,
       "notes": ""
+    },
+    {
+      "id": "US-135",
+      "title": "Add feed-update status signals to client AppState",
+      "description": "As a developer, I need `feedUpdateStatus` and `feedsWithUpdates` signals on `AppState` so any component can react to whether the user has pending server-side feed updates.",
+      "acceptanceCriteria": [
+        "`src/client/state.ts` adds `feedUpdateStatus:Signal<'synced'|'updates'>` to the `AppState` type and initializes it to `'synced'` in `State()`",
+        "`src/client/state.ts` adds `feedsWithUpdates:Signal<string[]>` to the `AppState` type and initializes it to `[]` in `State()`",
+        "Any place that sets both signals together must wrap the updates in `batch()` from `@preact/signals`",
+        "No automatic refresh is triggered from these signals -- they are display-only state",
+        "Typecheck and lint pass"
+      ],
+      "priority": 135,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-136",
+      "title": "Track per-user, per-feed last-pulled cursor on the server",
+      "description": "As a backend developer, I need the user's Durable Object to record a cursor per followed feed so it can compute which feeds have un-pulled items.",
+      "acceptanceCriteria": [
+        "Extend the shared schema (`src/shared/schema.sql` or `src/shared/db/schema.ts`) so each row in `feeds` has a `last_pulled_at` TEXT (ISO timestamp, nullable) column; add a server-side `ALTER TABLE` migration block in `src/server/durable-objects/index.ts` that backfills existing rows to the latest item's `published_at` (or `NULL` if no items)",
+        "`src/server/durable-objects/index.ts` updates `last_pulled_at` to the maximum item `published_at` for that feed at the end of every successful per-feed refresh (`POST /feeds/:id/refresh`) and global refresh (`POST /feeds/refresh`)",
+        "A new helper `getFeedsWithUpdates():string[]` in the DO returns the IDs of feeds where `MAX(items.published_at) > feeds.last_pulled_at` (or where `last_pulled_at IS NULL` and items exist)",
+        "New tests in `test/feed-cursor.ts` cover: cursor advances on full refresh, cursor advances on per-feed refresh, helper returns only feeds with newer items, helper returns empty when all feeds caught up",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 136,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-137",
+      "title": "Include feed-update status in initial fetch response",
+      "description": "As a user, I want the indicator to be correct on first paint so I never see a stale 'synced' state when there are pending updates.",
+      "acceptanceCriteria": [
+        "The DO's `GET /feeds` route in `src/server/durable-objects/index.ts` adds `feedUpdateStatus:'synced'|'updates'` and `feedsWithUpdates:string[]` to its JSON response, computed via the helper from US-136",
+        "`src/client/state.ts` populates `state.feedUpdateStatus` and `state.feedsWithUpdates` (signals from US-135) from this response in a `batch()` call when feeds are first loaded",
+        "If the response omits the new fields (back-compat), the client treats it as `'synced'` with `[]`",
+        "Tests in `test/feed-cursor.ts` (extend) cover: bootstrap response shape includes the new fields, values reflect the cursor state",
+        "Tests pass",
+        "Typecheck and lint pass",
+        "Verify in browser using dev-browser skill: load the app with at least one feed that has unpulled items (e.g. by manually setting `last_pulled_at` back), confirm the header indicator shows 'updates' immediately on first paint"
+      ],
+      "priority": 137,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-138",
+      "title": "Server SSE events for feed-updates-available / -cleared",
+      "description": "As a user, I want the indicator to react in real time when new items appear on the server, without me reloading.",
+      "acceptanceCriteria": [
+        "`src/server/durable-objects/index.ts` adds two new SSE event types via the existing `broadcast()` method: `feed-updates-available` (payload `{ feedIds:string[] }`) and `feed-updates-cleared` (payload `{ feedIds:string[] }`)",
+        "After a server-driven feed fetch/parse cycle inserts new items for a followed feed, the DO emits `feed-updates-available` with the affected feed IDs (only if those feeds were NOT already in the un-synced set, to avoid spam)",
+        "After a successful manual refresh advances `last_pulled_at` to cover all items, the DO emits `feed-updates-cleared` with the affected feed IDs",
+        "Events are scoped to the user's DO (no cross-user leakage) -- existing per-DO `broadcast()` already provides this",
+        "New tests in `test/feed-cursor.ts` (extend) cover: `available` emitted on new items, not re-emitted while feed is still un-synced, `cleared` emitted after refresh catches up",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 138,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-139",
+      "title": "Client subscribes to feed-update SSE events",
+      "description": "As a user, I want my header indicator and `/updates` page to react in real time as the server pushes events.",
+      "acceptanceCriteria": [
+        "`State.openEventStream` in `src/client/state.ts` adds two new listeners on the existing `EventSource`: `feed-updates-available` and `feed-updates-cleared`",
+        "On `feed-updates-available`: parse `feedIds` from `event.data` JSON, merge the IDs into `state.feedsWithUpdates` (deduped), and set `state.feedUpdateStatus.value = 'updates'` -- both inside `batch()`",
+        "On `feed-updates-cleared`: parse `feedIds`, remove them from `state.feedsWithUpdates`, and if the resulting list is empty set `state.feedUpdateStatus.value = 'synced'` -- both inside `batch()`",
+        "Neither handler calls `State.refreshFeeds` or any other auto-pull -- the user must click manually",
+        "Existing `feed-updated` and `refresh-complete` handlers are unchanged",
+        "Typecheck and lint pass"
+      ],
+      "priority": 139,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-140",
+      "title": "Add FeedStatus indicator component to header",
+      "description": "As a user, I want to see 'status: synced' or 'status: updates' with a colored dot in the header so I know whether I have unpulled feed updates at a glance.",
+      "acceptanceCriteria": [
+        "New file `src/client/components/feed-status.ts` exports `FeedStatus:FunctionComponent<{ state:AppState }>`",
+        "New file `src/client/components/feed-status.css` styles the component using CSS variables from `_variables.css` / `_vars.css`; no font sizes below 1rem",
+        "Renders `<${Dot} color=\"green\" />` followed by the text `status: synced` when `state.feedUpdateStatus.value === 'synced'`",
+        "Renders `<${Dot} color=\"yellow\" />` followed by `status: ` and `<a href=\"/updates\">updates</a>` when `state.feedUpdateStatus.value === 'updates'`",
+        "The `/updates` link uses a plain `<a href>` so the existing client-side router intercepts it",
+        "Component has `role=\"status\"` and `aria-live=\"polite\"` for screen readers",
+        "Hidden for anonymous users (returns `null` when `state.user.value` is falsy)",
+        "`src/client/components/header.ts` imports and renders `<${FeedStatus} state=${state} />` inside `.header-right.desktop-nav`, immediately after `<${SyncStatus} />` and before the logout button",
+        "Existing `SyncStatus` component is unchanged and still rendered alongside",
+        "Typecheck and lint pass",
+        "Verify in browser using dev-browser skill: log in, confirm 'status: synced' with green dot is visible in the header; manually set `state.feedUpdateStatus.value = 'updates'` from the browser console and confirm the dot turns yellow and 'updates' becomes a link to /updates"
+      ],
+      "priority": 140,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-141",
+      "title": "Add /updates client-side route",
+      "description": "As a user, I want a dedicated page that shows which feeds have pending updates.",
+      "acceptanceCriteria": [
+        "New files `src/client/routes/updates.ts` and `src/client/routes/updates.css`",
+        "`src/client/routes/index.ts` registers `router.addRoute('/updates', ...)` following the existing pattern used for `/settings`",
+        "Route component reads `state.feedsWithUpdates` and renders a heading 'Pending Updates' plus a list of feeds whose IDs are in that signal (resolve titles by joining against `state.feeds`)",
+        "When `state.feedsWithUpdates.value.length === 0`, render the empty state: 'All feeds are up to date.'",
+        "Anonymous users are redirected to `/login` (match the existing protected-route pattern used by `/settings`)",
+        "Page is exported in the `routes` array of `src/client/routes/index.ts` only if other protected routes are also exported there (mirror existing convention)",
+        "Typecheck and lint pass",
+        "Verify in browser using dev-browser skill: navigate to /updates while logged in, confirm the page renders; with no pending updates the empty state shows; with pending updates a list of feed titles renders"
+      ],
+      "priority": 141,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-142",
+      "title": "Per-feed pending-items preview endpoint and expandable rows",
+      "description": "As a user, I want to see the titles of pending items before I pull them, so I can decide whether the refresh is worth my time.",
+      "acceptanceCriteria": [
+        "New DO route `GET /feeds/:id/pending` in `src/server/durable-objects/index.ts` returns `{ items:Array<{ id:string, title:string, published_at:string }> }` for items in that feed whose `published_at > feeds.last_pulled_at` (limit 50, newest first)",
+        "Route is exposed via the existing data-router proxy at `/api/feeds/:id/pending` (no extra config needed -- `dataRouter.all('*')` already proxies)",
+        "`src/client/routes/updates.ts` renders each feed row as an expandable disclosure (collapsed by default) using a native `<details>`/`<summary>` or an existing toggle pattern in the codebase",
+        "Expanding a row fetches the preview endpoint lazily, shows a spinner while loading, and renders item titles with `published_at` formatted via `toLocaleString()`",
+        "Preview data is held in component-local state (or a per-feed signal) -- it does NOT mutate `state.items` or any reader state",
+        "Errors render an inline message inside the expanded row; the row stays expanded so the user can retry",
+        "New tests in `test/feed-cursor.ts` (extend) cover: pending endpoint returns only items past the cursor, ordering newest first, limit honored",
+        "Tests pass",
+        "Typecheck and lint pass",
+        "Verify in browser using dev-browser skill: on /updates, expand a feed row, confirm titles + dates render and that closing/reopening does not crash"
+      ],
+      "priority": 142,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-143",
+      "title": "Per-feed Refresh button on /updates",
+      "description": "As a user, I want to refresh a single feed from the /updates page without pulling everything.",
+      "acceptanceCriteria": [
+        "`src/client/state.ts` exports a new action `State.refreshFeed(state:AppState, feedId:string):Promise<void>` that POSTs to `/api/feeds/:id/refresh` and, on success, removes `feedId` from `state.feedsWithUpdates` and (if the list is now empty) sets `state.feedUpdateStatus.value = 'synced'` -- both inside `batch()`",
+        "Each feed row on `/updates` includes a Refresh `<${Button}>` (existing `src/client/components/button.ts`) with `isSpinning` bound to a local in-flight signal",
+        "Button is disabled while in-flight to prevent double-click",
+        "On success the row disappears from the list (because the feed ID is removed from `state.feedsWithUpdates`); when the list becomes empty the empty state from US-141 takes over",
+        "On failure the row stays, an inline error message renders, and the button becomes clickable again",
+        "Server-side success path emits `feed-updates-cleared` (covered by US-138) so other tabs/devices clear in real time",
+        "Typecheck and lint pass",
+        "Verify in browser using dev-browser skill: on /updates with at least one pending feed, click Refresh on one row, confirm the row disappears and the header indicator updates correctly (still 'updates' if other feeds remain, 'synced' if that was the last one)"
+      ],
+      "priority": 143,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-144",
+      "title": "Audit and lock down: no automatic feed refresh paths",
+      "description": "As a user, I never want feeds pulled automatically; refresh must always be an explicit click (sidebar global or per-feed on /updates).",
+      "acceptanceCriteria": [
+        "Audit `src/client/` for callers of `State.refreshFeeds` and `State.refreshFeed`: the only allowed callers are `src/client/components/sidebar-footer.ts` (global Refresh Feeds button) and `src/client/routes/updates.ts` (per-feed Refresh button)",
+        "Remove or guard any callers triggered by timers (`setInterval`, `setTimeout` for periodic sync), `visibilitychange`, `focus`, `online`, route changes, or SSE events",
+        "If a legitimate post-sync refresh exists (e.g. `State.refreshAfterSync` reacting to local-first DB sync completion), document it in a code comment as 'local-first DB sync, NOT server feed pull' so future readers do not confuse the two flows",
+        "After global Refresh Feeds completes successfully, `state.feedsWithUpdates` is cleared and `state.feedUpdateStatus` is set to `'synced'` in a `batch()` (defensive client-side update independent of the SSE `feed-updates-cleared` event)",
+        "Add a unit test in `test/state-refresh-audit.ts` that scans the client source (or imports) for unauthorized `refreshFeeds` / `refreshFeed` call sites and fails if any are found outside the two allowed files",
+        "Tests pass",
+        "Typecheck and lint pass",
+        "Verify in browser using dev-browser skill: leave the app idle for 60 seconds with the network tab open, confirm no `/api/feeds/refresh` or `/api/feeds/:id/refresh` requests fire without a click"
+      ],
+      "priority": 144,
+      "passes": false,
+      "notes": ""
     }
   ]
 }
