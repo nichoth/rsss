@@ -1888,6 +1888,226 @@
       "priority": 122,
       "passes": true,
       "notes": ""
+    },
+    {
+      "id": "US-123",
+      "title": "Add feed_cache_policy table to local schema",
+      "description": "As a developer, I need a per-feed cache policy table so users can override site-wide cache defaults on a per-feed basis.",
+      "acceptanceCriteria": [
+        "`src/client/db/local-schema.ts` exports a new `FEED_CACHE_POLICY_SQL` constant containing `CREATE TABLE IF NOT EXISTS feed_cache_policy (feed_id INTEGER PRIMARY KEY, cache_mode TEXT CHECK (cache_mode IN ('text','text_images')), max_size_bytes INTEGER, max_age_seconds INTEGER, updated_at TEXT NOT NULL DEFAULT (datetime('now')))`",
+        "Every column except `feed_id` and `updated_at` is nullable; NULL means \"inherit site-wide default\"",
+        "`src/client/db/sqlite-init.ts` (or wherever schema is applied on open) executes `FEED_CACHE_POLICY_SQL` alongside the existing schema so it is created on every open and is idempotent",
+        "New file `test/feed-cache-policy.ts` (or extend `test/local-adapter.ts`) asserts the table exists with the expected columns and that `INSERT OR REPLACE` works for upserting policy rows",
+        "No behavior change to existing reads/writes",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 123,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-124",
+      "title": "Add site-wide cache defaults to local-first-settings",
+      "description": "As a developer, I need site-wide cache defaults persisted alongside the existing local-first settings so they survive reload.",
+      "acceptanceCriteria": [
+        "`src/client/local-first-settings.ts` adds three exported signals: `defaultCacheMode:Signal<'text'|'text_images'>` (default `'text_images'`), `defaultMaxSizeBytes:Signal<number>` (default 50_000_000), `defaultMaxAgeSeconds:Signal<number>` (default 30 * 86400)",
+        "`loadLocalFirstSettings` reads these from the existing `LS_KEY` JSON and sets them inside the existing `batch(...)`",
+        "`saveLocalFirstSettings` writes these alongside `syncSubscriptions` and `storeContent`",
+        "Corrupt or missing fields fall back to the defaults above without throwing",
+        "No new top-level localStorage key; reuse `rsss.localFirst`",
+        "TypeScript style follows project conventions (no space before `:`, lines under 80 cols, ternaries split across lines)",
+        "New tests in `test/local-first-settings.ts` (create if missing) cover load+save round-trip and the missing-field fallback",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 124,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-125",
+      "title": "Add cached_images table to local schema",
+      "description": "As a developer, I need to track which image URLs have been cached locally, their owning feed/item, and their byte size, so size limits and the storage display work.",
+      "acceptanceCriteria": [
+        "`src/client/db/local-schema.ts` exports a new `CACHED_IMAGES_SQL` constant: `CREATE TABLE IF NOT EXISTS cached_images (url TEXT PRIMARY KEY, feed_id INTEGER NOT NULL, item_id INTEGER, bytes INTEGER NOT NULL, cached_at TEXT NOT NULL DEFAULT (datetime('now')))` plus an index on `feed_id` and an index on `cached_at`",
+        "Schema is applied on every DB open alongside existing tables, idempotently",
+        "New helper `src/client/db/cached-images.ts` exports `recordCachedImage(db, {url, feedId, itemId, bytes})`, `getFeedCacheSize(db, feedId):Promise<number>`, `getTotalCacheSize(db):Promise<number>`, and `deleteCachedImagesForFeed(db, feedId):Promise<string[]>` (returns the URLs that were removed so callers can evict them from Cache Storage)",
+        "Tests in `test/cached-images.ts` cover record, sum-by-feed, sum-total, and delete-by-feed against a `:memory:` DB",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 125,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-126",
+      "title": "Cache item images via Cache Storage during ingest",
+      "description": "As a user with `text_images` mode enabled for a feed, I want images referenced in cached items to be downloaded into Cache Storage so they are available offline.",
+      "acceptanceCriteria": [
+        "New module `src/client/db/image-cache.ts` exports `cacheItemImages(db, item, policy):Promise<void>` that: parses `<img src=\"...\">` URLs out of `item.content` and `item.description`, fetches each, stores the response in a Cache Storage bucket named `rsss-images-v1`, and records a `cached_images` row via the helper from US-125",
+        "Skip URLs that are already present in `cached_images` (idempotent)",
+        "When the effective cache mode for the item's feed is `'text'`, the function returns immediately without fetching anything",
+        "The effective policy is resolved from `feed_cache_policy` for that feed, falling back to `defaultCacheMode` from US-124",
+        "Errors fetching individual images are caught and logged (no PII), do not abort the loop, and do not write a `cached_images` row",
+        "Hook this into the existing pull-sync code path (`src/client/db/pull-sync.ts`) so that when a new item is inserted with `storeContent` enabled, `cacheItemImages` is invoked for that item",
+        "New tests in `test/image-cache.ts` mock `fetch` and `caches` to assert: text mode skips, text_images mode caches new URLs, already-cached URLs are skipped, fetch errors do not write rows",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 126,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-127",
+      "title": "Add site-wide cache controls section to /settings",
+      "description": "As a user, I want default cache controls on the /settings page so all feeds without explicit overrides follow the same policy.",
+      "acceptanceCriteria": [
+        "`src/client/routes/settings.ts` renders a new `<section class=\"settings-section cache-section\">` titled \"Cache\" placed after the existing local-first section and before the per-feed list",
+        "Section contains: a radio group bound to `defaultCacheMode` with options \"Text only\" / \"Text and images\"; a number input bound to `defaultMaxSizeBytes` labelled \"Max cache size per feed (MB)\" with `min=1`; a number input bound to `defaultMaxAgeSeconds` labelled \"Keep cached items for (days)\" with `min=1`",
+        "Inputs convert between MB / days for display and bytes / seconds in the underlying signal",
+        "Changes call `saveLocalFirstSettings()` immediately and update the signals inside a `batch(...)`",
+        "Helper text: \"These defaults apply to feeds with no override.\"",
+        "Styling lives in `src/client/routes/settings.css` using nested selectors inside `.cache-section { ... }`; uses variables from `_variables.css`; no font-size below 1rem",
+        "TypeScript follows project conventions (no space before `:`, lines under 80 cols)",
+        "Typecheck and lint pass",
+        "Verify in browser using dev-browser skill: navigate to `/settings`, change each control, reload the page, confirm values persist"
+      ],
+      "priority": 127,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-128",
+      "title": "Per-feed cache controls in /settings feed list",
+      "description": "As a user, I want to edit cache settings for an individual feed from the /settings feed list so I can manage everything in one place.",
+      "acceptanceCriteria": [
+        "Each row in `.settings-feeds-list` (in `src/client/routes/settings.ts`) shows the effective cache mode for that feed with a `(default)` tag when inherited from site defaults",
+        "Each row has an expand/edit affordance (button or `<details>`) that reveals per-feed controls: cache mode select with options \"Use default\" / \"Text only\" / \"Text + images\"; max-size override input (blank = use default); max-age override input (blank = use default)",
+        "Saving \"Use default\" writes NULL to the corresponding column in `feed_cache_policy` (do NOT copy the current default value)",
+        "Saving an explicit value upserts a row in `feed_cache_policy` for that `feed_id`",
+        "After save, the displayed effective values update without a page reload",
+        "All policy reads use the same effective-policy resolver from US-126 (extract a shared helper if needed)",
+        "Styling uses nested selectors and variables from `_variables.css`; no font-size below 1rem",
+        "TypeScript follows project conventions",
+        "Typecheck and lint pass",
+        "Verify in browser using dev-browser skill: subscribe to a feed, set a per-feed override, reload, confirm the override sticks; clear it back to \"Use default\" and confirm the row no longer shows an override"
+      ],
+      "priority": 128,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-129",
+      "title": "Per-feed cache controls on the feed-reader page",
+      "description": "As a user, I want to change a single feed's cache settings while reading it without navigating to /settings.",
+      "acceptanceCriteria": [
+        "`src/client/routes/feed-reader.ts` adds a cache-controls UI (a button that opens an inline panel or `<details>` block) showing the same per-feed controls as US-128",
+        "The panel writes through the same `feed_cache_policy` upsert helper used in US-128 (no duplicate logic)",
+        "Edits made on the feed-reader page are reflected on `/settings` after navigation (no caching of stale state)",
+        "Styling lives in `src/client/routes/feed-reader.css` using nested selectors inside `.feed-reader { ... }`; uses variables from `_variables.css`; no font-size below 1rem",
+        "TypeScript follows project conventions",
+        "Typecheck and lint pass",
+        "Verify in browser using dev-browser skill: open a feed, toggle its cache mode, navigate to `/settings`, confirm the change is reflected there"
+      ],
+      "priority": 129,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-130",
+      "title": "Show storage used per feed in /settings",
+      "description": "As a user, I want to see how much space each feed's cache is using so I can make informed cleanup decisions.",
+      "acceptanceCriteria": [
+        "`src/client/util.ts` (or a new file) exports `formatBytes(n:number):string` returning e.g. `'1.2 MB'` / `'340 KB'` / `'0 B'` -- check `util.ts` first and only add if not present",
+        "Each feed row in `.settings-feeds-list` shows storage used for that feed: `text bytes` (from `LENGTH(content) + LENGTH(description)` summed over `items WHERE feed_id = ?`) plus image bytes (from `SUM(bytes) FROM cached_images WHERE feed_id = ?`)",
+        "The cache section header shows total account usage = sum of both across all feeds",
+        "Numbers refresh after any save/clear action without a page reload",
+        "Queries are executed via the existing SQLite worker client; no synchronous DB calls on the main thread",
+        "Styling uses nested selectors and variables from `_variables.css`; no font-size below 1rem",
+        "Tests in `test/cached-images.ts` (or new `test/storage-usage.ts`) cover the per-feed and total queries against a seeded `:memory:` DB",
+        "Tests pass",
+        "Typecheck and lint pass",
+        "Verify in browser using dev-browser skill: with at least two feeds cached, confirm per-feed numbers and the account total are non-zero and add up correctly"
+      ],
+      "priority": 130,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-131",
+      "title": "Clear-cache action per feed",
+      "description": "As a user, I want a \"Clear cache\" button per feed so I can free space for one feed without nuking everything.",
+      "acceptanceCriteria": [
+        "`src/client/db/content-storage.ts` adds `clearFeedCache(db, feedId:number):Promise<void>` that: nulls `content` and `description` on `items WHERE feed_id = ?`; deletes `cached_images` rows for that feed (via the helper from US-125) and evicts the corresponding URLs from the `rsss-images-v1` Cache Storage bucket",
+        "A \"Clear cache\" button is added to the per-feed editor in both `/settings` (US-128) and the feed-reader page (US-129)",
+        "Clicking the button shows a confirmation prompt (`window.confirm` is acceptable) before clearing",
+        "After clear, the storage display from US-130 updates to 0 for that feed and the account total decreases by the freed amount",
+        "The action is idempotent (running twice does not throw)",
+        "TypeScript follows project conventions",
+        "New tests in `test/content-storage.ts` (extend if exists, else create) cover: clears text, removes cached_images rows, returns the URL list for cache eviction",
+        "Tests pass",
+        "Typecheck and lint pass",
+        "Verify in browser using dev-browser skill: clear cache for one feed, confirm its storage drops to 0 while another feed's cache is unchanged"
+      ],
+      "priority": 131,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-132",
+      "title": "Evict cached items older than max_age on sync cycle",
+      "description": "As a user, I want stale cached content to be removed automatically so my disk does not fill up with old articles.",
+      "acceptanceCriteria": [
+        "New module `src/client/db/cache-eviction.ts` exports `evictByMaxAge(db):Promise<{itemsEvicted:number, imagesEvicted:number}>`",
+        "For each feed, resolve the effective `max_age_seconds` (per-feed override, else site default) and: null `content`/`description` on items where `(julianday('now') - julianday(items.updated_at)) * 86400 > max_age_seconds`; delete matching `cached_images` rows and evict their URLs from Cache Storage",
+        "Items currently being read in an open tab are best-effort skipped: read a `currently-open-item-id` value from a small in-memory registry exposed by `src/client/state.ts` (add the registry in this story)",
+        "`src/client/db/sync-cycle.ts` calls `evictByMaxAge` once per sync cycle, after the pull-sync step, before push-sync",
+        "Tests in `test/cache-eviction.ts` cover: TTL respects per-feed override, falls back to site default, skips currently-open item id, returns accurate counts",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 132,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-133",
+      "title": "Evict by per-feed size cap on sync cycle",
+      "description": "As a user, I want each feed's cache to stay under its configured size cap so one greedy feed cannot consume all my storage.",
+      "acceptanceCriteria": [
+        "`src/client/db/cache-eviction.ts` adds `evictByFeedSizeCap(db):Promise<{feedsTrimmed:number, bytesFreed:number}>`",
+        "For each feed: compute current size (text + images, same calculation as US-130); if it exceeds the effective `max_size_bytes` (per-feed override, else site default), evict items oldest-first by `items.updated_at` -- nulling text and removing cached_images rows -- until current size is below the cap",
+        "Skip the currently-open item id from the same registry as US-132",
+        "Cache Storage URLs corresponding to evicted `cached_images` rows are removed from the `rsss-images-v1` bucket",
+        "`src/client/db/sync-cycle.ts` calls `evictByFeedSizeCap` after `evictByMaxAge`",
+        "Tests in `test/cache-eviction.ts` cover: per-feed override respected, default applied when no override, oldest-first ordering, currently-open item skipped, no-op when under cap",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 133,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-134",
+      "title": "Evict by account-wide size cap and surface the setting",
+      "description": "As a user, I want to cap total cache size across all feeds so the app cannot grow unbounded on disk.",
+      "acceptanceCriteria": [
+        "`src/client/local-first-settings.ts` adds a `defaultAccountMaxSizeBytes:Signal<number>` (default 500_000_000) persisted in the same `LS_KEY` JSON; missing field falls back to the default",
+        "`src/client/routes/settings.ts` cache section adds a number input \"Total cache size (MB)\" bound to this signal alongside the existing per-feed default cap from US-127",
+        "`src/client/db/cache-eviction.ts` adds `evictByAccountSizeCap(db):Promise<{bytesFreed:number}>`: if total cache (text + images, all feeds) exceeds the cap, evict oldest items across all feeds -- nulling text, removing `cached_images` rows, and clearing the corresponding Cache Storage entries -- until total is under the cap; skip the currently-open item id",
+        "`src/client/db/sync-cycle.ts` calls `evictByAccountSizeCap` after `evictByFeedSizeCap`",
+        "Tests in `test/cache-eviction.ts` cover: trims when over cap across feeds, no-op when under cap, currently-open item skipped, oldest-first across feeds (not per-feed)",
+        "Tests pass",
+        "Typecheck and lint pass",
+        "Verify in browser using dev-browser skill: set a small account cap (e.g. 5 MB), trigger a sync, confirm total cache is reduced below the cap and the storage display reflects the new total"
+      ],
+      "priority": 134,
+      "passes": false,
+      "notes": ""
     }
   ]
 }
