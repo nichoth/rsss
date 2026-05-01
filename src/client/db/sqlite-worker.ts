@@ -14,7 +14,8 @@ import {
 import {
     OUTBOX_SQL,
     SYNC_META_SQL,
-    FEED_CACHE_POLICY_SQL
+    FEED_CACHE_POLICY_SQL,
+    CACHED_IMAGES_SQL
 } from './local-schema.js'
 
 type WorkerDbExecArg =
@@ -174,6 +175,7 @@ function applySchema (targetDb:WorkerDb):void {
     targetDb.exec(DEAD_LETTER_OUTBOX_SQL)
     targetDb.exec(SYNC_META_SQL)
     targetDb.exec(FEED_CACHE_POLICY_SQL)
+    targetDb.exec(CACHED_IMAGES_SQL)
 }
 
 async function initSqliteInWorker ():Promise<SqliteWorkerNamespace> {

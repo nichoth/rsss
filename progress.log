@@ -3226,3 +3226,36 @@ Thread: https://ampcode.com/threads/unknown
   - Cache-mode validation should use an explicit allowlist (`=== 'text' || === 'text_images'`) rather than truthy check, since any string is truthy.
   - Use `typeof x === 'number' && isFinite(x)` to guard numeric settings; `null`, strings, and `NaN`/`Infinity` all fail correctly.
 ---
+
+## 2026-05-01 - US-125
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added `cached_images` table to local schema.
+  - Added `CACHED_IMAGES_SQL` constant to `src/client/db/local-schema.ts` with
+    CREATE TABLE (id, url UNIQUE, feed_id, item_id, size_bytes, cached_at) and
+    two indexes (feed_idx, item_idx).
+  - Wired `CACHED_IMAGES_SQL` into both schema-apply paths: `openLocalDb` in
+    `sqlite-init.ts` and `applySchema` in `sqlite-worker.ts`.
+  - Re-exported `CACHED_IMAGES_SQL` from `sqlite-init.ts`.
+  - Created `src/client/db/cached-images.ts` with four helpers:
+    `recordCachedImage` (INSERT OR IGNORE), `sumByFeed`, `sumTotal`,
+    `deleteByFeed`.
+  - Added `test/cached-images.ts` with 8 tests covering schema shape, record,
+    idempotency, sum-by-feed, sum-total (including empty), delete-by-feed, and
+    idempotent delete. All 21 assertions pass.
+  - Registered `cached-images.js` in `test/index.ts`.
+- Files changed:
+  - `src/client/db/local-schema.ts`
+  - `src/client/db/sqlite-init.ts`
+  - `src/client/db/sqlite-worker.ts`
+  - `src/client/db/cached-images.ts` (new)
+  - `test/cached-images.ts` (new)
+  - `test/index.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Both `sqlite-init.ts` (test/direct path) and `sqlite-worker.ts` (OPFS
+    worker path) maintain independent `applySchema` calls; new tables must be
+    added to both.
+  - `@substrate-system/tapzero` does not expose `t.pass()`; use an assertion
+    like `t.equal(value, expected, msg)` instead.
+---
