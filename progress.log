@@ -3464,3 +3464,43 @@ Thread: https://ampcode.com/threads/unknown
   - The `handleClearFeedCache` pattern (confirm + clear + refresh) is identical in both
     settings.ts and feed-reader.ts; future eviction actions should follow the same shape.
 ---
+
+## 2026-05-01 - US-132
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Evict cached items older than max_age on sync cycle.
+  - Created `src/client/open-item-registry.ts` — module-level registry for the
+    currently open item ID (`setCurrentlyOpenItemId` / `getCurrentlyOpenItemId` /
+    `_resetOpenItemRegistry`).
+  - Modified `src/client/state.ts` to import `setCurrentlyOpenItemId` and
+    update the registry via an `effect` whenever `state.routeItem.value` changes.
+  - Created `src/client/db/cache-eviction.ts` exporting `evictByMaxAge(db, cacheStorage?)`
+    which: iterates all feeds, resolves effective `max_age_seconds` (per-feed or
+    site default), nulls `content`/`description` on stale items, deletes associated
+    `cached_images` rows, evicts URLs from Cache Storage, and skips the currently-
+    open item ID from the registry.
+  - Modified `src/client/db/sync.ts` to call `await evictByMaxAge(db).catch(() => {})`
+    after `pullSync` in `runSyncCycle`, so eviction runs each sync cycle without
+    blocking the rest of the cycle on failure.
+  - Created `test/cache-eviction.ts` with 15 passing tests covering: site-default
+    TTL fallback, per-feed override, currently-open item skip, accurate counts.
+  - Registered `test/cache-eviction.ts` in `test/index.ts`.
+- Files changed:
+  - `src/client/open-item-registry.ts` (new)
+  - `src/client/state.ts`
+  - `src/client/db/cache-eviction.ts` (new)
+  - `src/client/db/sync.ts`
+  - `test/cache-eviction.ts` (new)
+  - `test/index.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Open-item skip: put the registry in `src/client/open-item-registry.ts`
+    (not `state.ts`) to avoid circular deps with `db/sync.ts → db/cache-eviction.ts
+    → state.ts → db/sync.ts`.
+  - `evictByMaxAge` uses `caches` (Cache Storage) as an optional parameter for
+    testability — same pattern as `clearFeedCache` in `content-storage.ts`.
+  - Eviction in `runSyncCycle` wraps `.catch(() => {})` so cache eviction errors
+    never abort or mask sync errors.
+  - Dynamic `IN (?,?,?)` clauses: build `ph = ids.map(() => '?').join(', ')` and
+    pass `ids` as the bind array — tested and working with the SQLite WASM layer.
+---

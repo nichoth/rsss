@@ -15,6 +15,7 @@ import {
     getRemoteItemByRoute,
     localTabLockRevision
 } from './db/index.js'
+import { setCurrentlyOpenItemId } from './open-item-registry.js'
 import type {
     CountsResponse,
     Feed,
@@ -286,6 +287,10 @@ export function State ():AppState {
                     routeItemRequest = null
                 }
             })
+    })
+
+    effect(() => {
+        setCurrentlyOpenItemId(state.routeItem.value?.id ?? null)
     })
 
     /**

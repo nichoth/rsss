@@ -11,6 +11,7 @@ import {
     PushSyncBillingError,
     pushSync
 } from './push-sync.js'
+import { evictByMaxAge } from './cache-eviction.js'
 import {
     isLocalFirstActive,
     setSyncDone,
@@ -118,6 +119,7 @@ async function runSyncCycle (
         throwIfDisabling(db)
         await pullSync(db, abortableFetch, { trackStatus: false })
         throwIfDisabling(db)
+        await evictByMaxAge(db).catch(() => {})
     } catch (err) {
         if (isCancellation(db, err)) return
         if (
