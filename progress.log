@@ -3178,3 +3178,32 @@ Thread: https://ampcode.com/threads/unknown
   - OG image extraction intentionally rejects `http:` image URLs, even when
     found on valid pages, to avoid mixed-content blocking in the client.
 ---
+## 2026-05-01 - US-123
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added `feed_cache_policy` table to local SQLite schema.
+  - Added `FEED_CACHE_POLICY_SQL` constant to `src/client/db/local-schema.ts`
+    with the exact DDL from the acceptance criteria.
+  - Applied it in `src/client/db/sqlite-worker.ts` `applySchema` (production
+    OPFS path) and in `src/client/db/sqlite-init.ts` `openLocalDb` (test-mode
+    in-memory path).
+  - Re-exported `FEED_CACHE_POLICY_SQL` from `sqlite-init.ts` alongside the
+    existing `SYNC_META_SQL` and `OUTBOX_SQL` exports.
+  - Created `test/feed-cache-policy.ts` with 21 assertions covering column
+    existence, NOT NULL / nullable constraints, `updated_at` default,
+    INSERT OR REPLACE upsert, and all-null optional columns.
+  - Registered `feed-cache-policy.js` in `test/index.ts`.
+- Files changed:
+  - `src/client/db/local-schema.ts`
+  - `src/client/db/sqlite-worker.ts`
+  - `src/client/db/sqlite-init.ts`
+  - `test/feed-cache-policy.ts`
+  - `test/index.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Schema additions must be applied in both `sqlite-worker.ts` (`applySchema`)
+    for production OPFS opens and in `sqlite-init.ts` (`openLocalDb`) for
+    test-mode in-memory opens; missing either means tests or production diverge.
+  - `FEED_CACHE_POLICY_SQL` is the new per-feed cache policy table; NULL on
+    optional columns means "inherit site-wide default" (US-124 adds those).
+---

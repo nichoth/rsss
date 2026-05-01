@@ -19,3 +19,15 @@ export const OUTBOX_SQL = `
         last_error TEXT
     );
 `
+
+export const FEED_CACHE_POLICY_SQL = `
+    CREATE TABLE IF NOT EXISTS feed_cache_policy (
+        feed_id INTEGER PRIMARY KEY,
+        cache_mode TEXT CHECK (
+            cache_mode IN ('text', 'text_images')
+        ),
+        max_size_bytes INTEGER,
+        max_age_seconds INTEGER,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+`

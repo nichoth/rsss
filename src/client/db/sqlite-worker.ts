@@ -11,7 +11,11 @@ import {
     SCHEMA_SQL,
     DEAD_LETTER_OUTBOX_SQL
 } from '../../shared/schema.js'
-import { OUTBOX_SQL, SYNC_META_SQL } from './local-schema.js'
+import {
+    OUTBOX_SQL,
+    SYNC_META_SQL,
+    FEED_CACHE_POLICY_SQL
+} from './local-schema.js'
 
 type WorkerDbExecArg =
     string |
@@ -169,6 +173,7 @@ function applySchema (targetDb:WorkerDb):void {
     targetDb.exec(OUTBOX_SQL)
     targetDb.exec(DEAD_LETTER_OUTBOX_SQL)
     targetDb.exec(SYNC_META_SQL)
+    targetDb.exec(FEED_CACHE_POLICY_SQL)
 }
 
 async function initSqliteInWorker ():Promise<SqliteWorkerNamespace> {

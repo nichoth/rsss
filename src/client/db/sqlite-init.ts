@@ -4,11 +4,19 @@ import {
 } from '../../shared/schema.js'
 import { createSQLiteWorkerClient } from './sqlite-worker-factory.js'
 import { WorkerBackedLocalDb } from './local-db.js'
-import { OUTBOX_SQL, SYNC_META_SQL } from './local-schema.js'
+import {
+    OUTBOX_SQL,
+    SYNC_META_SQL,
+    FEED_CACHE_POLICY_SQL
+} from './local-schema.js'
 import { LOCAL_TAB_LOCK_ERROR } from './tab-coordination.js'
 import type { SQLiteWorkerClient } from './sqlite-worker-client.js'
 
-export { SYNC_META_SQL, OUTBOX_SQL } from './local-schema.js'
+export {
+    SYNC_META_SQL,
+    OUTBOX_SQL,
+    FEED_CACHE_POLICY_SQL
+} from './local-schema.js'
 
 export class OPFSUnavailableError extends Error {
     constructor (message = 'OPFS is not available in this browser') {
@@ -156,6 +164,7 @@ export async function openLocalDb (did:string):Promise<Sqlite3Db> {
         db.exec(OUTBOX_SQL)
         db.exec(DEAD_LETTER_OUTBOX_SQL)
         db.exec(SYNC_META_SQL)
+        db.exec(FEED_CACHE_POLICY_SQL)
         return db as Sqlite3Db
     }
 
