@@ -53,6 +53,17 @@ const debug = Debug('rsss:state')
 const CHECKOUT_EMAIL_KEY = 'rsss_checkout_email'
 export const DEFAULT_PAGE_SIZE = 20
 const SYNC_AUTH_EXPIRED = 'Your session expired. Please log in again.'
+const SSE_REFRESH_DEBOUNCE_MS = 250
+const REFRESH_FEEDS_SAFETY_TIMEOUT_MS = 60_000
+
+let refreshFeedsSafetyTimeout:ReturnType<typeof setTimeout>|null = null
+
+function clearRefreshFeedsSafetyTimeout ():void {
+    if (refreshFeedsSafetyTimeout !== null) {
+        clearTimeout(refreshFeedsSafetyTimeout)
+        refreshFeedsSafetyTimeout = null
+    }
+}
 
 let eventSource:EventSource|null = null
 
@@ -435,24 +446,52 @@ State.refreshAfterSync = async function (
 ):Promise<void> {
     const route = state.route.value
 
-    await State.loadFeeds(state)
-    await State.loadItems(state)
-    await State.loadCounts(state)
+    await Promise.all([
+        State.loadFeeds(state),
+        State.loadItems(state),
+        State.loadCounts(state)
+    ])
 
     if (!isItemRoute(route)) return
 
-    state.routeItemLoading.value = true
     const item = await State.loadItemByRoute(state, route)
-
-    if (state.route.value !== route) {
-        state.routeItemLoading.value = false
-        return
-    }
+    if (state.route.value !== route) return
 
     batch(() => {
         state.routeItem.value = item
         state.routeItemLoading.value = false
     })
+}
+
+function buildItemOptions (state:AppState):{
+    feedId?:number;
+    isRead?:boolean;
+    isStarred?:boolean;
+    limit?:number;
+    offset?:number;
+} {
+    const options:{
+        feedId?:number;
+        isRead?:boolean;
+        isStarred?:boolean;
+        limit?:number;
+        offset?:number;
+    } = {
+        limit: state.pageSize.value,
+        offset: state.itemsOffset.value
+    }
+
+    if (state.selectedFeedId.value !== null) {
+        options.feedId = state.selectedFeedId.value
+    }
+    if (state.showUnreadOnly.value) {
+        options.isRead = false
+    }
+    if (state.showStarredOnly.value) {
+        options.isStarred = true
+    }
+
+    return options
 }
 
 /**
@@ -469,9 +508,24 @@ State.openEventStream = function (state:AppState):void {
     })
     eventSource = source
 
+    let pendingRefresh:ReturnType<typeof setTimeout>|null = null
+    const scheduleRefresh = () => {
+        if (pendingRefresh !== null) return
+        pendingRefresh = setTimeout(() => {
+            pendingRefresh = null
+            State.refreshAfterSync(state)
+        }, SSE_REFRESH_DEBOUNCE_MS)
+    }
+
     source.addEventListener('feed-updated', () => {
         debug('SSE feed-updated')
-        State.refreshAfterSync(state)
+        scheduleRefresh()
+    })
+
+    source.addEventListener('refresh-complete', () => {
+        debug('SSE refresh-complete')
+        clearRefreshFeedsSafetyTimeout()
+        state.feedsLoading.value = false
     })
 
     source.addEventListener('error', (ev) => {
@@ -1060,14 +1114,21 @@ State.refreshFeeds = async function (
 ):Promise<void> {
     state.feedsLoading.value = true
 
+    clearRefreshFeedsSafetyTimeout()
+    refreshFeedsSafetyTimeout = setTimeout(() => {
+        refreshFeedsSafetyTimeout = null
+        state.feedsLoading.value = false
+    }, REFRESH_FEEDS_SAFETY_TIMEOUT_MS)
+
     try {
         await api.post('feeds/refresh')
-        await State.loadFeeds(state)
-        await State.loadItems(state)
-        await State.loadCounts(state)
-    } finally {
+    } catch (err) {
+        clearRefreshFeedsSafetyTimeout()
         state.feedsLoading.value = false
+        throw err
     }
+    // Spinner stays on until SSE 'refresh-complete' (or the
+    // safety timeout) clears it.
 }
 
 /**
@@ -1078,39 +1139,23 @@ State.loadItems = async function (
 ):Promise<void> {
     state.itemsLoading.value = true
 
+    let data:ItemsResponse|null = null
     try {
-        const options:{
-            feedId?:number
-            isRead?:boolean
-            isStarred?:boolean
-            limit?:number
-            offset?:number
-        } = {
-            limit: state.pageSize.value,
-            offset: state.itemsOffset.value
-        }
-
-        if (state.selectedFeedId.value !== null) {
-            options.feedId = state.selectedFeedId.value
-        }
-        if (state.showUnreadOnly.value) {
-            options.isRead = false
-        }
-        if (state.showStarredOnly.value) {
-            options.isStarred = true
-        }
-
         const adapter = await getAdapter(
             state.user.value?.did
         )
-        const data = await adapter.getItems(options)
-        state.items.value = data.items as Item[]
-        state.itemsTotal.value = data.total
+        data = await adapter.getItems(buildItemOptions(state))
     } catch (err) {
         debug('Error loading items:', err)
-    } finally {
-        state.itemsLoading.value = false
     }
+
+    batch(() => {
+        if (data) {
+            state.items.value = data.items as Item[]
+            state.itemsTotal.value = data.total
+        }
+        state.itemsLoading.value = false
+    })
 }
 
 /**

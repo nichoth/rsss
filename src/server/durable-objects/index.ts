@@ -643,13 +643,24 @@ export class UserDO extends DurableObject<Env> {
             return c.json({ success: true })
         })
 
-        // Refresh all feeds
-        app.post('/feeds/refresh', async (c) => {
-            const feeds = this.sql.exec('SELECT * FROM feeds').toArray() as unknown as Feed[]
+        // Refresh all feeds. Kick fetches off in waitUntil and
+        // return immediately - clients see per-feed completion via
+        // SSE (`feed-updated`) and the whole-batch completion via
+        // `refresh-complete`.
+        app.post('/feeds/refresh', (c) => {
+            const feeds = this.sql.exec('SELECT * FROM feeds')
+                .toArray() as unknown as Feed[]
 
-            await Promise.all(feeds.map(feed => this.fetchFeed(feed)))
+            this.ctx.waitUntil((async () => {
+                await Promise.all(
+                    feeds.map(feed => this.fetchFeed(feed))
+                )
+                this.broadcast('refresh-complete', {
+                    refreshed: feeds.length
+                })
+            })())
 
-            return c.json({ success: true, refreshed: feeds.length })
+            return c.json({ success: true, queued: feeds.length })
         })
 
         // List items with optional filters
