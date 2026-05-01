@@ -3207,3 +3207,22 @@ Thread: https://ampcode.com/threads/unknown
   - `FEED_CACHE_POLICY_SQL` is the new per-feed cache policy table; NULL on
     optional columns means "inherit site-wide default" (US-124 adds those).
 ---
+
+## 2026-05-01 - US-124
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added site-wide cache defaults to local-first-settings.
+  - Exported `CacheMode` type alias (`'text' | 'text_images'`).
+  - Added module-level default constants `DEFAULT_CACHE_MODE`, `DEFAULT_MAX_SIZE_BYTES`, `DEFAULT_MAX_AGE_SECONDS`.
+  - Added three exported signals: `defaultCacheMode` (default `'text_images'`), `defaultMaxSizeBytes` (default 50 MB), `defaultMaxAgeSeconds` (default 30 days).
+  - Extended `loadLocalFirstSettings` to read all three new fields inside the existing `batch(...)`, with safe fallback for missing/corrupt values.
+  - Extended `saveLocalFirstSettings` to write all three new fields alongside existing ones; no new localStorage key.
+  - Added four new tests in `test/local-first-settings.ts`: initial defaults, round-trip, missing-field fallback, corrupt-value fallback.
+- Files changed:
+  - `src/client/local-first-settings.ts`
+  - `test/local-first-settings.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Cache-mode validation should use an explicit allowlist (`=== 'text' || === 'text_images'`) rather than truthy check, since any string is truthy.
+  - Use `typeof x === 'number' && isFinite(x)` to guard numeric settings; `null`, strings, and `NaN`/`Infinity` all fail correctly.
+---
