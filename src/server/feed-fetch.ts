@@ -2,6 +2,7 @@ const MAX_FEED_BYTES = 5 * 1024 * 1024
 const MAX_HEAD_BYTES = 256 * 1024
 const FEED_FETCH_TIMEOUT_MS = 15_000
 const MAX_FEED_REDIRECTS = 3
+const MAX_ARTICLE_REDIRECTS = 5
 const DNS_JSON_URL = 'https://cloudflare-dns.com/dns-query'
 
 type ResolveHostname = (hostname:string) => Promise<string[]>
@@ -59,7 +60,11 @@ export async function fetchFeedText (
     feedUrl:string,
     options:FetchFeedTextOptions = {}
 ):Promise<string> {
-    const result = await fetchValidatedResponse(feedUrl, options)
+    const result = await fetchValidatedResponse(feedUrl, {
+        ...options,
+        maxRedirects: MAX_FEED_REDIRECTS,
+        redirectErrorMessage: 'Feed redirected too many times'
+    })
 
     return readBoundedText(result.response, options.maxBytes || MAX_FEED_BYTES)
 }
@@ -69,7 +74,11 @@ export async function fetchOgImage (
     options:FetchOgImageOptions = {}
 ):Promise<string|null> {
     try {
-        const result = await fetchValidatedResponse(articleUrl, options)
+        const result = await fetchValidatedResponse(articleUrl, {
+            ...options,
+            maxRedirects: MAX_ARTICLE_REDIRECTS,
+            redirectErrorMessage: 'Article redirected too many times'
+        })
         const contentType = result.response.headers.get('content-type') || ''
 
         if (!isHtmlContentType(contentType)) return null
@@ -93,12 +102,18 @@ export async function fetchOgImage (
 
 async function fetchValidatedResponse (
     inputUrl:string,
-    options:FetchFeedTextOptions
+    options:FetchFeedTextOptions & {
+        maxRedirects?:number
+        redirectErrorMessage?:string
+    }
 ):Promise<{ response:Response; url:string }> {
     let url = await validateFeedUrl(inputUrl)
     const fetchFn = options.fetchFn || fetch
     const resolveHostname = options.resolveHostname ||
         (options.fetchFn ? undefined : resolveHostnameWithDoh)
+    const maxRedirects = options.maxRedirects ?? MAX_FEED_REDIRECTS
+    const redirectErrorMessage = options.redirectErrorMessage ||
+        'Feed redirected too many times'
 
     for (let redirectCount = 0; ; redirectCount++) {
         await validateResolvedHostname(url, resolveHostname)
@@ -113,9 +128,9 @@ async function fetchValidatedResponse (
         })
 
         if (isRedirect(response)) {
-            if (redirectCount >= MAX_FEED_REDIRECTS) {
+            if (redirectCount >= maxRedirects) {
                 throw new FeedFetchError(
-                    'Feed redirected too many times',
+                    redirectErrorMessage,
                     310
                 )
             }

@@ -34,10 +34,10 @@ server-side files are touched by this feature.
 
 **Purpose**: Confirm the working state before behavioural changes.
 
-- [ ] T001 Confirm branch `001-fix-og-image-redirects` is checked out and
+- [X] T001 Confirm branch `001-fix-og-image-redirects` is checked out and
       working tree is clean (`git status` shows no uncommitted changes
       outside `specs/001-fix-og-image-redirects/`)
-- [ ] T002 Run baseline `npm test && npm run lint` and record any
+- [X] T002 Run baseline `npm test && npm run lint` and record any
       pre-existing failures so post-change runs can be compared
 
 ---
@@ -52,17 +52,17 @@ can be verified.
 
 **CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T003 In `src/server/feed-fetch.ts` add a top-of-file constant
+- [X] T003 In `src/server/feed-fetch.ts` add a top-of-file constant
       `MAX_ARTICLE_REDIRECTS = 5` next to the existing
       `MAX_FEED_REDIRECTS = 3`. Do not change the value of
       `MAX_FEED_REDIRECTS`.
-- [ ] T004 In `src/server/feed-fetch.ts` extend the internal
+- [X] T004 In `src/server/feed-fetch.ts` extend the internal
       `fetchValidatedResponse` helper to accept an optional
       `maxRedirects?:number` option (defaulting to `MAX_FEED_REDIRECTS`)
       and use it in the redirect-loop bound. Do not expose the option
       on the public `FetchFeedTextOptions` or `FetchOgImageOptions`
       types (research.md R-2).
-- [ ] T005 In `src/server/feed-fetch.ts` make `fetchFeedText` continue to
+- [X] T005 In `src/server/feed-fetch.ts` make `fetchFeedText` continue to
       call `fetchValidatedResponse` with `maxRedirects:
       MAX_FEED_REDIRECTS` and continue to throw `FeedFetchError('Feed
       redirected too many times')` on the cap. No behaviour change for
@@ -92,22 +92,22 @@ fires.
 > Write these tests FIRST. Confirm they FAIL on the current foundational
 > state before implementing T010–T011.
 
-- [ ] T006 [P] [US1] In `test/feed-fetch-security.ts` update the existing
+- [X] T006 [P] [US1] In `test/feed-fetch-security.ts` update the existing
       redirect-limit test for the article path to expect 6 `fetch` calls
       (initial + 5 redirects) instead of 4, and assert the thrown
       `FeedFetchError` message is `'Article redirected too many times'`
       (research.md R-3, R-6).
-- [ ] T007 [P] [US1] In `test/feed-fetch-security.ts` add a parallel
+- [X] T007 [P] [US1] In `test/feed-fetch-security.ts` add a parallel
       test confirming `fetchFeedText` still caps at 4 calls (initial + 3
       redirects) and still throws
       `FeedFetchError('Feed redirected too many times')`.
-- [ ] T008 [P] [US1] In `test/feed-parser.ts` add a test that stubs
+- [X] T008 [P] [US1] In `test/feed-parser.ts` add a test that stubs
       `globalThis.fetch` so an article URL returns 302→302→302→302→302→302
       (exceeds `MAX_ARTICLE_REDIRECTS`), runs the `UserDO` refresh path
       that triggers OG enrichment, spies on `console.error`, and asserts
       the spy was NOT called with anything matching
       `/redirected too many times/i` or `/og image/i` (research.md R-6).
-- [ ] T009 [P] [US1] In `test/feed-parser.ts` add a regression test that
+- [X] T009 [P] [US1] In `test/feed-parser.ts` add a regression test that
       stubs `globalThis.fetch` so the FEED-XML URL exceeds
       `MAX_FEED_REDIRECTS`, runs the refresh, spies on `console.error`,
       and asserts exactly one error line fires whose message contains
@@ -116,19 +116,19 @@ fires.
 
 ### Implementation for User Story 1
 
-- [ ] T010 [US1] In `src/server/feed-fetch.ts` change `fetchOgImage` to
+- [X] T010 [US1] In `src/server/feed-fetch.ts` change `fetchOgImage` to
       call `fetchValidatedResponse` with `maxRedirects:
       MAX_ARTICLE_REDIRECTS` and to throw
       `FeedFetchError('Article redirected too many times')` on the cap
       (research.md R-2, R-3). The function must continue to return
       `null` for any caught `FeedFetchError`.
-- [ ] T011 [US1] In `src/server/durable-objects/index.ts` remove the two
+- [X] T011 [US1] In `src/server/durable-objects/index.ts` remove the two
       `console.error('Error fetching og image for …', err)` call sites
       inside `fetchOgImageBeforeDeadline` (the `onError` callback near
       line ~1290 and the outer `catch` near line ~1301). Do NOT replace
       them with a `console.debug` or any other logger — research.md R-4
       says no debug log is added in this change.
-- [ ] T012 [US1] In `src/server/durable-objects/index.ts` verify (and
+- [X] T012 [US1] In `src/server/durable-objects/index.ts` verify (and
       leave unchanged) the existing feed-XML `catch` block that emits
       `console.error("Error fetching feed ${feed.url}", err)` and writes
       `last_error` / `last_status` on the feed row. Add a one-line
@@ -160,17 +160,17 @@ with either the feed-supplied image or `thumbnail_url IS NULL`.
 
 ### Tests for User Story 2
 
-- [ ] T013 [P] [US2] In `test/feed-parser.ts` add a happy-path test
+- [X] T013 [P] [US2] In `test/feed-parser.ts` add a happy-path test
       that stubs `globalThis.fetch` so the article URL returns 3 302
       hops then 200 with `<meta property="og:image" content="…">`, runs
       the refresh, and asserts the new item row's `thumbnail_url`
       matches the stubbed OG image URL.
-- [ ] T014 [P] [US2] In `test/feed-parser.ts` add a fallback test where
+- [X] T014 [P] [US2] In `test/feed-parser.ts` add a fallback test where
       the article URL exceeds the article redirect budget but the feed
       XML supplied a `<media:thumbnail>` (or equivalent) image; assert
       the item is inserted with `thumbnail_url` set to the
       feed-supplied image (FR-007 fallback path).
-- [ ] T015 [P] [US2] In `test/feed-parser.ts` add a "no thumbnail at
+- [X] T015 [P] [US2] In `test/feed-parser.ts` add a "no thumbnail at
       all" test where the article URL exceeds the budget AND the feed
       XML supplied no fallback image; assert the item is still inserted
       with `thumbnail_url IS NULL` and is therefore visible in a
@@ -184,7 +184,7 @@ additional production code is required. The implementation tasks here
 are integration-level verifications that the budget actually unlocks
 the previously-failing chains.
 
-- [ ] T016 [US2] Run the new tests T013–T015 against the implementation
+- [X] T016 [US2] Run the new tests T013–T015 against the implementation
       from T010 and confirm they pass without further code changes. If
       any fails, the failure indicates a real bug in T010's wiring; fix
       `src/server/feed-fetch.ts` rather than weakening the test.
@@ -194,6 +194,8 @@ the previously-failing chains.
       article redirects. Confirm thumbnails appear for resolvable
       chains and the refresh completes within the existing
       `OG_IMAGE_FETCH_BUDGET_MS` (10s) for loop items (SC-002, SC-003).
+      *(MANUAL — deferred to user; requires real subscribed feed and
+      live network access.)*
 
 **Checkpoint**: User Stories 1 AND 2 both pass their independent tests.
 ≥95% of newly-ingested items in a representative refresh end up with a
@@ -206,13 +208,13 @@ refresh wall time (SC-003).
 
 **Purpose**: Final gates before merge. No new behaviour.
 
-- [ ] T018 Run `npm test && npm run lint` and confirm a green run.
+- [X] T018 Run `npm test && npm run lint` and confirm a green run.
       Compare against the T002 baseline; any newly-failing test must be
       fixed (not skipped) before merge.
-- [ ] T019 Run `npm run typecheck` to confirm
+- [X] T019 Run `npm run typecheck` to confirm
       `src/server/feed-fetch.ts` and `src/server/durable-objects/index.ts`
       still type-check cleanly.
-- [ ] T020 Re-read the diff for `src/server/feed-fetch.ts` and
+- [X] T020 Re-read the diff for `src/server/feed-fetch.ts` and
       `src/server/durable-objects/index.ts` and confirm: (a) no CSS
       changes, (b) no emoji in code or comments, (c) no logging of
       article URLs at error level, (d) no public type changes, (e) no
@@ -222,6 +224,7 @@ refresh wall time (SC-003).
       confirm a feed whose XML loops still surfaces `last_error` /
       `last_status` in the UI and logs exactly one feed-level
       `console.error` line (SC-004 / FR-005).
+      *(MANUAL — deferred to user; live network walkthrough.)*
 
 ---
 
