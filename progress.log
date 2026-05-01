@@ -3327,3 +3327,42 @@ Thread: https://ampcode.com/threads/unknown
     --bundle --loader:.css=text | ./node_modules/.bin/tapout`.
   - tapzero does not have `t.notOk`; use `t.ok(!value, msg)` instead.
 ---
+## 2026-05-01 - US-128
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Per-feed cache controls in /settings feed list.
+  - New `src/client/db/feed-cache-policy.ts` with `FeedCachePolicyRow`,
+    `EffectivePolicy`, `resolveEffectivePolicy`, `getFeedCachePolicy`,
+    `upsertFeedCachePolicy`, `loadFeedPolicies`, and `feedPolicies` signal.
+  - Settings route loads per-feed policies from local DB in a `useEffect`
+    whenever feeds or sync state changes.
+  - Each feed row now shows the effective cache mode label with a `(default)`
+    tag when the value is inherited from site defaults.
+  - Added `<details class="feed-cache-controls">` per feed row with:
+    cache mode select (Use default / Text only / Text + images),
+    max-size number input (blank = default), max-age number input (blank =
+    default).
+  - Handlers optimistically update the `feedPolicies` signal, then persist
+    via `upsertFeedCachePolicy`; gracefully no-ops when no local DB.
+  - When all three policy fields are NULL, the row is deleted from
+    `feed_cache_policy` (clean state).
+  - Added 5 focused tests covering: default label rendering, override label,
+    controls existence, signal update on select change, clearing to default.
+  - Updated `settings.css` with styles for `.feed-cache-mode`,
+    `.feed-cache-controls`, `.feed-cache-form`, `.cache-field-label`.
+- Files changed:
+  - `src/client/db/feed-cache-policy.ts` (new)
+  - `src/client/routes/settings.ts`
+  - `src/client/routes/settings.css`
+  - `test/settings-route.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Per-feed policy state lives in `feedPolicies` signal
+    (`src/client/db/feed-cache-policy.ts`); import it instead of
+    querying the DB directly in components.
+  - `resolveEffectivePolicy` is the shared helper for effective policy
+    resolution (cache_mode, max_size_bytes, max_age_seconds with default
+    fallbacks); use it everywhere instead of inline `?? default` patterns.
+  - Optimistic signal update before DB write lets tests verify behavior
+    without a real OPFS database.
+---

@@ -1996,7 +1996,7 @@
         "Verify in browser using dev-browser skill: subscribe to a feed, set a per-feed override, reload, confirm the override sticks; clear it back to \"Use default\" and confirm the row no longer shows an override"
       ],
       "priority": 128,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

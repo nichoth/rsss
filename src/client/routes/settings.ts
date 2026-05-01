@@ -14,7 +14,8 @@ import {
     defaultMaxAgeSeconds,
     setSyncSubscriptions,
     saveLocalFirstSettings,
-    loadLocalFirstSettings
+    loadLocalFirstSettings,
+    type CacheMode
 } from '../local-first-settings.js'
 import {
     isLocalFirstSupported,
@@ -36,6 +37,13 @@ import {
 } from '../db/index.js'
 import { runSyncCycle } from '../db/sync-cycle.js'
 import { syncStatus, syncError } from '../db/sync-status.js'
+import {
+    feedPolicies,
+    loadFeedPolicies,
+    upsertFeedCachePolicy,
+    resolveEffectivePolicy,
+    type FeedCachePolicyRow
+} from '../db/feed-cache-policy.js'
 import './settings.css'
 import { NBSP } from '../constants.js'
 
@@ -53,6 +61,16 @@ export const SettingsRoute:FunctionComponent<{
             State.loadBillingStatus()
         }
     }, [])
+
+    useEffect(() => {
+        const did = state.user.value?.did
+        const db = did ?
+            (getBootstrappedDb() ?? getLocalDb(did)) :
+            null
+        if (!db || feeds.value.length === 0) return
+        const ids = feeds.value.map(f => f.id)
+        loadFeedPolicies(db, ids).catch(() => {})
+    }, [feeds.value, syncSubscriptions.value])
 
     const supported = localFirstSupported.value
     const inProgress = bootstrapInProgress.value
@@ -231,6 +249,73 @@ export const SettingsRoute:FunctionComponent<{
                 defaultMaxAgeSeconds.value = Math.round(days * 86400)
             })
             saveLocalFirstSettings()
+        }
+    }
+
+    function getLocalDbForUser ():ReturnType<typeof getBootstrappedDb> {
+        const did = state.user.value?.did
+        return did ?
+            (getBootstrappedDb() ?? getLocalDb(did)) :
+            null
+    }
+
+    async function saveFeedPolicy (
+        feedId:number,
+        patch:Partial<FeedCachePolicyRow>
+    ):Promise<void> {
+        const current = feedPolicies.value[feedId] ?? null
+        const updated:FeedCachePolicyRow = {
+            feed_id: feedId,
+            cache_mode: current?.cache_mode ?? null,
+            max_size_bytes: current?.max_size_bytes ?? null,
+            max_age_seconds: current?.max_age_seconds ?? null,
+            ...patch
+        }
+        feedPolicies.value = {
+            ...feedPolicies.value,
+            [feedId]: updated
+        }
+        const db = getLocalDbForUser()
+        if (!db) return
+        try {
+            await upsertFeedCachePolicy(db, feedId, updated)
+        } catch (err) {
+            console.error(
+                '[settings] feed policy save failed',
+                err instanceof Error ? err.message : ''
+            )
+        }
+    }
+
+    function handleFeedCacheModeChange (feedId:number) {
+        return (ev:Event) => {
+            const val = (ev.target as HTMLSelectElement).value
+            const mode = (val === 'text' || val === 'text_images') ?
+                val as CacheMode :
+                null
+            saveFeedPolicy(feedId, { cache_mode: mode })
+        }
+    }
+
+    function handleFeedMaxSizeChange (feedId:number) {
+        return (ev:Event) => {
+            const raw = (ev.target as HTMLInputElement).value.trim()
+            const mb = raw === '' ? null : parseFloat(raw)
+            const bytes = (mb !== null && isFinite(mb) && mb >= 1) ?
+                Math.round(mb * 1_000_000) :
+                null
+            saveFeedPolicy(feedId, { max_size_bytes: bytes })
+        }
+    }
+
+    function handleFeedMaxAgeChange (feedId:number) {
+        return (ev:Event) => {
+            const raw = (ev.target as HTMLInputElement).value.trim()
+            const days = raw === '' ? null : parseFloat(raw)
+            const secs = (days !== null && isFinite(days) && days >= 1) ?
+                Math.round(days * 86400) :
+                null
+            saveFeedPolicy(feedId, { max_age_seconds: secs })
         }
     }
 
@@ -488,6 +573,21 @@ export const SettingsRoute:FunctionComponent<{
                             No feeds followed yet.
                         </p>
                     ` : feeds.value.map(feed => {
+                const policy = feedPolicies.value[feed.id] ?? null
+                const eff = resolveEffectivePolicy(policy)
+                const modeLabel = eff.cacheMode === 'text' ?
+                    'Text only' :
+                    'Text + images'
+                const sizeVal = policy?.max_size_bytes != null ?
+                    String(Math.round(
+                        policy.max_size_bytes / 1_000_000
+                    )) :
+                    ''
+                const ageVal = policy?.max_age_seconds != null ?
+                    String(Math.round(
+                        policy.max_age_seconds / 86400
+                    )) :
+                    ''
                 return html`
                         <li
                             class="settings-feed-item"
@@ -503,24 +603,99 @@ export const SettingsRoute:FunctionComponent<{
                                 >
                                     ${feed.url}
                                 </a>
+                                <span class="feed-cache-mode">
+                                    ${modeLabel}${eff.isDefault.cacheMode ?
+                                        ' (default)' :
+                                        ''}
+                                </span>
                             </div>
-                            <button
-                                class="btn-delete"
-                                onClick=${(e:Event) => {
-                                    e.preventDefault()
-                                    if (confirm(
-                                        'Are you sure you want' +
-                                        ' to unfollow this feed?'
-                                    )) {
-                                        State.deleteFeed(
-                                            state,
-                                            feed.id
-                                        )
-                                    }
-                                }}
-                            >
-                                Unfollow
-                            </button>
+                            <div class="feed-controls">
+                                <details class="feed-cache-controls">
+                                    <summary>Cache settings</summary>
+                                    <div class="feed-cache-form">
+                                        <label class="cache-field-label">
+                                            Cache mode
+                                            <select
+                                                name=${`feed-cache-mode-${feed.id}`}
+                                                onChange=${handleFeedCacheModeChange(
+                                                    feed.id
+                                                )}
+                                            >
+                                                <option
+                                                    value=""
+                                                    selected=${
+                                                        policy?.cache_mode ==
+                                                        null
+                                                    }
+                                                >
+                                                    Use default
+                                                </option>
+                                                <option
+                                                    value="text"
+                                                    selected=${
+                                                        policy?.cache_mode ===
+                                                        'text'
+                                                    }
+                                                >
+                                                    Text only
+                                                </option>
+                                                <option
+                                                    value="text_images"
+                                                    selected=${
+                                                        policy?.cache_mode ===
+                                                        'text_images'
+                                                    }
+                                                >
+                                                    Text + images
+                                                </option>
+                                            </select>
+                                        </label>
+                                        <label class="cache-field-label">
+                                            Max size (MB, blank = default)
+                                            <input
+                                                type="number"
+                                                name=${`feed-max-size-${feed.id}`}
+                                                min="1"
+                                                value=${sizeVal}
+                                                placeholder="default"
+                                                onChange=${handleFeedMaxSizeChange(
+                                                    feed.id
+                                                )}
+                                            />
+                                        </label>
+                                        <label class="cache-field-label">
+                                            Keep for (days, blank = default)
+                                            <input
+                                                type="number"
+                                                name=${`feed-max-age-${feed.id}`}
+                                                min="1"
+                                                value=${ageVal}
+                                                placeholder="default"
+                                                onChange=${handleFeedMaxAgeChange(
+                                                    feed.id
+                                                )}
+                                            />
+                                        </label>
+                                    </div>
+                                </details>
+                                <button
+                                    class="btn-delete"
+                                    onClick=${(e:Event) => {
+                                        e.preventDefault()
+                                        if (confirm(
+                                            'Are you sure you want' +
+                                            ' to unfollow this feed?'
+                                        )) {
+                                            State.deleteFeed(
+                                                state,
+                                                feed.id
+                                            )
+                                        }
+                                    }}
+                                >
+                                    Unfollow
+                                </button>
+                            </div>
                         </li>
                         `
             })

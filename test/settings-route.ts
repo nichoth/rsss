@@ -19,11 +19,16 @@ import {
     type BillingStatus
 } from '../src/client/billing-status.js'
 import { localFirstSupported } from '../src/client/db/index.js'
+import {
+    feedPolicies,
+    _resetFeedPolicies
+} from '../src/client/db/feed-cache-policy.js'
+import type { Feed } from '../src/client/db/types.js'
 
 interface MinimalState {
     isAuthenticated:ReturnType<typeof signal<boolean>>;
     user:ReturnType<typeof signal<null>>;
-    feeds:ReturnType<typeof signal<[]>>;
+    feeds:ReturnType<typeof signal<Feed[]>>;
     _setRoute:(r:string) => void;
     _routeHistory:string[];
 }
@@ -41,6 +46,20 @@ function makeState ():MinimalState {
         feeds: signal([]),
         _setRoute: (r:string) => { history.push(r) },
         _routeHistory: history
+    }
+}
+
+function makeFeed (overrides:Partial<Feed> = {}):Feed {
+    return {
+        id: 1,
+        url: 'https://example.com/feed.rss',
+        title: 'Example Feed',
+        description: null,
+        site_url: null,
+        last_fetched: null,
+        created_at: '2025-01-01',
+        updated_at: '2025-01-01',
+        ...overrides
     }
 }
 
@@ -312,3 +331,182 @@ test('SettingsRoute cache section save persists on change', async (t) => {
         unmount(root)
     }
 })
+
+// US-128: Per-feed cache controls
+
+test('Per-feed row shows effective cache mode with (default) tag', async (t) => {
+    const state = makeState()
+    state.feeds.value = [makeFeed({ id: 1, title: 'My Feed' })]
+    _resetFeedPolicies()
+    defaultCacheMode.value = 'text'
+
+    const root = mount(state)
+    try {
+        await nextTick()
+        const item = root.querySelector('.settings-feed-item')
+        t.ok(item, 'feed item rendered')
+        const modeEl = item?.querySelector('.feed-cache-mode')
+        t.ok(modeEl, '.feed-cache-mode element exists')
+        t.ok(
+            modeEl?.textContent?.includes('(default)'),
+            'shows (default) when no override'
+        )
+        t.ok(
+            modeEl?.textContent?.includes('Text only'),
+            'shows Text only when defaultCacheMode is text'
+        )
+    } finally {
+        defaultCacheMode.value = 'text_images'
+        _resetFeedPolicies()
+        unmount(root)
+    }
+})
+
+test('Per-feed row shows override label without (default) when policy set',
+    async (t) => {
+        const state = makeState()
+        state.feeds.value = [makeFeed({ id: 2, title: 'Override Feed' })]
+        feedPolicies.value = {
+            2: {
+                feed_id: 2,
+                cache_mode: 'text_images',
+                max_size_bytes: null,
+                max_age_seconds: null
+            }
+        }
+        defaultCacheMode.value = 'text'
+
+        const root = mount(state)
+        try {
+            await nextTick()
+            const item = root.querySelector('.settings-feed-item')
+            const modeEl = item?.querySelector('.feed-cache-mode')
+            t.ok(modeEl, '.feed-cache-mode element exists')
+            t.ok(
+                !modeEl?.textContent?.includes('(default)'),
+                'no (default) tag when cache_mode is overridden'
+            )
+            t.ok(
+                modeEl?.textContent?.includes('Text + images'),
+                'shows Text + images for text_images override'
+            )
+        } finally {
+            defaultCacheMode.value = 'text_images'
+            _resetFeedPolicies()
+            unmount(root)
+        }
+    }
+)
+
+test('Per-feed details element contains cache controls', async (t) => {
+    const state = makeState()
+    state.feeds.value = [makeFeed({ id: 3 })]
+    _resetFeedPolicies()
+
+    const root = mount(state)
+    try {
+        await nextTick()
+        const details = root.querySelector(
+            '.settings-feed-item details.feed-cache-controls'
+        )
+        t.ok(details, '<details class="feed-cache-controls"> exists')
+
+        const select = details?.querySelector(
+            'select[name="feed-cache-mode-3"]'
+        ) as HTMLSelectElement|null
+        t.ok(select, 'cache mode select exists')
+
+        const opts = select ?
+            Array.from(select.options).map(o => o.value) :
+            []
+        t.ok(opts.includes(''), 'has Use default option (value="")')
+        t.ok(opts.includes('text'), 'has text option')
+        t.ok(opts.includes('text_images'), 'has text_images option')
+
+        const sizeInput = details?.querySelector(
+            'input[name="feed-max-size-3"]'
+        )
+        t.ok(sizeInput, 'max size input exists')
+
+        const ageInput = details?.querySelector(
+            'input[name="feed-max-age-3"]'
+        )
+        t.ok(ageInput, 'max age input exists')
+    } finally {
+        _resetFeedPolicies()
+        unmount(root)
+    }
+})
+
+test(
+    'Changing per-feed cache mode select updates feedPolicies signal',
+    async (t) => {
+        const state = makeState()
+        state.feeds.value = [makeFeed({ id: 4, title: 'Signal Test' })]
+        _resetFeedPolicies()
+        defaultCacheMode.value = 'text_images'
+
+        const root = mount(state)
+        try {
+            await nextTick()
+            const select = root.querySelector(
+                'select[name="feed-cache-mode-4"]'
+            ) as HTMLSelectElement|null
+            t.ok(select, 'cache mode select exists')
+            if (!select) return
+
+            select.value = 'text'
+            select.dispatchEvent(new Event('change', { bubbles: true }))
+            await nextTick()
+
+            t.equal(
+                feedPolicies.value[4]?.cache_mode,
+                'text',
+                'feedPolicies updated for feed 4'
+            )
+        } finally {
+            defaultCacheMode.value = 'text_images'
+            _resetFeedPolicies()
+            unmount(root)
+        }
+    }
+)
+
+test(
+    'Selecting Use default clears cache_mode override in feedPolicies',
+    async (t) => {
+        const state = makeState()
+        state.feeds.value = [makeFeed({ id: 5 })]
+        feedPolicies.value = {
+            5: {
+                feed_id: 5,
+                cache_mode: 'text',
+                max_size_bytes: null,
+                max_age_seconds: null
+            }
+        }
+
+        const root = mount(state)
+        try {
+            await nextTick()
+            const select = root.querySelector(
+                'select[name="feed-cache-mode-5"]'
+            ) as HTMLSelectElement|null
+            t.ok(select, 'cache mode select exists')
+            if (!select) return
+
+            select.value = ''
+            select.dispatchEvent(new Event('change', { bubbles: true }))
+            await nextTick()
+
+            t.equal(
+                feedPolicies.value[5]?.cache_mode ?? null,
+                null,
+                'cache_mode cleared to null on Use default'
+            )
+        } finally {
+            _resetFeedPolicies()
+            unmount(root)
+        }
+    }
+)
