@@ -3296,3 +3296,34 @@ Thread: https://ampcode.com/threads/unknown
   - Image caching must happen OUTSIDE the pull-sync SQLite transaction so
     network fetches do not hold the write lock open.
 ---
+
+## 2026-05-01 - US-127
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added site-wide cache controls section to /settings.
+  - Added `<section class="settings-section cache-section">` titled "Cache"
+    placed after the local-first section and before the per-feed list.
+  - Section contains: radio group for `defaultCacheMode` ("Text only" /
+    "Text and images"), number input for `defaultMaxSizeBytes` (MB display),
+    number input for `defaultMaxAgeSeconds` (days display).
+  - Inputs convert MB<->bytes and days<->seconds; changes call
+    `saveLocalFirstSettings()` and update signals via `batch(...)`.
+  - Helper text "These defaults apply to feeds with no override." placed at
+    section top.
+  - Styling in `.cache-section` with nested selectors and existing variables.
+  - Added `batch` import from `@preact/signals` to `settings.ts`.
+  - Added focused tests for section ordering, radio state, radio change,
+    size input display/update, age input display/update, and persistence.
+- Files changed:
+  - `src/client/routes/settings.ts`
+  - `src/client/routes/settings.css`
+  - `test/settings-route.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `batch` from `@preact/signals` must be imported explicitly in route
+    components; it is not re-exported from the preact signals hooks package.
+  - Settings-route tests use `--loader:.css=text` esbuild flag to handle CSS
+    imports; run via `./node_modules/.bin/esbuild ./test/settings-route.ts
+    --bundle --loader:.css=text | ./node_modules/.bin/tapout`.
+  - tapzero does not have `t.notOk`; use `t.ok(!value, msg)` instead.
+---

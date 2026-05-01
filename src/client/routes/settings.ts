@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { type FunctionComponent } from 'preact'
 import { useEffect, useRef } from 'preact/hooks'
-import { useComputed } from '@preact/signals'
+import { useComputed, batch } from '@preact/signals'
 import { CheckBox } from '@substrate-system/check-box'
 import { type AppState, State } from '../state.js'
 import { billingStatus } from '../billing-status.js'
@@ -9,6 +9,9 @@ import {
     syncSubscriptions,
     pendingSyncSubscriptions,
     storeContent,
+    defaultCacheMode,
+    defaultMaxSizeBytes,
+    defaultMaxAgeSeconds,
     setSyncSubscriptions,
     saveLocalFirstSettings,
     loadLocalFirstSettings
@@ -201,6 +204,36 @@ export const SettingsRoute:FunctionComponent<{
         })
     }
 
+    function handleCacheModeChange (ev:Event) {
+        const val = (ev.target as HTMLInputElement).value
+        if (val === 'text' || val === 'text_images') {
+            batch(() => {
+                defaultCacheMode.value = val
+            })
+            saveLocalFirstSettings()
+        }
+    }
+
+    function handleMaxSizeChange (ev:Event) {
+        const mb = parseFloat((ev.target as HTMLInputElement).value)
+        if (isFinite(mb) && mb >= 1) {
+            batch(() => {
+                defaultMaxSizeBytes.value = Math.round(mb * 1_000_000)
+            })
+            saveLocalFirstSettings()
+        }
+    }
+
+    function handleMaxAgeChange (ev:Event) {
+        const days = parseFloat((ev.target as HTMLInputElement).value)
+        if (isFinite(days) && days >= 1) {
+            batch(() => {
+                defaultMaxAgeSeconds.value = Math.round(days * 86400)
+            })
+            saveLocalFirstSettings()
+        }
+    }
+
     async function handleSync () {
         const did = state.user.value?.did
         if (!did) return
@@ -384,6 +417,66 @@ export const SettingsRoute:FunctionComponent<{
                     <p class="bootstrap-error">${syncError.value}</p>
                 `}
             `}
+        </section>
+
+        <section class="settings-section cache-section">
+            <h2>Cache</h2>
+            <p class="section-desc">
+                These defaults apply to feeds with no override.
+            </p>
+            <div class="cache-setting">
+                <fieldset class="cache-mode-group">
+                    <legend>Cache mode</legend>
+                    <label class="cache-radio-label">
+                        <input
+                            type="radio"
+                            name="default-cache-mode"
+                            value="text"
+                            checked=${defaultCacheMode.value === 'text'}
+                            onChange=${handleCacheModeChange}
+                        />
+                        Text only
+                    </label>
+                    <label class="cache-radio-label">
+                        <input
+                            type="radio"
+                            name="default-cache-mode"
+                            value="text_images"
+                            checked=${defaultCacheMode.value === 'text_images'}
+                            onChange=${handleCacheModeChange}
+                        />
+                        Text and images
+                    </label>
+                </fieldset>
+            </div>
+            <div class="cache-setting">
+                <label class="cache-input-label">
+                    Max cache size per feed (MB)
+                    <input
+                        type="number"
+                        name="default-max-size-mb"
+                        min="1"
+                        value=${Math.round(
+                            defaultMaxSizeBytes.value / 1_000_000
+                        )}
+                        onChange=${handleMaxSizeChange}
+                    />
+                </label>
+            </div>
+            <div class="cache-setting">
+                <label class="cache-input-label">
+                    Keep cached items for (days)
+                    <input
+                        type="number"
+                        name="default-max-age-days"
+                        min="1"
+                        value=${Math.round(
+                            defaultMaxAgeSeconds.value / 86400
+                        )}
+                        onChange=${handleMaxAgeChange}
+                    />
+                </label>
+            </div>
         </section>
 
         <section class="settings-section">

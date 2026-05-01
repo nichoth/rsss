@@ -178,6 +178,57 @@
     }
 }
 
+.cache-section {
+    & .cache-setting {
+        padding: 0.75rem 0;
+        border-bottom: 1px solid var(--color-border-subtle);
+
+        &:last-of-type {
+            border-bottom: none;
+        }
+    }
+
+    & .cache-mode-group {
+        border: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+
+        & legend {
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+            padding: 0;
+        }
+    }
+
+    & .cache-radio-label {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        cursor: pointer;
+        font-size: 1rem;
+    }
+
+    & .cache-input-label {
+        display: flex;
+        flex-direction: column;
+        gap: 0.375rem;
+        font-weight: 500;
+        font-size: 1rem;
+
+        & input[type="number"] {
+            width: 8rem;
+            padding: 0.35rem 0.5rem;
+            border: 1px solid var(--color-border);
+            background: var(--color-bg);
+            color: var(--color-text);
+            font-size: 1rem;
+        }
+    }
+}
+
 .settings-feeds-list {
     display: flex;
     flex-direction: column;
