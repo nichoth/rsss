@@ -3366,3 +3366,32 @@ Thread: https://ampcode.com/threads/unknown
   - Optimistic signal update before DB write lets tests verify behavior
     without a real OPFS database.
 ---
+
+## 2026-05-01 - US-129
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Per-feed cache controls on the feed-reader page.
+  - Added imports for `feedPolicies`, `loadFeedPolicies`, `upsertFeedCachePolicy`,
+    `resolveEffectivePolicy`, `FeedCachePolicyRow`, `CacheMode`, `getBootstrappedDb`,
+    and `getLocalDb` to `feed-reader.ts`.
+  - Added a `useEffect` that loads the feed policy for `selectedFeed` whenever
+    the selected feed changes.
+  - Added `saveFeedPolicy`, `handleFeedCacheModeChange`, `handleFeedMaxSizeChange`,
+    and `handleFeedMaxAgeChange` — identical logic to the helpers in settings.ts,
+    reusing `feedPolicies` signal and `upsertFeedCachePolicy` with no duplication.
+  - Added a `<details class="feed-cache-controls">` panel in the items-header,
+    visible only when a feed is selected, showing the same mode/size/age controls.
+  - Added CSS for `.feed-cache-controls` inside `.route.feed-reader { ... }` using
+    nested selectors and variables from `_variables.css`.
+- Files changed:
+  - `src/client/routes/feed-reader.ts`
+  - `src/client/routes/feed-reader.css`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - The `feedPolicies` signal is shared module state; changes written from
+    feed-reader.ts are immediately visible in settings.ts on navigation — no
+    extra refresh or re-fetch is needed for the cross-page consistency criterion.
+  - Per-feed controls need a `useEffect` that depends on `selectedFeed?.id` to
+    load the policy for the newly selected feed when the user navigates to a
+    different feed-reader route.
+---

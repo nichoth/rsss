@@ -8,6 +8,18 @@ import {
     type AppState,
     stripProtocol,
 } from '../state.js'
+import { type CacheMode } from '../local-first-settings.js'
+import {
+    feedPolicies,
+    loadFeedPolicies,
+    upsertFeedCachePolicy,
+    resolveEffectivePolicy,
+    type FeedCachePolicyRow
+} from '../db/feed-cache-policy.js'
+import {
+    getBootstrappedDb,
+    getLocalDb
+} from '../db/index.js'
 import { ItemRow } from '../components/item-row.js'
 import { Sidebar } from '../components/sidebar.js'
 import Debug from '@substrate-system/debug'
@@ -62,6 +74,80 @@ export const FeedReader:FunctionComponent<{
         }
     }, [selectedFeed?.id])
 
+    useEffect(() => {
+        if (!selectedFeed) return
+        const did = state.user.value?.did
+        const db = did ?
+            (getBootstrappedDb() ?? getLocalDb(did)) :
+            null
+        if (!db) return
+        loadFeedPolicies(db, [selectedFeed.id]).catch(() => {})
+    }, [selectedFeed?.id])
+
+    function getDb () {
+        const did = state.user.value?.did
+        return did ?
+            (getBootstrappedDb() ?? getLocalDb(did)) :
+            null
+    }
+
+    async function saveFeedPolicy (
+        feedId:number,
+        patch:Partial<FeedCachePolicyRow>
+    ):Promise<void> {
+        const current = feedPolicies.value[feedId] ?? null
+        const updated:FeedCachePolicyRow = {
+            feed_id: feedId,
+            cache_mode: current?.cache_mode ?? null,
+            max_size_bytes: current?.max_size_bytes ?? null,
+            max_age_seconds: current?.max_age_seconds ?? null,
+            ...patch
+        }
+        feedPolicies.value = { ...feedPolicies.value, [feedId]: updated }
+        const db = getDb()
+        if (!db) return
+        try {
+            await upsertFeedCachePolicy(db, feedId, updated)
+        } catch (err) {
+            console.error(
+                '[feed-reader] feed policy save failed',
+                err instanceof Error ? err.message : ''
+            )
+        }
+    }
+
+    function handleFeedCacheModeChange (feedId:number) {
+        return (ev:Event) => {
+            const val = (ev.target as HTMLSelectElement).value
+            const mode = (val === 'text' || val === 'text_images') ?
+                val as CacheMode :
+                null
+            saveFeedPolicy(feedId, { cache_mode: mode })
+        }
+    }
+
+    function handleFeedMaxSizeChange (feedId:number) {
+        return (ev:Event) => {
+            const raw = (ev.target as HTMLInputElement).value.trim()
+            const mb = raw === '' ? null : parseFloat(raw)
+            const bytes = (mb !== null && isFinite(mb) && mb >= 1) ?
+                Math.round(mb * 1_000_000) :
+                null
+            saveFeedPolicy(feedId, { max_size_bytes: bytes })
+        }
+    }
+
+    function handleFeedMaxAgeChange (feedId:number) {
+        return (ev:Event) => {
+            const raw = (ev.target as HTMLInputElement).value.trim()
+            const days = raw === '' ? null : parseFloat(raw)
+            const secs = (days !== null && isFinite(days) && days >= 1) ?
+                Math.round(days * 86400) :
+                null
+            saveFeedPolicy(feedId, { max_age_seconds: secs })
+        }
+    }
+
     const handleToggleUnread = useCallback(() => {
         state.showUnreadOnly.value = !state.showUnreadOnly.value
         state.itemsOffset.value = 0
@@ -113,6 +199,102 @@ export const FeedReader:FunctionComponent<{
                     <div class="items-header">
                         ${selectedFeed && html`
                             <h2 class="feed-title">${feedTitle}</h2>
+                            ${(() => {
+                                const policy = feedPolicies.value[
+                                    selectedFeed.id
+                                ] ?? null
+                                const eff = resolveEffectivePolicy(policy)
+                                const modeLabel = eff.cacheMode === 'text' ?
+                                    'Text only' :
+                                    'Text + images'
+                                const sizeVal = policy?.max_size_bytes != null ?
+                                    String(Math.round(
+                                        policy.max_size_bytes / 1_000_000
+                                    )) :
+                                    ''
+                                const ageVal = policy?.max_age_seconds != null ?
+                                    String(Math.round(
+                                        policy.max_age_seconds / 86400
+                                    )) :
+                                    ''
+                                return html`
+                                    <details class="feed-cache-controls">
+                                        <summary>
+                                            Cache:
+                                            ${modeLabel}${
+                                                eff.isDefault.cacheMode ?
+                                                    ' (default)' :
+                                                    ''
+                                            }
+                                        </summary>
+                                        <div class="feed-cache-form">
+                                            <label class="cache-field-label">
+                                                Cache mode
+                                                <select
+                                                    name=${`feed-cache-mode-${selectedFeed.id}`}
+                                                    onChange=${handleFeedCacheModeChange(
+                                                        selectedFeed.id
+                                                    )}
+                                                >
+                                                    <option
+                                                        value=""
+                                                        selected=${
+                                                            policy?.cache_mode ==
+                                                            null
+                                                        }
+                                                    >
+                                                        Use default
+                                                    </option>
+                                                    <option
+                                                        value="text"
+                                                        selected=${
+                                                            policy?.cache_mode ===
+                                                            'text'
+                                                        }
+                                                    >
+                                                        Text only
+                                                    </option>
+                                                    <option
+                                                        value="text_images"
+                                                        selected=${
+                                                            policy?.cache_mode ===
+                                                            'text_images'
+                                                        }
+                                                    >
+                                                        Text + images
+                                                    </option>
+                                                </select>
+                                            </label>
+                                            <label class="cache-field-label">
+                                                Max size (MB, blank = default)
+                                                <input
+                                                    type="number"
+                                                    name=${`feed-max-size-${selectedFeed.id}`}
+                                                    min="1"
+                                                    value=${sizeVal}
+                                                    placeholder="default"
+                                                    onChange=${handleFeedMaxSizeChange(
+                                                        selectedFeed.id
+                                                    )}
+                                                />
+                                            </label>
+                                            <label class="cache-field-label">
+                                                Keep for (days, blank = default)
+                                                <input
+                                                    type="number"
+                                                    name=${`feed-max-age-${selectedFeed.id}`}
+                                                    min="1"
+                                                    value=${ageVal}
+                                                    placeholder="default"
+                                                    onChange=${handleFeedMaxAgeChange(
+                                                        selectedFeed.id
+                                                    )}
+                                                />
+                                            </label>
+                                        </div>
+                                    </details>
+                                `
+                            })()}
                         `}
                         <div class="items-filters">
                             <check-box

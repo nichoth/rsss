@@ -2013,7 +2013,7 @@
         "Verify in browser using dev-browser skill: open a feed, toggle its cache mode, navigate to `/settings`, confirm the change is reflected there"
       ],
       "priority": 129,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
