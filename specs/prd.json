@@ -2284,6 +2284,153 @@
       "priority": 144,
       "passes": true,
       "notes": ""
+    },
+    {
+      "id": "US-145",
+      "title": "Extend Dot component to support gray and blue colors",
+      "description": "As a developer, I need the `Dot` component to support the full color set used by the new sync-status indicator.",
+      "acceptanceCriteria": [
+        "`src/client/components/dot.ts` accepts `color?:'gray'|'blue'|'yellow'|'red'|'green'`",
+        "`gray` and `blue` styles added to `dot.css` using variables from `_variables.css`; if a suitable variable does not exist, add one (e.g. `--color-dot-gray`, `--color-dot-blue`) and reuse existing palette values where possible",
+        "Existing call sites compile unchanged (the new colors are additive; no breaking change to current consumers)",
+        "Typecheck passes",
+        "Lint passes (`npm run lint`)"
+      ],
+      "priority": 145,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-146",
+      "title": "Server returns per-feed update counts on bootstrap",
+      "description": "As a backend developer, I need the bootstrap/initial-data endpoint to return per-feed counts of pending items so the client can render the dot without an extra round trip.",
+      "acceptanceCriteria": [
+        "Bootstrap response includes `feedUpdateCounts:Record<string,number>` mapping feed ID to pending count",
+        "Counts are read from the server's already-cached state populated by the existing background fetch loop; the bootstrap handler does NOT trigger a live fetch of remote feeds",
+        "Counts are computed against the user's per-feed cursor",
+        "Response shape documented in the relevant API type / schema file",
+        "Unit test covers: no feeds, some feeds with 0 pending, some feeds with N pending",
+        "Anonymous users do not receive `feedUpdateCounts` in their bootstrap response (FR-11)",
+        "Tests pass",
+        "Typecheck passes",
+        "Lint passes"
+      ],
+      "priority": 146,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-147",
+      "title": "Add feedSyncStatus and feedUpdateCounts signals to AppState",
+      "description": "As a developer, I need a single signal that captures every state the header dot can be in, plus the per-feed counts, so the UI logic stays simple with one source of truth.",
+      "acceptanceCriteria": [
+        "`src/client/state.ts` adds `feedSyncStatus:Signal<'inactive'|'updates'|'syncing'|'error'|'synced'>` to `AppState`",
+        "`src/client/state.ts` adds `feedUpdateCounts:Signal<Record<string,number>>` to `AppState`",
+        "Default values before bootstrap: `feedSyncStatus = 'inactive'`, `feedUpdateCounts = {}`",
+        "Resolve overlap with existing `feedUpdateStatus:Signal<'synced'|'updates'>` and `feedsWithUpdates:Signal<string[]>` (state.ts:170-171, 201-202): either replace them with the new signals (updating all call sites) OR keep them as derived views over the new signals; document the choice in a code comment. There must be only one source of truth",
+        "All multi-signal writes use `batch()`",
+        "Typecheck passes",
+        "Lint passes"
+      ],
+      "priority": 147,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-148",
+      "title": "Hydrate sync status from the bootstrap response",
+      "description": "As a user, I want the header dot to be correct on first paint, so I never see a flash of the wrong color.",
+      "acceptanceCriteria": [
+        "Bootstrap hydration block in `src/client/state.ts` (around lines 1091-1095) reads `feedUpdateCounts` from the response and assigns it to the new signal",
+        "If the sum of counts is 0: set `feedSyncStatus = 'synced'`",
+        "If the sum of counts is > 0: set `feedSyncStatus = 'updates'`",
+        "If the bootstrap call fails: leave `feedSyncStatus = 'inactive'` (gray); show no error in the header (errors only come from explicit sync attempts)",
+        "All signal writes wrapped in `batch()`",
+        "Unit/integration test covers the three branches (empty counts, non-empty counts, bootstrap failure)",
+        "Tests pass",
+        "Typecheck passes",
+        "Lint passes"
+      ],
+      "priority": 148,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-149",
+      "title": "Header FeedStatus renders single Dot for all five sync states",
+      "description": "As a user, I want the header to show a single dot whose color tells me at a glance what the sync state is.",
+      "acceptanceCriteria": [
+        "`src/client/components/feed-status.ts` renders a single `Dot` whose color is derived from `feedSyncStatus`: inactive=gray, updates=blue, syncing=yellow, error=red, synced=green",
+        "When status is `'updates'`, the dot is followed by a numeric count equal to the sum of `feedUpdateCounts` values (e.g. `<dot> 3`)",
+        "When status is `'error'`, the dot is followed by short text such as `sync failed` and a `title=` attribute carrying the error message",
+        "Component has `role=\"status\"` and `aria-live=\"polite\"` so screen readers announce transitions",
+        "Anonymous users do not see the indicator (no dot rendered)",
+        "Only ONE global dot in the header (no per-feed dots — see Non-Goals)",
+        "Typecheck passes",
+        "Lint passes",
+        "Verify in browser using dev-browser skill: load app while signed in, confirm dot color matches state and count appears when status is 'updates'"
+      ],
+      "priority": 149,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-150",
+      "title": "Wire global Sync button to drive feedSyncStatus transitions",
+      "description": "As a user, I want one obvious button that pulls all feed updates and drives the header dot through syncing/synced/error states.",
+      "acceptanceCriteria": [
+        "Reuse the existing global Refresh Feeds button in `src/client/components/sidebar-footer.ts` — do NOT introduce a second button",
+        "Clicking the button transitions `feedSyncStatus` -> `'syncing'` (yellow dot) using `batch()`",
+        "Button uses `isSpinning` prop on the existing `Button` component while in flight to prevent double-click",
+        "Drive these transitions from inside the existing `State.refreshFeeds` action — do NOT create a parallel sync function",
+        "On success: clear `feedUpdateCounts` to `{}` and set `feedSyncStatus = 'synced'` (green dot) in a single `batch()`",
+        "On error: set `feedSyncStatus = 'error'` (red dot) and surface the error message via the header `title` attribute (and an existing toast/error region if one exists)",
+        "Audit confirms no automatic sync paths: no `setInterval`/`setTimeout` periodic sync, no `visibilitychange`/`focus`/`online` triggers, no route-change triggers, no SSE-driven sync",
+        "Typecheck passes",
+        "Lint passes",
+        "Verify in browser using dev-browser skill: click Sync, confirm dot turns yellow then green; with network offline confirm dot turns red and `title` shows error"
+      ],
+      "priority": 150,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-151",
+      "title": "Sticky green: synced state persists until new updates arrive",
+      "description": "As a user, I want a 'synced' indicator that stays put, so I can trust the header rather than having to remember when I last synced.",
+      "acceptanceCriteria": [
+        "After a successful sync, `feedSyncStatus` stays `'synced'` indefinitely — no timeout reverts it to `'inactive'`",
+        "The next time `feedUpdateCounts` becomes non-empty (next bootstrap reporting pending counts), `feedSyncStatus` flips to `'updates'`",
+        "If the user reloads the page and the bootstrap returns no pending counts, the header remains green (`'synced'`), NOT gray",
+        "If the user reloads and the bootstrap returns non-empty counts, the header shows blue (`'updates'`) with the count",
+        "Test covers: synced state survives across simulated idle period; reload-with-empty-counts produces green; reload-with-counts produces blue",
+        "Tests pass",
+        "Typecheck passes",
+        "Lint passes",
+        "Verify in browser using dev-browser skill: trigger a sync to green, reload the page, confirm header is still green when no new updates exist"
+      ],
+      "priority": 151,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-152",
+      "title": "Error state recovers cleanly on retry",
+      "description": "As a user, when a sync fails, I want to be able to retry and have the header recover correctly.",
+      "acceptanceCriteria": [
+        "Clicking the global Sync button while `feedSyncStatus === 'error'` re-attempts the sync and transitions to `'syncing'` (yellow)",
+        "After a successful retry, status moves to `'synced'` (green)",
+        "After a second consecutive failure, status returns to `'error'` (red) carrying the latest error message",
+        "Previous error message is REPLACED, not stacked (only the most recent error is exposed via `title`/error region)",
+        "Test covers the retry path: error -> syncing -> synced; and error -> syncing -> error with replaced message",
+        "Tests pass",
+        "Typecheck passes",
+        "Lint passes",
+        "Verify in browser using dev-browser skill: force a sync failure, click Sync again with network restored, confirm dot goes yellow then green"
+      ],
+      "priority": 152,
+      "passes": false,
+      "notes": ""
     }
   ]
 }
