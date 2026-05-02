@@ -631,6 +631,32 @@ export class UserDO extends DurableObject<Env> {
             return c.json({ feed })
         })
 
+        // Pending items for a feed (not yet pulled past last_pulled_at)
+        app.get('/feeds/:id/pending', (c) => {
+            const id = parseInt(c.req.param('id'), 10)
+            const rows = this.sql.exec(
+                `SELECT CAST(id AS TEXT) AS id,
+                    COALESCE(title, '') AS title,
+                    pub_date AS published_at
+                FROM items
+                WHERE feed_id = ?
+                  AND pub_date IS NOT NULL
+                  AND pub_date > COALESCE(
+                    (SELECT last_pulled_at FROM feeds WHERE id = ?),
+                    '1970-01-01'
+                  )
+                ORDER BY pub_date DESC
+                LIMIT 50`,
+                id,
+                id
+            ).toArray() as Array<{
+                id:string
+                title:string
+                published_at:string
+            }>
+            return c.json({ items: rows })
+        })
+
         // Delete a feed
         app.delete('/feeds/:id', async (c) => {
             const id = parseInt(c.req.param('id'), 10)

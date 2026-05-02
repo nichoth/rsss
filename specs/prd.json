@@ -2246,7 +2246,7 @@
         "Verify in browser using dev-browser skill: on /updates, expand a feed row, confirm titles + dates render and that closing/reopening does not crash"
       ],
       "priority": 142,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

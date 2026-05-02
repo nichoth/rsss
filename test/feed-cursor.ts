@@ -452,3 +452,130 @@ test('GET /feeds includes feedUpdateStatus updates when feeds pending',
         )
     }
 )
+
+// ---- GET /feeds/:id/pending tests ----
+
+function createPendingHarness (opts:{
+    lastPulledAt?:string|null
+    dbItems?:Array<{
+        id:number
+        title:string
+        pub_date:string
+    }>
+} = {}) {
+    const {
+        lastPulledAt = null,
+        dbItems = []
+    } = opts
+
+    const feed:FeedRow = feedRow(1, 'https://a.example/feed', lastPulledAt)
+
+    const userDo = Object.create(UserDO.prototype) as CursorDoType
+
+    userDo.sql = {
+        exec (query:string, ..._params:unknown[]) {
+            if (query.includes('SELECT * FROM feeds WHERE id = ?')) {
+                return result([feed])
+            }
+            if (
+                query.includes('FROM items') &&
+                query.includes('pub_date') &&
+                query.includes('LIMIT 50')
+            ) {
+                const cursor = lastPulledAt ?? '1970-01-01'
+                const rows = dbItems
+                    .filter(i => i.pub_date > cursor)
+                    .sort((a, b) =>
+                        b.pub_date.localeCompare(a.pub_date)
+                    )
+                    .slice(0, 50)
+                    .map(i => ({
+                        id: String(i.id),
+                        title: i.title,
+                        published_at: i.pub_date
+                    }))
+                return result(rows)
+            }
+            return result([])
+        }
+    }
+
+    userDo.ctx = {
+        storage: {
+            async get<T> (_key:string) { return undefined as T|undefined },
+            async put (_key:string, _value:unknown) {},
+            async delete (_key:string) {}
+        },
+        waitUntil (_p:Promise<unknown>) {}
+    }
+
+    userDo.fetchFeed = async () => {}
+    userDo.broadcast = () => {}
+    userDo.getFeedsWithUpdates = () => []
+
+    return { app: userDo.createRouter() }
+}
+
+test('GET /feeds/:id/pending returns only items past the cursor',
+    async t => {
+        const { app } = createPendingHarness({
+            lastPulledAt: '2026-04-15',
+            dbItems: [
+                { id: 10, title: 'Old item', pub_date: '2026-04-01' },
+                { id: 11, title: 'New item', pub_date: '2026-04-20' }
+            ]
+        })
+
+        const res = await app.request('/feeds/1/pending')
+        const body = await res.json() as {
+            items:Array<{ id:string; title:string; published_at:string }>
+        }
+
+        t.equal(res.status, 200, 'returns 200')
+        t.equal(body.items.length, 1, 'returns only 1 item past cursor')
+        t.equal(body.items[0].id, '11', 'returns the newer item')
+        t.equal(body.items[0].title, 'New item', 'returns correct title')
+    }
+)
+
+test('GET /feeds/:id/pending returns items newest first', async t => {
+    const { app } = createPendingHarness({
+        lastPulledAt: '2026-01-01',
+        dbItems: [
+            { id: 1, title: 'Oldest', pub_date: '2026-02-01' },
+            { id: 2, title: 'Middle', pub_date: '2026-03-01' },
+            { id: 3, title: 'Newest', pub_date: '2026-04-01' }
+        ]
+    })
+
+    const res = await app.request('/feeds/1/pending')
+    const body = await res.json() as {
+        items:Array<{ id:string }>
+    }
+
+    t.deepEqual(
+        body.items.map(i => i.id),
+        ['3', '2', '1'],
+        'items are ordered newest first'
+    )
+})
+
+test('GET /feeds/:id/pending honors limit of 50', async t => {
+    const manyItems = Array.from({ length: 60 }, (_, i) => ({
+        id: i + 1,
+        title: `Item ${i + 1}`,
+        pub_date: `2026-04-${String(i + 1).padStart(2, '0')}`
+    }))
+
+    const { app } = createPendingHarness({
+        lastPulledAt: null,
+        dbItems: manyItems
+    })
+
+    const res = await app.request('/feeds/1/pending')
+    const body = await res.json() as {
+        items:unknown[]
+    }
+
+    t.equal(body.items.length, 50, 'returns at most 50 items')
+})
