@@ -5,6 +5,9 @@ import {
     resolveEffectivePolicy
 } from './feed-cache-policy.js'
 import { getCurrentlyOpenItemId } from '../open-item-registry.js'
+import {
+    defaultAccountMaxSizeBytes
+} from '../local-first-settings.js'
 
 export async function evictByMaxAge (
     db:Sqlite3Db,
@@ -176,4 +179,93 @@ export async function evictByFeedSizeCap (
     }
 
     return { feedsTrimmed, bytesFreed }
+}
+
+export async function evictByAccountSizeCap (
+    db:Sqlite3Db,
+    cacheStorage:Pick<CacheStorage, 'open'> = caches
+):Promise<{ bytesFreed:number }> {
+    const cap = defaultAccountMaxSizeBytes.value
+
+    const textRow = await queryOneDb<{ total:number|null }>(
+        db,
+        'SELECT SUM(COALESCE(LENGTH(content), 0) +' +
+        ' COALESCE(LENGTH(description), 0)) AS total FROM items'
+    )
+    const imageRow = await queryOneDb<{ total:number|null }>(
+        db,
+        'SELECT SUM(size_bytes) AS total FROM cached_images'
+    )
+    let currentSize = (textRow?.total ?? 0) + (imageRow?.total ?? 0)
+    if (currentSize <= cap) return { bytesFreed: 0 }
+
+    const openItemId = getCurrentlyOpenItemId()
+    let sql =
+        'SELECT id,' +
+        ' COALESCE(LENGTH(content), 0) +' +
+        '  COALESCE(LENGTH(description), 0) AS text_bytes,' +
+        ' content, description' +
+        ' FROM items' +
+        ' WHERE (content IS NOT NULL OR description IS NOT NULL' +
+        '  OR EXISTS' +
+        '   (SELECT 1 FROM cached_images WHERE item_id = items.id))'
+    const bind:(number|null)[] = []
+    if (openItemId !== null) {
+        sql += ' AND id != ?'
+        bind.push(openItemId)
+    }
+    sql += ' ORDER BY updated_at ASC'
+
+    type ItemRow = {
+        id:number
+        text_bytes:number
+        content:string|null
+        description:string|null
+    }
+    const items = await queryDb<ItemRow>(db, sql, bind)
+
+    let bytesFreed = 0
+    let bucket:Cache|null = null
+
+    for (const item of items) {
+        if (currentSize <= cap) break
+
+        const images = await queryDb<{
+            url:string
+            size_bytes:number
+        }>(
+            db,
+            'SELECT url, size_bytes FROM cached_images WHERE item_id = ?',
+            [item.id]
+        )
+
+        if (item.content !== null || item.description !== null) {
+            await execDb(db, {
+                sql: 'UPDATE items SET content = NULL,' +
+                    ' description = NULL WHERE id = ?',
+                bind: [item.id]
+            })
+        }
+
+        let imageFreed = 0
+        if (images.length > 0) {
+            await execDb(db, {
+                sql: 'DELETE FROM cached_images WHERE item_id = ?',
+                bind: [item.id]
+            })
+            if (!bucket) {
+                bucket = await cacheStorage.open('rsss-images-v1')
+            }
+            for (const img of images) {
+                await bucket.delete(img.url)
+                imageFreed += img.size_bytes
+            }
+        }
+
+        const freed = item.text_bytes + imageFreed
+        currentSize -= freed
+        bytesFreed += freed
+    }
+
+    return { bytesFreed }
 }

@@ -7,7 +7,8 @@ import {
 } from '../src/client/db/sqlite-init.js'
 import {
     evictByMaxAge,
-    evictByFeedSizeCap
+    evictByFeedSizeCap,
+    evictByAccountSizeCap
 } from '../src/client/db/cache-eviction.js'
 import {
     setCurrentlyOpenItemId,
@@ -15,7 +16,10 @@ import {
 } from '../src/client/open-item-registry.js'
 import { upsertFeedCachePolicy } from '../src/client/db/feed-cache-policy.js'
 import { recordCachedImage } from '../src/client/db/cached-images.js'
-import { defaultMaxSizeBytes } from '../src/client/local-first-settings.js'
+import {
+    defaultMaxSizeBytes,
+    defaultAccountMaxSizeBytes
+} from '../src/client/local-first-settings.js'
 
 setTestMode(true, wasmUrl as string)
 
@@ -508,6 +512,210 @@ test(
             t.equal(rows[1].content, null, 'non-open item B evicted')
         } finally {
             _resetOpenItemRegistry()
+            db.close()
+        }
+    }
+)
+
+// --- evictByAccountSizeCap tests ---
+
+test(
+    'evictByAccountSizeCap no-op when total cache is under the cap',
+    async (t) => {
+        _resetOpenItemRegistry()
+        const saved = defaultAccountMaxSizeBytes.value
+        defaultAccountMaxSizeBytes.value = 10_000
+        const db = await openLocalDb('did:test:acctcap-noop')
+        try {
+            db.exec(`
+                INSERT INTO feeds (url, title, created_at, updated_at)
+                VALUES ('https://a.com/feed', 'A',
+                        '${BASE_DATE}', '${BASE_DATE}')
+            `)
+            db.exec(`
+                INSERT INTO items
+                    (feed_id, guid, title, link, content, description,
+                     created_at, updated_at)
+                VALUES (1, 'g1', 'T1', 'http://a', 'abc', NULL,
+                        '${BASE_DATE}', '${BASE_DATE}')
+            `)
+            const { storage } = mockCacheStorage()
+            const result = await evictByAccountSizeCap(db, storage)
+
+            t.equal(result.bytesFreed, 0, 'no bytes freed')
+
+            const rows: Array<{ content: string | null }> = []
+            db.exec({
+                sql: 'SELECT content FROM items',
+                rowMode: 'object',
+                resultRows: rows
+            })
+            t.equal(rows[0].content, 'abc', 'content preserved')
+        } finally {
+            defaultAccountMaxSizeBytes.value = saved
+            db.close()
+        }
+    }
+)
+
+test(
+    'evictByAccountSizeCap trims when over cap across multiple feeds',
+    async (t) => {
+        _resetOpenItemRegistry()
+        const saved = defaultAccountMaxSizeBytes.value
+        defaultAccountMaxSizeBytes.value = 5
+        const db = await openLocalDb('did:test:acctcap-trim')
+        try {
+            db.exec(`
+                INSERT INTO feeds (url, title, created_at, updated_at)
+                VALUES
+                    ('https://a.com/feed', 'A',
+                     '${BASE_DATE}', '${BASE_DATE}'),
+                    ('https://b.com/feed', 'B',
+                     '${BASE_DATE}', '${BASE_DATE}')
+            `)
+            db.exec(`
+                INSERT INTO items
+                    (feed_id, guid, title, link, content, description,
+                     created_at, updated_at)
+                VALUES
+                    (1, 'g1', 'T1', 'http://a', 'hello', NULL,
+                     '${OLD_DATE}', '${OLD_DATE}'),
+                    (2, 'g2', 'T2', 'http://b', 'world', NULL,
+                     '${OLDER_DATE}', '${OLDER_DATE}')
+            `)
+            const { storage } = mockCacheStorage()
+            const result = await evictByAccountSizeCap(db, storage)
+
+            t.ok(result.bytesFreed > 0, 'bytes freed')
+
+            const rows: Array<{ guid: string; content: string | null }> = []
+            db.exec({
+                sql: 'SELECT guid, content FROM items ORDER BY guid ASC',
+                rowMode: 'object',
+                resultRows: rows
+            })
+            // g1 has OLD_DATE (2000) = oldest → evicted first
+            t.equal(rows[0].content, null, 'oldest item g1 evicted')
+            // g2 has OLDER_DATE (2023) = newer → preserved
+            t.equal(rows[1].content, 'world', 'newer item g2 preserved')
+        } finally {
+            defaultAccountMaxSizeBytes.value = saved
+            db.close()
+        }
+    }
+)
+
+test(
+    'evictByAccountSizeCap skips currently-open item id',
+    async (t) => {
+        _resetOpenItemRegistry()
+        const saved = defaultAccountMaxSizeBytes.value
+        defaultAccountMaxSizeBytes.value = 5
+        const db = await openLocalDb('did:test:acctcap-open-item')
+        try {
+            db.exec(`
+                INSERT INTO feeds (url, title, created_at, updated_at)
+                VALUES ('https://a.com/feed', 'A',
+                        '${BASE_DATE}', '${BASE_DATE}')
+            `)
+            db.exec(`
+                INSERT INTO items
+                    (feed_id, guid, title, link, content, description,
+                     created_at, updated_at)
+                VALUES
+                    (1, 'gA', 'A', 'http://a1', 'hello', NULL,
+                     '${OLDER_DATE}', '${OLDER_DATE}'),
+                    (1, 'gB', 'B', 'http://a2', 'world', NULL,
+                     '${OLD_DATE}', '${OLD_DATE}')
+            `)
+            const idRows: Array<{ id: number; guid: string }> = []
+            db.exec({
+                sql: 'SELECT id, guid FROM items ORDER BY updated_at ASC',
+                rowMode: 'object',
+                resultRows: idRows
+            })
+            const openId = idRows[0].id
+            setCurrentlyOpenItemId(openId)
+
+            const { storage } = mockCacheStorage()
+            const result = await evictByAccountSizeCap(db, storage)
+
+            t.ok(result.bytesFreed > 0, 'some bytes freed')
+
+            const rows: Array<{ guid: string; content: string | null }> = []
+            db.exec({
+                sql: 'SELECT guid, content FROM items ORDER BY guid ASC',
+                rowMode: 'object',
+                resultRows: rows
+            })
+            // gA has OLDER_DATE (2023) = not-open, evicted
+            t.equal(
+                rows[0].content,
+                null,
+                'non-open item gA evicted'
+            )
+            // gB has OLD_DATE (2000) = oldest = open, preserved
+            t.equal(
+                rows[1].content,
+                'world',
+                'open item gB preserved'
+            )
+        } finally {
+            _resetOpenItemRegistry()
+            defaultAccountMaxSizeBytes.value = saved
+            db.close()
+        }
+    }
+)
+
+test(
+    'evictByAccountSizeCap evicts oldest-first across feeds',
+    async (t) => {
+        _resetOpenItemRegistry()
+        const saved = defaultAccountMaxSizeBytes.value
+        defaultAccountMaxSizeBytes.value = 6
+        const db = await openLocalDb('did:test:acctcap-oldest-first')
+        try {
+            db.exec(`
+                INSERT INTO feeds (url, title, created_at, updated_at)
+                VALUES
+                    ('https://a.com/feed', 'A',
+                     '${BASE_DATE}', '${BASE_DATE}'),
+                    ('https://b.com/feed', 'B',
+                     '${BASE_DATE}', '${BASE_DATE}')
+            `)
+            db.exec(`
+                INSERT INTO items
+                    (feed_id, guid, title, link, content, description,
+                     created_at, updated_at)
+                VALUES
+                    (1, 'gA', 'A', 'http://a1', 'hello', NULL,
+                     '${OLDER_DATE}', '${OLDER_DATE}'),
+                    (2, 'gB', 'B', 'http://b1', 'world', NULL,
+                     '${OLD_DATE}', '${OLD_DATE}'),
+                    (1, 'gC', 'C', 'http://a2', 'newer', NULL,
+                     '${NEWER_DATE}', '${NEWER_DATE}')
+            `)
+            const { storage } = mockCacheStorage()
+            const result = await evictByAccountSizeCap(db, storage)
+
+            t.ok(result.bytesFreed > 0, 'bytes freed')
+
+            const rows: Array<{ guid: string; content: string | null }> = []
+            db.exec({
+                sql: 'SELECT guid, content FROM items ORDER BY guid ASC',
+                rowMode: 'object',
+                resultRows: rows
+            })
+            // gA (OLDER_DATE=2023, feed 1) evicted (2nd oldest)
+            t.equal(rows[0].content, null, 'second-oldest gA evicted')
+            // gB (OLD_DATE=2000, feed 2) evicted (oldest across feeds)
+            t.equal(rows[1].content, null, 'oldest gB evicted')
+            // gC (NEWER_DATE=2025, feed 1) preserved
+            t.equal(rows[2].content, 'newer', 'newest gC preserved')
+        } finally {
+            defaultAccountMaxSizeBytes.value = saved
             db.close()
         }
     }

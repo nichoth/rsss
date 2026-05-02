@@ -1,5 +1,11 @@
 ## Codebase Patterns
 
+- The `items_updated_at` trigger in `src/shared/schema.ts` fires on any
+  UPDATE to items rows and sets `updated_at = datetime('now')`. Cache
+  eviction tests that verify post-eviction item ordering must NOT use
+  `ORDER BY updated_at` for verification queries — use `ORDER BY guid ASC`
+  or another stable column instead, because eviction UPDATEs cause
+  `updated_at` to change.
 - Server-side URL fetch helpers in `src/server/feed-fetch.ts` should share
   `fetchValidatedResponse` so URL validation, DNS pre-resolution, manual
   redirect handling, timeout, and blocked-host checks stay consistent.
@@ -3535,4 +3541,38 @@ Thread: https://ampcode.com/threads/unknown
     of images needs eviction) to avoid an unnecessary async call when no images are present.
   - The `queryOneDb` import from `local-db.js` was not previously imported in
     `cache-eviction.ts`; it was added to support per-feed text and image size SUM queries.
+---
+## 2026-05-01 - US-134
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Account-wide cache size cap with eviction and settings UI.
+  - Added `defaultAccountMaxSizeBytes:Signal<number>` (default 500_000_000) to
+    `src/client/local-first-settings.ts`, persisted in the same `LS_KEY` JSON;
+    missing field falls back to the default.
+  - Added `evictByAccountSizeCap(db):Promise<{bytesFreed:number}>` to
+    `src/client/db/cache-eviction.ts`: queries total text+image size across all
+    feeds, evicts oldest items across all feeds until total is under the cap,
+    skips the currently-open item.
+  - Called `evictByAccountSizeCap` in `src/client/db/sync.ts` after
+    `evictByFeedSizeCap` in the sync cycle.
+  - Added "Total cache size (MB)" number input to the Cache section in
+    `src/client/routes/settings.ts`, bound to `defaultAccountMaxSizeBytes`.
+  - Added 4 tests in `test/cache-eviction.ts`: no-op when under cap, trims
+    over cap across multiple feeds, skips currently-open item, evicts
+    oldest-first across feeds.
+- Files changed:
+  - `src/client/local-first-settings.ts`
+  - `src/client/db/cache-eviction.ts`
+  - `src/client/db/sync.ts`
+  - `src/client/routes/settings.ts`
+  - `test/cache-eviction.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - The `items_updated_at` trigger fires on any UPDATE to item rows (including
+    content=NULL eviction UPDATEs), resetting `updated_at = datetime('now')`.
+    Eviction test verification queries must use a stable ordering column
+    (`guid`, `id`) rather than `updated_at` to avoid ordering flips.
+  - `evictByAccountSizeCap` fetches the candidate items list once before the
+    eviction loop, so trigger-induced `updated_at` changes during the loop do
+    not affect eviction order.
 ---

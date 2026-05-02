@@ -6,6 +6,7 @@ export type CacheMode = 'text' | 'text_images'
 const DEFAULT_CACHE_MODE:CacheMode = 'text_images'
 const DEFAULT_MAX_SIZE_BYTES = 50_000_000
 const DEFAULT_MAX_AGE_SECONDS = 30 * 86400
+const DEFAULT_ACCOUNT_MAX_SIZE_BYTES = 500_000_000
 
 export const syncSubscriptions:Signal<boolean> = signal(false)
 export const storeContent:Signal<boolean> = signal(false)
@@ -16,6 +17,8 @@ export const defaultMaxSizeBytes:Signal<number> =
     signal(DEFAULT_MAX_SIZE_BYTES)
 export const defaultMaxAgeSeconds:Signal<number> =
     signal(DEFAULT_MAX_AGE_SECONDS)
+export const defaultAccountMaxSizeBytes:Signal<number> =
+    signal(DEFAULT_ACCOUNT_MAX_SIZE_BYTES)
 
 const LS_KEY = 'rsss.localFirst'
 export type SyncSubscriptionsResult = 'applied'|'pending'|'blocked'
@@ -46,6 +49,12 @@ export function loadLocalFirstSettings ():void {
                     age :
                     DEFAULT_MAX_AGE_SECONDS
             )
+            const acctSize = parsed.defaultAccountMaxSizeBytes
+            defaultAccountMaxSizeBytes.value = (
+                typeof acctSize === 'number' && isFinite(acctSize) ?
+                    acctSize :
+                    DEFAULT_ACCOUNT_MAX_SIZE_BYTES
+            )
         })
     } catch {
         // ignore corrupt storage
@@ -58,7 +67,8 @@ export function saveLocalFirstSettings ():void {
         storeContent: storeContent.value,
         defaultCacheMode: defaultCacheMode.value,
         defaultMaxSizeBytes: defaultMaxSizeBytes.value,
-        defaultMaxAgeSeconds: defaultMaxAgeSeconds.value
+        defaultMaxAgeSeconds: defaultMaxAgeSeconds.value,
+        defaultAccountMaxSizeBytes: defaultAccountMaxSizeBytes.value
     }))
 }
 

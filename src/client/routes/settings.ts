@@ -12,6 +12,7 @@ import {
     defaultCacheMode,
     defaultMaxSizeBytes,
     defaultMaxAgeSeconds,
+    defaultAccountMaxSizeBytes,
     setSyncSubscriptions,
     saveLocalFirstSettings,
     loadLocalFirstSettings,
@@ -264,6 +265,17 @@ export const SettingsRoute:FunctionComponent<{
         if (isFinite(days) && days >= 1) {
             batch(() => {
                 defaultMaxAgeSeconds.value = Math.round(days * 86400)
+            })
+            saveLocalFirstSettings()
+        }
+    }
+
+    function handleAccountMaxSizeChange (ev:Event) {
+        const mb = parseFloat((ev.target as HTMLInputElement).value)
+        if (isFinite(mb) && mb >= 1) {
+            batch(() => {
+                defaultAccountMaxSizeBytes.value =
+                    Math.round(mb * 1_000_000)
             })
             saveLocalFirstSettings()
         }
@@ -588,6 +600,20 @@ export const SettingsRoute:FunctionComponent<{
                             defaultMaxSizeBytes.value / 1_000_000
                         )}
                         onChange=${handleMaxSizeChange}
+                    />
+                </label>
+            </div>
+            <div class="cache-setting">
+                <label class="cache-input-label">
+                    Total cache size (MB)
+                    <input
+                        type="number"
+                        name="account-max-size-mb"
+                        min="1"
+                        value=${Math.round(
+                            defaultAccountMaxSizeBytes.value / 1_000_000
+                        )}
+                        onChange=${handleAccountMaxSizeChange}
                     />
                 </label>
             </div>

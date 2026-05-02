@@ -2106,7 +2106,7 @@
         "Verify in browser using dev-browser skill: set a small account cap (e.g. 5 MB), trigger a sync, confirm total cache is reduced below the cap and the storage display reflects the new total"
       ],
       "priority": 134,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
