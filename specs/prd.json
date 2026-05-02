@@ -2226,7 +2226,7 @@
         "Verify in browser using dev-browser skill: navigate to /updates while logged in, confirm the page renders; with no pending updates the empty state shows; with pending updates a list of feed titles renders"
       ],
       "priority": 141,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
