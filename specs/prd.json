@@ -2208,7 +2208,7 @@
         "Verify in browser using dev-browser skill: log in, confirm 'status: synced' with green dot is visible in the header; manually set `state.feedUpdateStatus.value = 'updates'` from the browser console and confirm the dot turns yellow and 'updates' becomes a link to /updates"
       ],
       "priority": 140,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

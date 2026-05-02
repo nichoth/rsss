@@ -1,0 +1,15 @@
+.feed-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 1rem;
+    color: var(--color-text);
+
+    & a {
+        color: var(--color-primary);
+    }
+
+    & a:hover {
+        color: var(--color-primary-hover);
+    }
+}
