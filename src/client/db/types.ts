@@ -55,6 +55,7 @@ export interface FeedsResponse {
     feeds:Feed[]
     feedUpdateStatus?:'synced'|'updates'
     feedsWithUpdates?:string[]
+    feedUpdateCounts?:Record<string, number>
 }
 
 /**

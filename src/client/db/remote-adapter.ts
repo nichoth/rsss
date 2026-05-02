@@ -49,13 +49,15 @@ export const remoteAdapter:DbAdapter = {
             feeds:Feed[]
             feedUpdateStatus?:string
             feedsWithUpdates?:string[]
+            feedUpdateCounts?:Record<string, number>
         }>()
         return {
             feeds: data.feeds,
             feedUpdateStatus: data.feedUpdateStatus === 'updates' ?
                 'updates' :
                 'synced',
-            feedsWithUpdates: data.feedsWithUpdates ?? []
+            feedsWithUpdates: data.feedsWithUpdates ?? [],
+            feedUpdateCounts: data.feedUpdateCounts ?? {}
         }
     },
 

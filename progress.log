@@ -23,6 +23,38 @@
 - Node static tests that are bundled and piped to `node --input-type=module`
   should resolve repo files from the runner cwd, not from `import.meta.url`,
   because esbuild stdin/eval wrappers change the module URL.
+- Feed bootstrap state is carried by `GET /feeds`; add new feed bootstrap
+  fields to the `FeedsResponse` type and mirror them in `remoteAdapter`.
+
+## 2026-05-02 13:19 PDT - US-146
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Returned per-feed pending update counts from the
+  feed bootstrap response.
+  - Added `UserDO.getFeedUpdateCounts()` to compute cached pending counts
+    from existing `feeds` and `items` rows against `feeds.last_pulled_at`.
+  - Included `feedUpdateCounts` in `GET /feeds` without triggering feed
+    fetches.
+  - Documented the response shape in `FeedsResponse` and passed it through
+    `remoteAdapter.getFeeds()`.
+  - Added focused coverage for empty counts, zero and non-zero per-feed
+    counts, and anonymous bootstrap responses omitting the field.
+- Files changed:
+  - `src/server/durable-objects/index.ts`
+  - `src/client/db/types.ts`
+  - `src/client/db/remote-adapter.ts`
+  - `test/feed-cursor.ts`
+  - `test/api-router.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `GET /feeds` is the current feed bootstrap response used by client
+    state hydration.
+  - Feed bootstrap response additions should be reflected in both
+    `FeedsResponse` and `remoteAdapter.getFeeds()` so later state stories can
+    consume them without reaching into raw API JSON.
+  - Pending update counts should be computed from cached `items.pub_date`
+    versus `feeds.last_pulled_at`; this path must not fetch remote feeds.
+---
 
 ## 2026-05-02 13:10 PDT - US-145
 Thread: https://ampcode.com/threads/unknown

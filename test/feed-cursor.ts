@@ -138,6 +138,12 @@ function createCursorHarness (
             if (query.includes('SELECT * FROM feeds')) {
                 return result([...feeds])
             }
+            if (
+                query.includes('COUNT(items.id)') &&
+                query.includes('GROUP BY feeds.id')
+            ) {
+                return result([])
+            }
             if (query.includes('last_pulled_at')) {
                 cursorUpdates.push(params[params.length - 1] as number)
                 return result([])
@@ -413,6 +419,7 @@ test('GET /feeds includes feedUpdateStatus synced when no pending feeds',
             feeds:unknown[]
             feedUpdateStatus:string
             feedsWithUpdates:string[]
+            feedUpdateCounts:Record<string, number>
         }
 
         t.equal(res.status, 200, 'GET /feeds returns 200')
@@ -427,6 +434,11 @@ test('GET /feeds includes feedUpdateStatus synced when no pending feeds',
             [],
             'feedsWithUpdates is empty when no pending feeds'
         )
+        t.deepEqual(
+            body.feedUpdateCounts,
+            {},
+            'feedUpdateCounts is empty when no feeds have pending items'
+        )
     }
 )
 
@@ -438,6 +450,7 @@ test('GET /feeds includes feedUpdateStatus updates when feeds pending',
             feeds:unknown[]
             feedUpdateStatus:string
             feedsWithUpdates:string[]
+            feedUpdateCounts:Record<string, number>
         }
 
         t.equal(
@@ -449,6 +462,62 @@ test('GET /feeds includes feedUpdateStatus updates when feeds pending',
             body.feedsWithUpdates,
             ['1'],
             'feedsWithUpdates contains the pending feed ID'
+        )
+        t.deepEqual(
+            body.feedUpdateCounts,
+            {},
+            'feedUpdateCounts defaults to empty when no counts are available'
+        )
+    }
+)
+
+test('GET /feeds includes per-feed update counts from cached items',
+    async t => {
+        const userDo = Object.create(UserDO.prototype) as CursorDoType
+
+        userDo.sql = {
+            exec (query:string) {
+                if (query.includes('SELECT * FROM feeds ORDER BY title ASC')) {
+                    return result([
+                        feedRow(1, 'https://a.example/feed', '2026-04-02'),
+                        feedRow(2, 'https://b.example/feed', '2026-04-20'),
+                        feedRow(3, 'https://c.example/feed', null)
+                    ])
+                }
+                if (
+                    query.includes('COUNT(items.id)') &&
+                    query.includes('GROUP BY feeds.id')
+                ) {
+                    return result([
+                        { id: 1, pending_count: 2 },
+                        { id: 2, pending_count: 0 },
+                        { id: 3, pending_count: 1 }
+                    ])
+                }
+                return result([])
+            }
+        }
+        userDo.ctx = {
+            storage: {
+                async get<T> (_key:string) { return undefined as T|undefined },
+                async put (_key:string, _value:unknown) {},
+                async delete (_key:string) {}
+            },
+            waitUntil (_p:Promise<unknown>) {}
+        }
+        userDo.fetchFeed = async () => {}
+        userDo.broadcast = () => {}
+        userDo.getFeedsWithUpdates = () => ['1', '3']
+
+        const res = await userDo.createRouter().request('/feeds')
+        const body = await res.json() as {
+            feedUpdateCounts:Record<string, number>
+        }
+
+        t.deepEqual(
+            body.feedUpdateCounts,
+            { 1: 2, 2: 0, 3: 1 },
+            'response includes zero and non-zero per-feed pending counts'
         )
     }
 )

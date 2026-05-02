@@ -492,6 +492,31 @@ export class UserDO extends DurableObject<Env> {
         return rows.map(r => String(r.id))
     }
 
+    getFeedUpdateCounts ():Record<string, number> {
+        const rows = this.sql.exec(`
+            SELECT
+                feeds.id AS id,
+                COUNT(items.id) AS pending_count
+            FROM feeds
+            LEFT JOIN items
+                ON items.feed_id = feeds.id
+                AND items.pub_date IS NOT NULL
+                AND (
+                    feeds.last_pulled_at IS NULL
+                    OR items.pub_date > feeds.last_pulled_at
+                )
+            GROUP BY feeds.id
+        `).toArray() as Array<{
+            id:number|string
+            pending_count:number|string|null
+        }>
+
+        return rows.reduce<Record<string, number>>((counts, row) => {
+            counts[String(row.id)] = Number(row.pending_count ?? 0)
+            return counts
+        }, {})
+    }
+
     private advanceFeedCursor (feedId:number):void {
         this.sql.exec(
             `UPDATE feeds SET last_pulled_at = (
@@ -560,7 +585,13 @@ export class UserDO extends DurableObject<Env> {
             const feedUpdateStatus = feedsWithUpdates.length > 0 ?
                 'updates' :
                 'synced'
-            return c.json({ feeds, feedUpdateStatus, feedsWithUpdates })
+            const feedUpdateCounts = this.getFeedUpdateCounts()
+            return c.json({
+                feeds,
+                feedUpdateStatus,
+                feedsWithUpdates,
+                feedUpdateCounts
+            })
         })
 
         // Add a new feed

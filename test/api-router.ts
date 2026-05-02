@@ -175,6 +175,31 @@ test('dataRouter applies auth before proxying to the DO', async (t) => {
     t.equal(didProxy, false)
 })
 
+test('anonymous bootstrap response does not include feedUpdateCounts',
+    async (t) => {
+        const res = await app.request(
+            'https://rsss.space/api/me',
+            {},
+            {
+                SESSION_SECRET: 'test-secret',
+                SESSIONS: new MemoryKv() as unknown as KVNamespace
+            }
+        )
+        const body = await res.json() as {
+            authenticated?:boolean
+            feedUpdateCounts?:Record<string, number>
+        }
+
+        t.equal(res.status, 401, 'anonymous bootstrap returns 401')
+        t.equal(body.authenticated, false, 'anonymous response is unauth')
+        t.equal(
+            body.feedUpdateCounts,
+            undefined,
+            'anonymous response does not expose feedUpdateCounts'
+        )
+    }
+)
+
 test('dataRouter entitlement tests cover every data route', (t) => {
     const covered = GATED_DATA_ROUTES.map(route => {
         return `${route.method} ${route.path}`
