@@ -2121,7 +2121,7 @@
         "Typecheck and lint pass"
       ],
       "priority": 135,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

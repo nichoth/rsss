@@ -3576,3 +3576,18 @@ Thread: https://ampcode.com/threads/unknown
     eviction loop, so trigger-induced `updated_at` changes during the loop do
     not affect eviction order.
 ---
+
+## 2026-05-01 - US-135
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added `feedUpdateStatus` and `feedsWithUpdates` signals to `AppState`.
+  - Added `feedUpdateStatus:Signal<'synced'|'updates'>` to the `AppState` type, initialized to `'synced'`.
+  - Added `feedsWithUpdates:Signal<string[]>` to the `AppState` type, initialized to `[]`.
+  - Updated `test/local-first-opfs-persistence.ts` mock state to include both new signals.
+- Files changed:
+  - `src/client/state.ts`
+  - `test/local-first-opfs-persistence.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - When adding fields to `AppState`, also update any test files that construct a mock `AppState` object (e.g., `test/local-first-opfs-persistence.ts`'s `makeState()` helper).
+---
