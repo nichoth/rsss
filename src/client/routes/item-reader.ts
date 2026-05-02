@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { type FunctionComponent } from 'preact'
-import { useCallback } from 'preact/hooks'
+import { useCallback, useEffect } from 'preact/hooks'
 import { useComputed } from '@preact/signals'
 import { NotFound } from '../not-found.js'
 import { formatDate, sanitizeHtml } from '../util.js'
@@ -9,8 +9,15 @@ import {
     type AppState,
     State,
     findItemByRoute,
-    isItemRoute
+    isItemRoute,
+    articleFetchingItemId,
+    articleFetchError
 } from '../state.js'
+import { isSummaryOnly } from '../../shared/article-detect.js'
+import {
+    publisherLinkLabel,
+    publisherLinkHref
+} from '../../shared/publisher-link.js'
 import './item-reader.css'
 import Debug from '@substrate-system/debug'
 const debug = Debug('rsss:view')
@@ -50,6 +57,7 @@ export const ItemReader:FunctionComponent<{
     const isStarred = !!item.is_starred
     const isRead = !!item.is_read
     const articleHtml = sanitizeHtml(
+        item.full_content ||
         item.content ||
         item.description ||
         ''
@@ -58,6 +66,34 @@ export const ItemReader:FunctionComponent<{
         !articleHtml &&
         navigator.onLine === false
     )
+    const isFetching = articleFetchingItemId.value === itemId
+    const fetchFailed = (
+        typeof item.full_content_status === 'string' &&
+        item.full_content_status.startsWith('failed_')
+    )
+    const fetchErrorMessage = (
+        articleFetchError.value &&
+        articleFetchError.value.itemId === itemId
+    ) ? articleFetchError.value.message : null
+
+    const handleRetry = useCallback(async () => {
+        await State.fetchFullArticle(state, itemId, { force: true })
+    }, [itemId])
+
+    useEffect(() => {
+        if (item.full_content_status != null) return
+        if (!isSummaryOnly(item)) return
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+            return
+        }
+        State.fetchFullArticle(state, itemId)
+    }, [
+        itemId,
+        item.full_content_status,
+        item.link,
+        item.content,
+        item.description
+    ])
 
     const handleStar = useCallback(async () => {
         await State.toggleItemStarred(
@@ -101,16 +137,6 @@ export const ItemReader:FunctionComponent<{
                             'Mark unread' :
                             'Mark read'}
                     </button>
-                    ${item.link && html`
-                        <a
-                            class="btn btn-small"
-                            href=${item.link}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                        >
-                            Open original
-                        </a>
-                    `}
                 </div>
             </header>
 
@@ -134,6 +160,30 @@ export const ItemReader:FunctionComponent<{
                     </div>
                 </header>
 
+                ${isFetching && html`
+                    <p class="article-fetch-status">
+                        Fetching full article…
+                    </p>
+                `}
+
+                ${(!isFetching && fetchFailed) && html`
+                    <p class="article-fetch-status failed">
+                        Couldn't load the full article.
+                        ${fetchErrorMessage && html`
+                            <span class="article-fetch-detail">
+                                ${' '}(${fetchErrorMessage})
+                            </span>
+                        `}
+                        <button
+                            type="button"
+                            class="btn btn-small article-fetch-retry"
+                            onClick=${handleRetry}
+                        >
+                            Retry
+                        </button>
+                    </p>
+                `}
+
                 ${contentUnavailable ? html`
                     <div class="article-body article-unavailable">
                         Article content unavailable offline.
@@ -146,7 +196,25 @@ export const ItemReader:FunctionComponent<{
                         }}
                     ></div>
                 `}
+
+                ${item.link && (() => {
+                    const label = publisherLinkLabel(item.link)
+                    const href = publisherLinkHref(item.link)
+                    if (!label || !href) return null
+                    return html`
+                        <p class="article-publisher-link">
+                            <a
+                                href=${href}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                            >
+                                ${label}
+                            </a>
+                        </p>
+                    `
+                })()}
             </article>
         </div>
     `
 }
+

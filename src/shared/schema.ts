@@ -7,6 +7,33 @@
  * pre-existing rows) remain in the Durable Object and must
  * run between TABLES_SQL and INDEXES_SQL.
  */
+
+export const MAX_FULL_CONTENT_BYTES = 256 * 1024
+export const MAX_ARTICLE_FETCH_BYTES = 1 * 1024 * 1024
+export const EXTRACTED_MIN_TEXT = 500
+export const SUMMARY_TEXT_THRESHOLD = 1500
+export const ARTICLE_FETCH_TIMEOUT_MS = 8_000
+export const FETCH_FULL_MIN_INTERVAL_MS = 5_000
+
+export type FullContentStatus =
+    | 'succeeded'
+    | 'failed_network'
+    | 'failed_status'
+    | 'failed_redirect'
+    | 'failed_non_html'
+    | 'failed_too_large'
+    | 'failed_no_body'
+
+export const ALL_FULL_CONTENT_STATUSES:FullContentStatus[] = [
+    'succeeded',
+    'failed_network',
+    'failed_status',
+    'failed_redirect',
+    'failed_non_html',
+    'failed_too_large',
+    'failed_no_body'
+]
+
 export const TABLES_SQL = `
     CREATE TABLE IF NOT EXISTS feeds (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -37,6 +64,9 @@ export const TABLES_SQL = `
         is_starred INTEGER DEFAULT 0,
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now')),
+        full_content TEXT,
+        full_content_fetched_at TEXT,
+        full_content_status TEXT,
         FOREIGN KEY (feed_id) REFERENCES feeds(id) ON DELETE CASCADE,
         UNIQUE(feed_id, guid)
     );

@@ -36,7 +36,7 @@ and the retry affordance.
 **Purpose**: Constants and shared schema scaffolding that every later
 phase consumes. No behaviour changes yet.
 
-- [ ] T001 [P] Add new constants block to `src/shared/schema.ts`
+- [X] T001 [P] Add new constants block to `src/shared/schema.ts`
   exporting `MAX_FULL_CONTENT_BYTES = 256 * 1024`,
   `MAX_ARTICLE_FETCH_BYTES = 1 * 1024 * 1024`,
   `EXTRACTED_MIN_TEXT = 500`, `SUMMARY_TEXT_THRESHOLD = 1500`,
@@ -44,12 +44,12 @@ phase consumes. No behaviour changes yet.
   `FETCH_FULL_MIN_INTERVAL_MS = 5_000`. Keep existing
   `MAX_ARTICLE_REDIRECTS = 5` value as the single source for redirect
   cap (reuse from spec 001).
-- [ ] T002 [P] Extend the `items` `CREATE TABLE` in
+- [X] T002 [P] Extend the `items` `CREATE TABLE` in
   `src/shared/schema.ts` `TABLES_SQL` to include three new columns:
   `full_content TEXT`, `full_content_fetched_at TEXT`,
   `full_content_status TEXT`. Update any exported `ITEM_COLUMNS`-style
   list in the same file.
-- [ ] T003 Add a `FullContentStatus` type to `src/shared/schema.ts`:
+- [X] T003 Add a `FullContentStatus` type to `src/shared/schema.ts`:
   `export type FullContentStatus = 'succeeded' | 'failed_network' |
   'failed_status' | 'failed_redirect' | 'failed_non_html' |
   'failed_too_large' | 'failed_no_body'`. Export an
@@ -66,31 +66,31 @@ references them yet. Repo still compiles.
 **Purpose**: Pure helpers that User Stories 1, 2, and 3 all depend on.
 These are testable in isolation (no DO, no fetch).
 
-- [ ] T004 [P] Create `src/shared/article-detect.ts` exporting
+- [X] T004 [P] Create `src/shared/article-detect.ts` exporting
   `isSummaryOnly(item:{ link?:string|null, content?:string|null,
   description?:string|null }):boolean`. Implements the R-1 heuristic:
   non-empty link AND `plainTextLength(item.content || item.description
   || '') < SUMMARY_TEXT_THRESHOLD`. Also export
   `plainTextLength(html:string):number` (strip tags, decode entities,
   collapse whitespace, count code points).
-- [ ] T005 [P] Create `src/shared/publisher-link.ts` exporting
+- [X] T005 [P] Create `src/shared/publisher-link.ts` exporting
   `publisherLinkLabel(link:string):string|null` and
   `publisherLinkHref(link:string):string|null`. Label is
   `"Read the full article on " + host` where `host =
   new URL(link).host` with leading `www.` stripped; both functions
   return `null` for empty, malformed, or non-`http(s):` URLs.
-- [ ] T006 [P] [Tests] Create `test/article-detect.ts` covering:
+- [X] T006 [P] [Tests] Create `test/article-detect.ts` covering:
   empty content + empty description → not summary; long content →
   not summary; short summary, no link → not summary (link gate);
   short summary, has link → summary; CJK + emoji content count
   by code points; HTML entities and tags do not inflate length.
-- [ ] T007 [P] [Tests] Create `test/publisher-link.ts` covering:
+- [X] T007 [P] [Tests] Create `test/publisher-link.ts` covering:
   `https://brittanyellich.com/post` →
   label "Read the full article on brittanyellich.com", href is the
   full URL; `https://www.example.com/x` → host stripped to
   `example.com`; `https://blog.example.com/x` → keeps subdomain;
   empty/null/`mailto:`/`javascript:` → `null,null`.
-- [ ] T008 Create `src/server/article-extract.ts` exporting
+- [X] T008 Create `src/server/article-extract.ts` exporting
   `extractArticleBody(html:string, baseUrl:string):
   { html:string, plainTextLength:number } | { error:'no_body' |
   'too_large' }`. Implements the R-3 pipeline: strip
@@ -103,7 +103,7 @@ These are testable in isolation (no DO, no fetch).
   return `error:'too_large'` if no clean truncation point exists
   below the cap. Also export `sanitiseExtractedHtml(html:string):
   string` doing the regex pass described in R-7.
-- [ ] T009 [P] [Tests] Create `test/article-extract.ts` covering:
+- [X] T009 [P] [Tests] Create `test/article-extract.ts` covering:
   `<article>` is preferred over `<main>`; chrome elements (header,
   nav, aside, footer, .comments) are removed; an inline `<script>`
   is stripped; an `onclick=` handler is stripped; a `javascript:`
@@ -132,7 +132,7 @@ Reference: quickstart.md SC-001 / FR-002 / FR-005 / SC-003.
 
 ### Server pipeline + endpoint
 
-- [ ] T010 [US1] Create `src/server/article-fetch.ts` exporting
+- [X] T010 [US1] Create `src/server/article-fetch.ts` exporting
   `fetchFullArticle(link:string):Promise<{ status:'succeeded',
   html:string, fetchedAt:string } | { status: Exclude<FullContentStatus,
   'succeeded'> }>`. Pipeline per contracts/fetch-full-article.md
@@ -146,7 +146,7 @@ Reference: quickstart.md SC-001 / FR-002 / FR-005 / SC-003.
   `extractArticleBody(html, finalUrl)` → success or
   `failed_no_body` / `failed_too_large`. No `console.error` for
   routine failures (spec-001 logging style).
-- [ ] T011 [US1] [Tests] Create `test/article-fetch.ts` covering:
+- [X] T011 [US1] [Tests] Create `test/article-fetch.ts` covering:
   successful 200 + readable HTML → `succeeded`; 404 → `failed_status`;
   6-redirect chain → `failed_redirect`; `Content-Type:
   application/pdf` → `failed_non_html`; 2 MiB body →
@@ -154,17 +154,17 @@ Reference: quickstart.md SC-001 / FR-002 / FR-005 / SC-003.
   `AbortSignal.timeout` fires → `failed_network`; SSRF-blocked
   hostname → `failed_network`. Use the existing `mockFetch`
   pattern from spec 001 tests (no real network).
-- [ ] T012 [US1] In `src/server/durable-objects/index.ts`, extend
+- [X] T012 [US1] In `src/server/durable-objects/index.ts`, extend
   `ITEM_COLUMNS` (or equivalent select-list constant) to include
   `full_content`, `full_content_fetched_at`, `full_content_status`.
   Make the same change to `ITEM_SYNC_COLUMNS` so the new columns are
   emitted on `/api/sync` pages (data-model.md "Wire format").
-- [ ] T013 [US1] In `src/server/durable-objects/index.ts`, add
+- [X] T013 [US1] In `src/server/durable-objects/index.ts`, add
   `private migrateAddItemFullContent()` exactly as in data-model.md
   (idempotent `PRAGMA table_info` + `ALTER TABLE` per column). Bump
   `USER_DO_MIGRATION_VERSION` from 4 → 5 and call the new migration
   from the version-5 branch.
-- [ ] T014 [US1] In `src/server/durable-objects/index.ts`, register
+- [X] T014 [US1] In `src/server/durable-objects/index.ts`, register
   `POST /items/:id/fetch-full`. Implementation per
   contracts/fetch-full-article.md "Server-side flow":
   parse `:id` (→ 400 on bad), parse JSON body `{ force?:boolean }`
@@ -179,12 +179,12 @@ Reference: quickstart.md SC-001 / FR-002 / FR-005 / SC-003.
   `full_content` on `failed_*` outcomes), return the updated row in
   the documented `{ "item": ... }` shape. Validate status
   transitions against `ALL_FULL_CONTENT_STATUSES`.
-- [ ] T015 [US1] In `src/server/index.ts`, route the public path
+- [X] T015 [US1] In `src/server/index.ts`, route the public path
   `POST /api/items/:id/fetch-full` through the existing `dataRouter`
   proxy to the user's DO at `POST /items/:id/fetch-full`, behind
   `requireAuth`. No entitlement gate (matches `/api/items` data
   endpoints).
-- [ ] T016 [US1] [Tests] Add an integration test
+- [X] T016 [US1] [Tests] Add an integration test
   `test/fetch-full-endpoint.ts` (or extend an existing DO route
   test if there is one) covering: 200 with `succeeded` row when the
   pipeline reports success; 200 with `failed_status` on 404; 200
@@ -196,12 +196,12 @@ Reference: quickstart.md SC-001 / FR-002 / FR-005 / SC-003.
 
 ### Sync wiring
 
-- [ ] T017 [US1] In `src/client/db/types.ts`, extend the `Item`
+- [X] T017 [US1] In `src/client/db/types.ts`, extend the `Item`
   type with `full_content?:string|null`,
   `full_content_fetched_at?:string|null`,
   `full_content_status?:FullContentStatus|null` (re-export status
   type from `src/shared/schema.ts`).
-- [ ] T018 [US1] In `src/client/db/pull-sync.ts`, extend
+- [X] T018 [US1] In `src/client/db/pull-sync.ts`, extend
   `upsertItem` to write the three new columns (mirror the
   treatment of `content` and `description`, including the
   `storeContent`/`keepContent` privacy gate — when local content
@@ -211,31 +211,31 @@ Reference: quickstart.md SC-001 / FR-002 / FR-005 / SC-003.
   table_info(items)` and `ALTER TABLE` for any of the three columns
   that is missing on an existing OPFS DB. Call it before the first
   upsert in a sync cycle.
-- [ ] T019 [US1] In `src/client/db/push-sync.ts`, extend
+- [X] T019 [US1] In `src/client/db/push-sync.ts`, extend
   `upsertItemFromServer` to copy the same three columns (server →
   local mirror path).
-- [ ] T020 [US1] In `src/client/db/bootstrap.ts` (or wherever the
+- [X] T020 [US1] In `src/client/db/bootstrap.ts` (or wherever the
   initial `/api/sync` payload is fanned into the local DB), make
   sure the new columns are passed through to `pullSync.upsertItem`.
-- [ ] T021 [US1] [Tests] Extend `test/sync.ts` with a round-trip
+- [X] T021 [US1] [Tests] Extend `test/sync.ts` with a round-trip
   case: server returns an item with `full_content_status:
   'succeeded'` and a `full_content`; after `pullSync`, the local
   row has the same three columns set. Add a second case where
   `storeContent` is false: `full_content` is dropped in the local
   upsert.
-- [ ] T022 [US1] [Tests] Extend `test/local-adapter.ts` to verify
+- [X] T022 [US1] [Tests] Extend `test/local-adapter.ts` to verify
   `SELECT * FROM items WHERE id = ?` returns the three new columns
   (NULL by default, populated after a manual UPDATE).
 
 ### Client trigger + render
 
-- [ ] T023 [US1] In `src/client/db/remote-adapter.ts`, add
+- [X] T023 [US1] In `src/client/db/remote-adapter.ts`, add
   `fetchFullArticle(itemId:number, opts?:{ force?:boolean }):
   Promise<{ item:Item }>`. POSTs to
   `/api/items/${itemId}/fetch-full` with `{ force }`, throws on
   non-2xx, returns parsed JSON. Map 429 to a typed
   `FetchFullThrottledError` carrying `retryAfterSeconds`.
-- [ ] T024 [US1] In `src/client/state.ts`, add a
+- [X] T024 [US1] In `src/client/state.ts`, add a
   `fetchFullArticle(itemId, opts?)` action that calls the remote
   adapter, then upserts the returned item into the local DB
   (`pullSync.upsertItem`-equivalent path) AND into any in-memory
@@ -244,7 +244,7 @@ Reference: quickstart.md SC-001 / FR-002 / FR-005 / SC-003.
   multi-signal write. Add component-local request state via
   `@substrate-system/state` (loading / error) so the route can
   render a "Fetching full article…" indicator.
-- [ ] T025 [US1] In `src/client/routes/item-reader.ts`, on item
+- [X] T025 [US1] In `src/client/routes/item-reader.ts`, on item
   open: if `isSummaryOnly(item) && item.full_content_status == null
   && navigator.onLine`, call `state.fetchFullArticle(item.id)`. Do
   NOT auto-trigger when status is `succeeded` (cache hit) or any
@@ -252,7 +252,7 @@ Reference: quickstart.md SC-001 / FR-002 / FR-005 / SC-003.
   through the existing `sanitizeHtml` (DOMPurify) when present,
   else fall back to `item.content || item.description` exactly as
   today. Keep the existing fallback chain intact.
-- [ ] T026 [US1] In `src/client/routes/item-reader.ts`, render a
+- [X] T026 [US1] In `src/client/routes/item-reader.ts`, render a
   small "Fetching full article…" indicator while the action is in
   flight. No new global CSS — extend
   `src/client/routes/item-reader.css` with one rule for
@@ -260,7 +260,7 @@ Reference: quickstart.md SC-001 / FR-002 / FR-005 / SC-003.
 
 ### Lockdown test
 
-- [ ] T027 [US1] [Tests] Create
+- [X] T027 [US1] [Tests] Create
   `test/article-fetch-not-in-refresh.ts` (modelled on
   `test/state-refresh-audit.ts` / `test/sync-invariant-static.mjs`)
   asserting that `fetchFullArticle` and `extractArticleBody` are
@@ -288,12 +288,12 @@ at `item.link`, opens in a new tab, and labels itself with the host
 (www-stripped) of `item.link`. Items with no link render no link.
 Reference: quickstart.md FR-011 / FR-012 / FR-013 / FR-015.
 
-- [ ] T028 [US2] In `src/client/routes/item-reader.ts`, render the
+- [X] T028 [US2] In `src/client/routes/item-reader.ts`, render the
   publisher link below the article body using
   `publisherLinkLabel(item.link)` and `publisherLinkHref(item.link)`.
   Render nothing if either returns null. Set
   `target="_blank" rel="noopener noreferrer"` (FR-013).
-- [ ] T029 [US2] In `src/client/routes/item-reader.ts`, replace the
+- [X] T029 [US2] In `src/client/routes/item-reader.ts`, replace the
   current "Open original" button affordance with the publisher link
   (FR-014: the publisher link is the *only* explicit escape hatch
   going forward). Confirm the link appears in all body states:
@@ -302,7 +302,7 @@ Reference: quickstart.md FR-011 / FR-012 / FR-013 / FR-015.
   `src/client/routes/item-reader.css` with a single new rule for
   `.article-publisher-link` (using existing colour / spacing
   variables; do not introduce new colours).
-- [ ] T030 [US2] [Tests] Extend `test/publisher-link.ts` (or add a
+- [X] T030 [US2] [Tests] Extend `test/publisher-link.ts` (or add a
   small DOM-rendering test) verifying that the route omits the
   link when `item.link` is null/empty/malformed, and renders it
   with the right label and `target="_blank" rel="noopener
@@ -330,24 +330,24 @@ single click and lands on the success state when the underlying issue
 is fixed.
 Reference: quickstart.md FR-009 / SC-005 / SC-006.
 
-- [ ] T031 [US3] In `src/client/routes/item-reader.ts`, when
+- [X] T031 [US3] In `src/client/routes/item-reader.ts`, when
   `item.full_content_status` starts with `'failed_'`, render a
   small notice "Couldn't load the full article." with a `Retry`
   button immediately above the publisher link. The summary
   (`item.content || item.description`) MUST remain visible —
   failure does not blank the article view (FR-008 / SC-005).
-- [ ] T032 [US3] Wire the Retry button to call
+- [X] T032 [US3] Wire the Retry button to call
   `state.fetchFullArticle(item.id, { force: true })`. While the
   retry is in flight, swap the notice for the same "Fetching full
   article…" indicator from T026; on success, replace the
   summary with the full body; on failure, restore the notice with
   whatever new `failed_*` status came back.
-- [ ] T033 [US3] In `src/client/routes/item-reader.css`, add one
+- [X] T033 [US3] In `src/client/routes/item-reader.css`, add one
   rule for `.article-fetch-status.failed` (and an `.article-fetch-
   retry` rule if the button needs spacing). Reuse existing colour
   variables — do not introduce new ones. No CSS unrelated to this
   feature is modified.
-- [ ] T034 [US3] [Tests] Add a small render-state test (extend the
+- [X] T034 [US3] [Tests] Add a small render-state test (extend the
   existing item-reader test file if one exists, otherwise inline in
   `test/article-detect.ts` is acceptable) verifying: (a) status
   `null` + content present → no notice; (b) status `succeeded` →
@@ -365,23 +365,23 @@ observable.
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T035 [P] Run `npm run lint` and `npm test`; fix any
+- [X] T035 [P] Run `npm run lint` and `npm test`; fix any
   surfaced issues. Confirm the new tests
   (`test/article-detect.ts`, `test/publisher-link.ts`,
   `test/article-extract.ts`, `test/article-fetch.ts`,
   `test/fetch-full-endpoint.ts`,
   `test/article-fetch-not-in-refresh.ts`) appear in the test
   runner's discovery (`script/run-all-tests.mjs` or equivalent).
-- [ ] T036 [P] Walk through `specs/002-full-article-fetch/quickstart.md`
+- [X] T036 [P] Walk through `specs/002-full-article-fetch/quickstart.md`
   end-to-end against `npm start` in a real browser. Verify each
   section's pass criteria. Capture any observed deviations and
   open follow-up tasks if they are out of spec scope.
-- [ ] T037 [P] Manually inspect the local OPFS DB after a few
+- [X] T037 [P] Manually inspect the local OPFS DB after a few
   brittanyellich opens (per quickstart "Inspect the local DB")
   and confirm `length(full_content) <= MAX_FULL_CONTENT_BYTES`,
   `full_content_status` is one of the documented enum values, and
   `full_content_fetched_at` parses as a valid timestamp (SC-008).
-- [ ] T038 Update `CLAUDE.md` "Active Technologies" section if the
+- [X] T038 Update `CLAUDE.md` "Active Technologies" section if the
   /speckit.plan agent-context update did not already cover the
   002 entry.
 

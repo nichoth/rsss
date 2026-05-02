@@ -2,7 +2,7 @@ const MAX_FEED_BYTES = 5 * 1024 * 1024
 const MAX_HEAD_BYTES = 256 * 1024
 const FEED_FETCH_TIMEOUT_MS = 15_000
 const MAX_FEED_REDIRECTS = 3
-const MAX_ARTICLE_REDIRECTS = 5
+export const MAX_ARTICLE_REDIRECTS = 5
 const DNS_JSON_URL = 'https://cloudflare-dns.com/dns-query'
 
 type ResolveHostname = (hostname:string) => Promise<string[]>
@@ -100,7 +100,7 @@ export async function fetchOgImage (
     }
 }
 
-async function fetchValidatedResponse (
+export async function fetchValidatedResponse (
     inputUrl:string,
     options:FetchFeedTextOptions & {
         maxRedirects?:number

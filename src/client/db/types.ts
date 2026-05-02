@@ -2,6 +2,10 @@
  * Shared types for database operations
  */
 
+import type { FullContentStatus } from '../../shared/schema.js'
+
+export type { FullContentStatus }
+
 export interface Feed {
     id:number
     url:string
@@ -29,6 +33,9 @@ export interface Item {
     created_at:string
     updated_at:string
     feed_title?:string
+    full_content?:string|null
+    full_content_fetched_at?:string|null
+    full_content_status?:FullContentStatus|null
 }
 
 export interface ItemsResponse {

@@ -6,6 +6,7 @@ import {
     setSyncError,
     isLocalFirstActive
 } from './sync-status.js'
+import { ensureItemFullContentColumns } from './pull-sync.js'
 
 export const DEAD_LETTER_ATTEMPT_LIMIT = 10
 
@@ -293,12 +294,14 @@ async function upsertItemFromServer (
     db:Sqlite3Db,
     item:Record<string, unknown>
 ):Promise<void> {
+    await ensureItemFullContentColumns(db)
     await execDb(db, {
         sql: `INSERT INTO items
             (id, feed_id, guid, title, link, description, content,
              author, pub_date, thumbnail_url, is_read, is_starred,
-             created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             created_at, updated_at,
+             full_content, full_content_fetched_at, full_content_status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 feed_id = excluded.feed_id,
                 guid = excluded.guid,
@@ -311,7 +314,10 @@ async function upsertItemFromServer (
                 thumbnail_url = excluded.thumbnail_url,
                 is_read = excluded.is_read,
                 is_starred = excluded.is_starred,
-                updated_at = excluded.updated_at`,
+                updated_at = excluded.updated_at,
+                full_content = excluded.full_content,
+                full_content_fetched_at = excluded.full_content_fetched_at,
+                full_content_status = excluded.full_content_status`,
         bind: [
             item.id as number,
             item.feed_id as number,
@@ -326,7 +332,10 @@ async function upsertItemFromServer (
             (item.is_read as number) ?? 0,
             (item.is_starred as number) ?? 0,
             item.created_at as string,
-            item.updated_at as string
+            item.updated_at as string,
+            (item.full_content as string|null) ?? null,
+            (item.full_content_fetched_at as string|null) ?? null,
+            (item.full_content_status as string|null) ?? null
         ]
     })
 }

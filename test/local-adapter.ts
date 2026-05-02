@@ -609,3 +609,74 @@ test('markAllRead with feedId marks only that feed read', async (t) => {
         db.close()
     }
 })
+
+interface ItemFullContentRow extends Record<string, SqlValue> {
+    id:number
+    full_content:string|null
+    full_content_fetched_at:string|null
+    full_content_status:string|null
+}
+
+test('items table exposes full_content columns', async (t) => {
+    const db = await openLocalDb('did:test:items-fullcontent')
+    await seedDb(db)
+    try {
+        const cols:Array<{ name:string }> = []
+        db.exec({
+            sql: 'PRAGMA table_info(items)',
+            rowMode: 'object',
+            resultRows: cols as Record<string, SqlValue>[]
+        })
+        const names = cols.map(c => c.name)
+        t.ok(names.includes('full_content'), 'full_content column exists')
+        t.ok(
+            names.includes('full_content_fetched_at'),
+            'full_content_fetched_at column exists'
+        )
+        t.ok(
+            names.includes('full_content_status'),
+            'full_content_status column exists'
+        )
+
+        const before:ItemFullContentRow[] = []
+        db.exec({
+            sql: 'SELECT id, full_content, full_content_fetched_at, ' +
+                'full_content_status FROM items WHERE id = 1',
+            rowMode: 'object',
+            resultRows: before as Record<string, SqlValue>[]
+        })
+        t.equal(before[0]?.full_content, null,
+            'full_content is NULL by default')
+        t.equal(before[0]?.full_content_status, null,
+            'full_content_status is NULL by default')
+
+        db.exec({
+            sql: 'UPDATE items SET full_content = ?, ' +
+                'full_content_fetched_at = ?, ' +
+                'full_content_status = ? WHERE id = ?',
+            bind: [
+                '<p>fetched</p>',
+                '2026-04-30 12:00:00',
+                'succeeded',
+                1
+            ]
+        })
+
+        const after:ItemFullContentRow[] = []
+        db.exec({
+            sql: 'SELECT id, full_content, full_content_fetched_at, ' +
+                'full_content_status FROM items WHERE id = 1',
+            rowMode: 'object',
+            resultRows: after as Record<string, SqlValue>[]
+        })
+        t.equal(after[0]?.full_content, '<p>fetched</p>',
+            'full_content is read back')
+        t.equal(after[0]?.full_content_fetched_at,
+            '2026-04-30 12:00:00',
+            'full_content_fetched_at is read back')
+        t.equal(after[0]?.full_content_status, 'succeeded',
+            'full_content_status is read back')
+    } finally {
+        db.close()
+    }
+})
