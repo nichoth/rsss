@@ -18,6 +18,42 @@
 - Item fields that must leave the Durable Object should be added to
   `ITEM_COLUMNS` / `ITEM_SYNC_COLUMNS`, then mirrored in both local sync
   item upsert paths: `pull-sync.ts` and `push-sync.ts`.
+- Dot component colors belong in global `_variables.css` variables and
+  `dot.css` should reference those variables rather than hardcoded fills.
+- Node static tests that are bundled and piped to `node --input-type=module`
+  should resolve repo files from the runner cwd, not from `import.meta.url`,
+  because esbuild stdin/eval wrappers change the module URL.
+
+## 2026-05-02 13:10 PDT - US-145
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Extended the Dot component color set.
+  - Added `blue` to the Dot color union.
+  - Added global dot color variables for gray, blue, yellow, green, red, and
+    the dot border.
+  - Updated dot CSS to use the global variables instead of hardcoded colors.
+  - Added focused coverage that gray and blue styles use color variables.
+- Files changed:
+  - `src/client/components/dot.ts`
+  - `src/client/components/dot.css`
+  - `src/client/_variables.css`
+  - `test/dot.ts`
+  - `test/node-builtins.d.ts`
+  - `test/state-refresh-audit.ts`
+  - `test/index.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Dot colors are component-specific names, but the actual color values
+    still live in the global variables file to satisfy the CSS color rules.
+  - Browser-based tapout tests should import CSS with esbuild's text loader
+    instead of reading it through `node:fs`.
+  - Node-only static tests need local ambient declarations for imported
+    Node built-ins because this repo does not include full Node typings in
+    `tsconfig.json`.
+  - Node static tests that are bundled and piped to
+    `node --input-type=module` should not resolve repo files from
+    `import.meta.url`; use repo-relative paths from the test runner cwd.
+---
 
 ## 2026-04-28 19:03 PDT - US-122
 Thread: https://ampcode.com/threads/unknown

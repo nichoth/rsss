@@ -24,10 +24,7 @@ function collectClientFiles (dir:string):string[] {
 
 test('no unauthorized State.refreshFeeds / State.refreshFeed call sites',
     t => {
-        const clientDir = new URL(
-            '../src/client',
-            import.meta.url
-        ).pathname
+        const clientDir = 'src/client'
         const files = collectClientFiles(clientDir)
 
         const violations:string[] = []

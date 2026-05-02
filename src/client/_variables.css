@@ -15,5 +15,11 @@
     --color-error: #dc2626;
     --color-placeholder: #dcdcdc;
     --color-success: #16a34a;
+    --color-dot-border: var(--color-border);
+    --color-dot-gray: var(--color-placeholder);
+    --color-dot-blue: var(--color-primary);
+    --color-dot-yellow: var(--color-accent);
+    --color-dot-green: var(--color-success);
+    --color-dot-red: var(--color-error);
     --sidebar-width: 280px;
 }

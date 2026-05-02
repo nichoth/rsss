@@ -1,24 +1,28 @@
 svg.dot {
     transition: 0.2s all;
     display: inline;
-    border: 1px solid;
+    border: 1px solid var(--color-dot-border);
     border-radius: 50%;
     width: 1rem;
     height: 1rem;
 
     &.gray {
-        fill: gray;
+        fill: var(--color-dot-gray);
+    }
+
+    &.blue {
+        fill: var(--color-dot-blue);
     }
 
     &.yellow {
-        fill: yellow;
+        fill: var(--color-dot-yellow);
     }
 
     &.green {
-        fill: #7df071;
+        fill: var(--color-dot-green);
     }
 
     &.red {
-        fill: red;
+        fill: var(--color-dot-red);
     }
 }

@@ -2297,7 +2297,7 @@
         "Lint passes (`npm run lint`)"
       ],
       "priority": 145,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
