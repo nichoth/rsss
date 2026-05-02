@@ -82,6 +82,10 @@ function createSql () {
                 return result([])
             }
 
+            if (query.includes('last_pulled_at')) {
+                return result([])
+            }
+
             throw new Error(`Unexpected SQL: ${query}`)
         }
     }

@@ -3591,3 +3591,29 @@ Thread: https://ampcode.com/threads/unknown
 - **Learnings for future iterations:**
   - When adding fields to `AppState`, also update any test files that construct a mock `AppState` object (e.g., `test/local-first-opfs-persistence.ts`'s `makeState()` helper).
 ---
+
+## 2026-05-01 - US-136
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Track per-user, per-feed last-pulled cursor on the server.
+  - Added `last_pulled_at TEXT` (nullable) to `feeds` in `src/shared/schema.ts`.
+  - Bumped `USER_DO_MIGRATION_VERSION` to 4 and added `migrateAddLastPulledAt()` that backfills `last_pulled_at` to `MAX(pub_date)` per feed.
+  - Added `getFeedsWithUpdates()` public helper returning IDs of feeds with items newer than `last_pulled_at`.
+  - Added private `advanceFeedCursor(feedId)` that sets `last_pulled_at = MAX(pub_date)` for a feed.
+  - Called `advanceFeedCursor` in `POST /feeds/:id/refresh` and in each feed in `POST /feeds/refresh` (waitUntil block).
+  - Added `test/feed-cursor.ts` with 11 tests covering helper behavior and route-level cursor advancement.
+  - Updated `test/do-migrations.ts` for version 4 and 5 PRAGMA queries.
+  - Updated `test/do-handlers.ts` SQL mock to handle `last_pulled_at` updates.
+- Files changed:
+  - `src/shared/schema.ts`
+  - `src/server/durable-objects/index.ts`
+  - `test/feed-cursor.ts`
+  - `test/do-migrations.ts`
+  - `test/do-handlers.ts`
+  - `test/index.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - When adding SQL queries to DO routes, update `do-handlers.ts` SQL mock or tests fail with "Unexpected SQL".
+  - `validateFeedUrl` does no network I/O (only URL parsing and hostname checks), so route tests that call refresh routes don't need to mock it.
+  - `getFeedsWithUpdates` is made public (no `private` keyword) to be accessible via `Object.create(UserDO.prototype)` in tests.
+---

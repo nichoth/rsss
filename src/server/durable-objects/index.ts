@@ -89,7 +89,7 @@ const MANUAL_REFRESH_STORAGE_PREFIX = 'manual_refresh:'
 const ALARM_REFRESH_CURSOR_KEY = 'alarm_refresh_cursor'
 const PENDING_DELETION_KEY = 'pending_deletion'
 const MIGRATION_STATE_KEY = 'schema_migration'
-const USER_DO_MIGRATION_VERSION = 3
+const USER_DO_MIGRATION_VERSION = 4
 const SYNC_PAGE_LIMIT = 500
 const MAX_PARSED_FEED_ITEMS = 1000
 const MAX_FEED_TITLE_LENGTH = 8 * 1024
@@ -337,6 +337,7 @@ export class UserDO extends DurableObject<Env> {
             this.migrateAddUpdatedAt()
             this.migrateAddFeedFailureColumns()
             this.migrateAddItemThumbnail()
+            this.migrateAddLastPulledAt()
             await this.ctx.storage.put(MIGRATION_STATE_KEY, {
                 migration_v: USER_DO_MIGRATION_VERSION
             })
@@ -403,6 +404,54 @@ export class UserDO extends DurableObject<Env> {
         if (!hasThumbnailUrl) {
             this.sql.exec('ALTER TABLE items ADD COLUMN thumbnail_url TEXT')
         }
+    }
+
+    private migrateAddLastPulledAt () {
+        const columns = this.sql.exec(
+            'PRAGMA table_info(feeds)'
+        ).toArray()
+        const hasLastPulledAt = columns.some((col: unknown) =>
+            (col as { name:string }).name === 'last_pulled_at'
+        )
+
+        if (!hasLastPulledAt) {
+            this.sql.exec(
+                'ALTER TABLE feeds ADD COLUMN last_pulled_at TEXT'
+            )
+            this.sql.exec(`
+                UPDATE feeds SET last_pulled_at = (
+                    SELECT MAX(pub_date) FROM items
+                    WHERE items.feed_id = feeds.id
+                    AND pub_date IS NOT NULL
+                )
+            `)
+        }
+    }
+
+    getFeedsWithUpdates ():string[] {
+        const rows = this.sql.exec(`
+            SELECT feeds.id FROM feeds
+            WHERE EXISTS (
+                SELECT 1 FROM items
+                WHERE items.feed_id = feeds.id
+                AND (
+                    feeds.last_pulled_at IS NULL
+                    OR items.pub_date > feeds.last_pulled_at
+                )
+            )
+        `).toArray() as Array<{ id:number }>
+        return rows.map(r => String(r.id))
+    }
+
+    private advanceFeedCursor (feedId:number):void {
+        this.sql.exec(
+            `UPDATE feeds SET last_pulled_at = (
+                SELECT MAX(pub_date) FROM items
+                WHERE feed_id = ? AND pub_date IS NOT NULL
+            ) WHERE id = ?`,
+            feedId,
+            feedId
+        )
     }
 
     private createRouter (): Hono {
@@ -633,6 +682,7 @@ export class UserDO extends DurableObject<Env> {
             try {
                 await validateFeedUrl(feed.url)
                 await this.fetchFeed(feed)
+                this.advanceFeedCursor(feed.id)
             } catch (_err) {
                 const err = _err as FeedFetchError
                 return c.json(
@@ -652,9 +702,10 @@ export class UserDO extends DurableObject<Env> {
                 .toArray() as unknown as Feed[]
 
             this.ctx.waitUntil((async () => {
-                await Promise.all(
-                    feeds.map(feed => this.fetchFeed(feed))
-                )
+                await Promise.all(feeds.map(async feed => {
+                    await this.fetchFeed(feed)
+                    this.advanceFeedCursor(feed.id)
+                }))
                 this.broadcast('refresh-complete', {
                     refreshed: feeds.length
                 })
