@@ -537,6 +537,45 @@ State.openEventStream = function (state:AppState):void {
         state.feedsLoading.value = false
     })
 
+    source.addEventListener('feed-updates-available', (ev) => {
+        debug('SSE feed-updates-available', ev.data)
+        try {
+            const { feedIds } = JSON.parse(ev.data) as {
+                feedIds:string[]
+            }
+            batch(() => {
+                const current = state.feedsWithUpdates.value
+                const merged = Array.from(
+                    new Set([...current, ...feedIds])
+                )
+                state.feedsWithUpdates.value = merged
+                state.feedUpdateStatus.value = 'updates'
+            })
+        } catch (err) {
+            debug('feed-updates-available parse error:', err)
+        }
+    })
+
+    source.addEventListener('feed-updates-cleared', (ev) => {
+        debug('SSE feed-updates-cleared', ev.data)
+        try {
+            const { feedIds } = JSON.parse(ev.data) as {
+                feedIds:string[]
+            }
+            batch(() => {
+                const cleared = new Set(feedIds)
+                const remaining = state.feedsWithUpdates.value
+                    .filter(id => !cleared.has(id))
+                state.feedsWithUpdates.value = remaining
+                if (remaining.length === 0) {
+                    state.feedUpdateStatus.value = 'synced'
+                }
+            })
+        } catch (err) {
+            debug('feed-updates-cleared parse error:', err)
+        }
+    })
+
     source.addEventListener('error', (ev) => {
         debug('SSE error (auto-reconnect)', ev)
     })
