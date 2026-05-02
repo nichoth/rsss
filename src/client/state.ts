@@ -1225,7 +1225,11 @@ State.deleteFeed = async function (
 State.refreshFeeds = async function (
     state:AppState
 ):Promise<void> {
-    state.feedsLoading.value = true
+    batch(() => {
+        state.feedsLoading.value = true
+        state.feedSyncStatus.value = 'syncing'
+        state.feedSyncError.value = null
+    })
 
     clearRefreshFeedsSafetyTimeout()
     refreshFeedsSafetyTimeout = setTimeout(() => {
@@ -1235,13 +1239,23 @@ State.refreshFeeds = async function (
 
     try {
         await api.post('feeds/refresh')
+        clearRefreshFeedsSafetyTimeout()
+        batch(() => {
+            state.feedUpdateCounts.value = {}
+            state.feedSyncStatus.value = 'synced'
+            state.feedsLoading.value = false
+        })
     } catch (err) {
         clearRefreshFeedsSafetyTimeout()
-        state.feedsLoading.value = false
+        batch(() => {
+            state.feedSyncStatus.value = 'error'
+            state.feedSyncError.value = err instanceof Error ?
+                err.message :
+                'Failed to refresh feeds'
+            state.feedsLoading.value = false
+        })
         throw err
     }
-    // Spinner stays on until SSE 'refresh-complete' (or the
-    // safety timeout) clears it.
 }
 
 /**

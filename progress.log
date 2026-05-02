@@ -1,5 +1,10 @@
 ## Codebase Patterns
 
+- `State.refreshFeeds` owns global feed refresh status transitions for the
+  header dot: set `feedSyncStatus` to `syncing` before POSTing
+  `/api/feeds/refresh`, clear `feedSyncError`, then set `synced` with empty
+  `feedUpdateCounts` on success or `error` with the latest message on
+  failure.
 - Feed update UI state in `src/client/state.ts` now uses
   `feedSyncStatus`, `feedUpdateCounts`, and `feedSyncError` as the source
   of truth. Older `feedUpdateStatus` and `feedsWithUpdates` are computed
@@ -3792,4 +3797,30 @@ Thread: https://ampcode.com/threads/unknown
   - `State.loadFeeds` should treat `feedUpdateCounts` as the canonical
     bootstrap source for feed sync status; legacy `feedUpdateStatus` is no
     longer the state hydration source.
+---
+
+## 2026-05-02 13:54 PDT - US-150
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Wired the global Refresh Feeds button action to
+  drive header feed sync states.
+  - `State.refreshFeeds` now enters `syncing` in the same batch that starts
+    the spinner and clears any stale feed sync error.
+  - Successful refresh requests clear `feedUpdateCounts`, set
+    `feedSyncStatus` to `synced`, and stop the spinner.
+  - Failed refresh requests set `feedSyncStatus` to `error`, replace
+    `feedSyncError` with the latest message, and stop the spinner.
+  - Added focused state-action coverage for in-flight, success, and failure
+    transitions.
+- Files changed:
+  - `src/client/state.ts`
+  - `test/state-auth-storage.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - The sidebar button already uses `feedsLoading` as the `Button`
+    `isSpinning` signal, so `State.refreshFeeds` is the right ownership
+    point for both duplicate-click prevention and feed-status transitions.
+  - Browser tests around `refreshFeeds` should stub the 60 second safety
+    timer, otherwise a successful refresh can leave a long-lived timer in
+    the test browser.
 ---

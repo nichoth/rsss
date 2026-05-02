@@ -2391,7 +2391,7 @@
         "Verify in browser using dev-browser skill: click Sync, confirm dot turns yellow then green; with network offline confirm dot turns red and `title` shows error"
       ],
       "priority": 150,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

@@ -68,6 +68,38 @@ function nextTask ():Promise<void> {
     return new Promise(resolve => setTimeout(resolve, 0))
 }
 
+function stubRefreshSafetyTimer ():() => void {
+    const originalSetTimeout = globalThis.setTimeout
+    const originalClearTimeout = globalThis.clearTimeout
+
+    Object.defineProperty(globalThis, 'setTimeout', {
+        value: (
+            handler:TimerHandler,
+            timeout?:number,
+            ...args:unknown[]
+        ) => {
+            if (timeout === 60_000) return 1
+            return originalSetTimeout(handler, timeout, ...args)
+        },
+        configurable: true
+    })
+    Object.defineProperty(globalThis, 'clearTimeout', {
+        value: () => undefined,
+        configurable: true
+    })
+
+    return () => {
+        Object.defineProperty(globalThis, 'setTimeout', {
+            value: originalSetTimeout,
+            configurable: true
+        })
+        Object.defineProperty(globalThis, 'clearTimeout', {
+            value: originalClearTimeout,
+            configurable: true
+        })
+    }
+}
+
 function emptySyncFetch ():typeof fetch {
     return async () => new Response(JSON.stringify({
         feeds: [],
@@ -161,6 +193,7 @@ function feedState ():AppState {
         feedSyncStatus: signal<
             'inactive'|'updates'|'syncing'|'error'|'synced'
         >('inactive'),
+        feedSyncError: signal<string|null>(null),
         feedUpdateCounts: signal<Record<string, number>>({})
     } as unknown) as AppState
 }
@@ -408,6 +441,124 @@ test('State exposes feed sync status as the single source of truth',
         )
 
         state.cleanup()
+    })
+
+test('refreshFeeds marks feed sync as syncing while request is in flight',
+    async t => {
+        const originalFetch = globalThis.fetch
+        const restoreTimeout = stubRefreshSafetyTimer()
+        let resolveRefresh:(response:Response) => void = () => {}
+
+        try {
+            globalThis.fetch = async () => new Promise<Response>(resolve => {
+                resolveRefresh = resolve
+            })
+
+            const state = feedState()
+            state.feedUpdateCounts.value = { 1: 2 }
+            state.feedSyncStatus.value = 'updates'
+
+            const refresh = State.refreshFeeds(state)
+            await nextTask()
+
+            t.equal(
+                state.feedsLoading.value,
+                true,
+                'refresh button spinner stays active during sync'
+            )
+            t.equal(
+                state.feedSyncStatus.value,
+                'syncing',
+                'feed sync status switches to syncing immediately'
+            )
+            t.equal(
+                state.feedSyncError.value,
+                null,
+                'clears stale feed sync errors before retrying'
+            )
+
+            resolveRefresh(new Response(JSON.stringify({
+                success: true
+            })))
+            await refresh
+        } finally {
+            globalThis.fetch = originalFetch
+            restoreTimeout()
+        }
+    })
+
+test('refreshFeeds clears update counts and marks feed sync as synced',
+    async t => {
+        const originalFetch = globalThis.fetch
+        const restoreTimeout = stubRefreshSafetyTimer()
+
+        try {
+            globalThis.fetch = async () => new Response(JSON.stringify({
+                success: true
+            }))
+
+            const state = feedState()
+            state.feedUpdateCounts.value = { 1: 2, 2: 1 }
+            state.feedSyncStatus.value = 'updates'
+
+            await State.refreshFeeds(state)
+
+            t.deepEqual(
+                state.feedUpdateCounts.value,
+                {},
+                'successful refresh clears pending update counts'
+            )
+            t.equal(
+                state.feedSyncStatus.value,
+                'synced',
+                'successful refresh marks feed sync as synced'
+            )
+            t.equal(
+                state.feedsLoading.value,
+                false,
+                'successful refresh clears the button spinner'
+            )
+        } finally {
+            globalThis.fetch = originalFetch
+            restoreTimeout()
+        }
+    })
+
+test('refreshFeeds stores latest error message on failure',
+    async t => {
+        const originalFetch = globalThis.fetch
+        const restoreTimeout = stubRefreshSafetyTimer()
+
+        try {
+            globalThis.fetch = async () => {
+                throw new Error('upstream timed out')
+            }
+
+            const state = feedState()
+            state.feedSyncStatus.value = 'updates'
+            state.feedSyncError.value = 'older error'
+
+            await State.refreshFeeds(state).catch(() => undefined)
+
+            t.equal(
+                state.feedSyncStatus.value,
+                'error',
+                'failed refresh marks feed sync as error'
+            )
+            t.equal(
+                state.feedSyncError.value,
+                'upstream timed out',
+                'stores the latest refresh error message'
+            )
+            t.equal(
+                state.feedsLoading.value,
+                false,
+                'failed refresh clears the button spinner'
+            )
+        } finally {
+            globalThis.fetch = originalFetch
+            restoreTimeout()
+        }
     })
 
 test('State auth effect loads once for the final rapid auth value',
