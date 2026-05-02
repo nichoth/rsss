@@ -8,6 +8,7 @@ import {
     billingError as billingErrorSignal,
     checkoutInProgress
 } from '../billing-status.js'
+import { NBSP } from '../constants.js'
 import './signup.css'
 
 const EMAIL_RE = /.+@.+\..+/
@@ -89,7 +90,7 @@ export const SignupPage:FunctionComponent<{
                     <div class="signup-already">
                         <h2>You're subscribed</h2>
                         <p>
-                            You're on the
+                            You're on the${NBSP}
                             <strong>${billing.value?.planId}</strong>
                             plan.
                         </p>

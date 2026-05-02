@@ -31,6 +31,13 @@ export function sanitizeHtml (html:string):string {
     })
 }
 
+export function formatBytes (n:number):string {
+    if (n === 0) return '0 B'
+    if (n < 1_000) return `${n} B`
+    if (n < 1_000_000) return `${(n / 1_000).toFixed(1)} KB`
+    return `${(n / 1_000_000).toFixed(1)} MB`
+}
+
 /**
  * Get the closes parent element matching the given selector.
  *

@@ -56,6 +56,40 @@
         color: var(--color-text, #333);
     }
 
+    & .feed-cache-controls {
+        font-size: 1rem;
+        margin-bottom: 0.5rem;
+
+        & summary {
+            cursor: pointer;
+            color: var(--color-text-secondary);
+            user-select: none;
+        }
+
+        & .feed-cache-form {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            padding: 0.75rem 0;
+        }
+
+        & .cache-field-label {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+            color: var(--color-text);
+
+            & select,
+            & input[type="number"] {
+                padding: 0.25rem 0.5rem;
+                border: 1px solid var(--color-border, #e0e0e0);
+                background: var(--color-bg, #fff);
+                color: var(--color-text, #333);
+                font-size: 1rem;
+            }
+        }
+    }
+
     & check-box {
         & label {
             gap: 0.8rem;

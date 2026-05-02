@@ -15,6 +15,7 @@ export const TABLES_SQL = `
         description TEXT,
         site_url TEXT,
         last_fetched TEXT,
+        last_pulled_at TEXT,
         last_error TEXT,
         last_status INTEGER,
         created_at TEXT DEFAULT (datetime('now')),

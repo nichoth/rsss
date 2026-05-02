@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { type FunctionComponent } from 'preact'
 import { useEffect, useRef } from 'preact/hooks'
-import { useComputed } from '@preact/signals'
+import { useComputed, batch } from '@preact/signals'
 import { CheckBox } from '@substrate-system/check-box'
 import { type AppState, State } from '../state.js'
 import { billingStatus } from '../billing-status.js'
@@ -9,9 +9,14 @@ import {
     syncSubscriptions,
     pendingSyncSubscriptions,
     storeContent,
+    defaultCacheMode,
+    defaultMaxSizeBytes,
+    defaultMaxAgeSeconds,
+    defaultAccountMaxSizeBytes,
     setSyncSubscriptions,
     saveLocalFirstSettings,
-    loadLocalFirstSettings
+    loadLocalFirstSettings,
+    type CacheMode
 } from '../local-first-settings.js'
 import {
     isLocalFirstSupported,
@@ -29,10 +34,24 @@ import {
     getOutboxCount,
     localTabLockError,
     localDbError,
-    purgeStoredContent
+    purgeStoredContent,
+    clearFeedCache
 } from '../db/index.js'
 import { runSyncCycle } from '../db/sync-cycle.js'
 import { syncStatus, syncError } from '../db/sync-status.js'
+import {
+    feedPolicies,
+    loadFeedPolicies,
+    upsertFeedCachePolicy,
+    resolveEffectivePolicy,
+    type FeedCachePolicyRow
+} from '../db/feed-cache-policy.js'
+import {
+    feedStorageBytes,
+    totalStorageBytes,
+    loadStorageUsage
+} from '../db/storage-usage.js'
+import { formatBytes } from '../util.js'
 import './settings.css'
 import { NBSP } from '../constants.js'
 
@@ -50,6 +69,26 @@ export const SettingsRoute:FunctionComponent<{
             State.loadBillingStatus()
         }
     }, [])
+
+    useEffect(() => {
+        const did = state.user.value?.did
+        const db = did ?
+            (getBootstrappedDb() ?? getLocalDb(did)) :
+            null
+        if (!db || feeds.value.length === 0) return
+        const ids = feeds.value.map(f => f.id)
+        loadFeedPolicies(db, ids).catch(() => {})
+    }, [feeds.value, syncSubscriptions.value])
+
+    useEffect(() => {
+        const did = state.user.value?.did
+        const db = did ?
+            (getBootstrappedDb() ?? getLocalDb(did)) :
+            null
+        if (!db || feeds.value.length === 0) return
+        const ids = feeds.value.map(f => f.id)
+        loadStorageUsage(db, ids).catch(() => {})
+    }, [feeds.value, syncSubscriptions.value])
 
     const supported = localFirstSupported.value
     const inProgress = bootstrapInProgress.value
@@ -199,6 +238,137 @@ export const SettingsRoute:FunctionComponent<{
             confirmTerminalReset: confirmTerminalBootstrapReset,
             confirmLowStorage: confirmLowStorageBootstrap
         })
+    }
+
+    function handleCacheModeChange (ev:Event) {
+        const val = (ev.target as HTMLInputElement).value
+        if (val === 'text' || val === 'text_images') {
+            batch(() => {
+                defaultCacheMode.value = val
+            })
+            saveLocalFirstSettings()
+        }
+    }
+
+    function handleMaxSizeChange (ev:Event) {
+        const mb = parseFloat((ev.target as HTMLInputElement).value)
+        if (isFinite(mb) && mb >= 1) {
+            batch(() => {
+                defaultMaxSizeBytes.value = Math.round(mb * 1_000_000)
+            })
+            saveLocalFirstSettings()
+        }
+    }
+
+    function handleMaxAgeChange (ev:Event) {
+        const days = parseFloat((ev.target as HTMLInputElement).value)
+        if (isFinite(days) && days >= 1) {
+            batch(() => {
+                defaultMaxAgeSeconds.value = Math.round(days * 86400)
+            })
+            saveLocalFirstSettings()
+        }
+    }
+
+    function handleAccountMaxSizeChange (ev:Event) {
+        const mb = parseFloat((ev.target as HTMLInputElement).value)
+        if (isFinite(mb) && mb >= 1) {
+            batch(() => {
+                defaultAccountMaxSizeBytes.value =
+                    Math.round(mb * 1_000_000)
+            })
+            saveLocalFirstSettings()
+        }
+    }
+
+    function getLocalDbForUser ():ReturnType<typeof getBootstrappedDb> {
+        const did = state.user.value?.did
+        return did ?
+            (getBootstrappedDb() ?? getLocalDb(did)) :
+            null
+    }
+
+    async function saveFeedPolicy (
+        feedId:number,
+        patch:Partial<FeedCachePolicyRow>
+    ):Promise<void> {
+        const current = feedPolicies.value[feedId] ?? null
+        const updated:FeedCachePolicyRow = {
+            feed_id: feedId,
+            cache_mode: current?.cache_mode ?? null,
+            max_size_bytes: current?.max_size_bytes ?? null,
+            max_age_seconds: current?.max_age_seconds ?? null,
+            ...patch
+        }
+        feedPolicies.value = {
+            ...feedPolicies.value,
+            [feedId]: updated
+        }
+        const db = getLocalDbForUser()
+        if (!db) return
+        try {
+            await upsertFeedCachePolicy(db, feedId, updated)
+        } catch (err) {
+            console.error(
+                '[settings] feed policy save failed',
+                err instanceof Error ? err.message : ''
+            )
+        }
+    }
+
+    function handleFeedCacheModeChange (feedId:number) {
+        return (ev:Event) => {
+            const val = (ev.target as HTMLSelectElement).value
+            const mode = (val === 'text' || val === 'text_images') ?
+                val as CacheMode :
+                null
+            saveFeedPolicy(feedId, { cache_mode: mode })
+        }
+    }
+
+    function handleFeedMaxSizeChange (feedId:number) {
+        return (ev:Event) => {
+            const raw = (ev.target as HTMLInputElement).value.trim()
+            const mb = raw === '' ? null : parseFloat(raw)
+            const bytes = (mb !== null && isFinite(mb) && mb >= 1) ?
+                Math.round(mb * 1_000_000) :
+                null
+            saveFeedPolicy(feedId, { max_size_bytes: bytes })
+        }
+    }
+
+    function handleFeedMaxAgeChange (feedId:number) {
+        return (ev:Event) => {
+            const raw = (ev.target as HTMLInputElement).value.trim()
+            const days = raw === '' ? null : parseFloat(raw)
+            const secs = (days !== null && isFinite(days) && days >= 1) ?
+                Math.round(days * 86400) :
+                null
+            saveFeedPolicy(feedId, { max_age_seconds: secs })
+        }
+    }
+
+    function handleClearFeedCache (feedId:number, feedTitle:string) {
+        return async (e:Event) => {
+            e.preventDefault()
+            if (!confirm(
+                `Clear cached content for "${feedTitle}"? ` +
+                'This will free space but article content will need ' +
+                'to be re-fetched.'
+            )) return
+            const db = getLocalDbForUser()
+            if (!db) return
+            try {
+                await clearFeedCache(db, feedId)
+                const ids = feeds.value.map(f => f.id)
+                await loadStorageUsage(db, ids)
+            } catch (err) {
+                console.error(
+                    '[settings] clear feed cache failed',
+                    err instanceof Error ? err.message : ''
+                )
+            }
+        }
     }
 
     async function handleSync () {
@@ -386,6 +556,83 @@ export const SettingsRoute:FunctionComponent<{
             `}
         </section>
 
+        <section class="settings-section cache-section">
+            <h2>Cache</h2>
+            <p class="cache-total">
+                Total storage used: ${formatBytes(totalStorageBytes.value)}
+            </p>
+            <p class="section-desc">
+                These defaults apply to feeds with no override.
+            </p>
+            <div class="cache-setting">
+                <fieldset class="cache-mode-group">
+                    <legend>Cache mode</legend>
+                    <label class="cache-radio-label">
+                        <input
+                            type="radio"
+                            name="default-cache-mode"
+                            value="text"
+                            checked=${defaultCacheMode.value === 'text'}
+                            onChange=${handleCacheModeChange}
+                        />
+                        Text only
+                    </label>
+                    <label class="cache-radio-label">
+                        <input
+                            type="radio"
+                            name="default-cache-mode"
+                            value="text_images"
+                            checked=${defaultCacheMode.value === 'text_images'}
+                            onChange=${handleCacheModeChange}
+                        />
+                        Text and images
+                    </label>
+                </fieldset>
+            </div>
+            <div class="cache-setting">
+                <label class="cache-input-label">
+                    Max cache size per feed (MB)
+                    <input
+                        type="number"
+                        name="default-max-size-mb"
+                        min="1"
+                        value=${Math.round(
+                            defaultMaxSizeBytes.value / 1_000_000
+                        )}
+                        onChange=${handleMaxSizeChange}
+                    />
+                </label>
+            </div>
+            <div class="cache-setting">
+                <label class="cache-input-label">
+                    Total cache size (MB)
+                    <input
+                        type="number"
+                        name="account-max-size-mb"
+                        min="1"
+                        value=${Math.round(
+                            defaultAccountMaxSizeBytes.value / 1_000_000
+                        )}
+                        onChange=${handleAccountMaxSizeChange}
+                    />
+                </label>
+            </div>
+            <div class="cache-setting">
+                <label class="cache-input-label">
+                    Keep cached items for (days)
+                    <input
+                        type="number"
+                        name="default-max-age-days"
+                        min="1"
+                        value=${Math.round(
+                            defaultMaxAgeSeconds.value / 86400
+                        )}
+                        onChange=${handleMaxAgeChange}
+                    />
+                </label>
+            </div>
+        </section>
+
         <section class="settings-section">
             <h2>Subscribed Feeds</h2>
             <ul class="settings-feeds-list">
@@ -395,6 +642,22 @@ export const SettingsRoute:FunctionComponent<{
                             No feeds followed yet.
                         </p>
                     ` : feeds.value.map(feed => {
+                const policy = feedPolicies.value[feed.id] ?? null
+                const eff = resolveEffectivePolicy(policy)
+                const modeLabel = eff.cacheMode === 'text' ?
+                    'Text only' :
+                    'Text + images'
+                const sizeVal = policy?.max_size_bytes != null ?
+                    String(Math.round(
+                        policy.max_size_bytes / 1_000_000
+                    )) :
+                    ''
+                const ageVal = policy?.max_age_seconds != null ?
+                    String(Math.round(
+                        policy.max_age_seconds / 86400
+                    )) :
+                    ''
+                const storedBytes = feedStorageBytes.value[feed.id] ?? 0
                 return html`
                         <li
                             class="settings-feed-item"
@@ -410,24 +673,111 @@ export const SettingsRoute:FunctionComponent<{
                                 >
                                     ${feed.url}
                                 </a>
+                                <span class="feed-cache-mode">
+                                    ${modeLabel}${eff.isDefault.cacheMode ?
+                                        ' (default)' :
+                                        ''}
+                                </span>
+                                <span class="feed-storage">
+                                    ${formatBytes(storedBytes)} cached
+                                </span>
                             </div>
-                            <button
-                                class="btn-delete"
-                                onClick=${(e:Event) => {
-                                    e.preventDefault()
-                                    if (confirm(
-                                        'Are you sure you want' +
-                                        ' to unfollow this feed?'
-                                    )) {
-                                        State.deleteFeed(
-                                            state,
-                                            feed.id
-                                        )
-                                    }
-                                }}
-                            >
-                                Unfollow
-                            </button>
+                            <div class="feed-controls">
+                                <details class="feed-cache-controls">
+                                    <summary>Cache settings</summary>
+                                    <div class="feed-cache-form">
+                                        <label class="cache-field-label">
+                                            Cache mode
+                                            <select
+                                                name=${`feed-cache-mode-${feed.id}`}
+                                                onChange=${handleFeedCacheModeChange(
+                                                    feed.id
+                                                )}
+                                            >
+                                                <option
+                                                    value=""
+                                                    selected=${
+                                                        policy?.cache_mode ==
+                                                        null
+                                                    }
+                                                >
+                                                    Use default
+                                                </option>
+                                                <option
+                                                    value="text"
+                                                    selected=${
+                                                        policy?.cache_mode ===
+                                                        'text'
+                                                    }
+                                                >
+                                                    Text only
+                                                </option>
+                                                <option
+                                                    value="text_images"
+                                                    selected=${
+                                                        policy?.cache_mode ===
+                                                        'text_images'
+                                                    }
+                                                >
+                                                    Text + images
+                                                </option>
+                                            </select>
+                                        </label>
+                                        <label class="cache-field-label">
+                                            Max size (MB, blank = default)
+                                            <input
+                                                type="number"
+                                                name=${`feed-max-size-${feed.id}`}
+                                                min="1"
+                                                value=${sizeVal}
+                                                placeholder="default"
+                                                onChange=${handleFeedMaxSizeChange(
+                                                    feed.id
+                                                )}
+                                            />
+                                        </label>
+                                        <label class="cache-field-label">
+                                            Keep for (days, blank = default)
+                                            <input
+                                                type="number"
+                                                name=${`feed-max-age-${feed.id}`}
+                                                min="1"
+                                                value=${ageVal}
+                                                placeholder="default"
+                                                onChange=${handleFeedMaxAgeChange(
+                                                    feed.id
+                                                )}
+                                            />
+                                        </label>
+                                    </div>
+                                    <button
+                                        class="btn-clear-cache"
+                                        onClick=${handleClearFeedCache(
+                                            feed.id,
+                                            feed.title || feed.url
+                                        )}
+                                    >
+                                        Clear cache
+                                    </button>
+                                </details>
+                                <button
+                                    class="btn-delete"
+                                    onClick=${(e:Event) => {
+                                        e.preventDefault()
+                                        if (confirm(
+                                            'Are you sure you want' +
+                                            ' to unfollow this feed?'
+                                        )) {
+                                            State.deleteFeed(
+                                                state,
+                                                feed.id
+                                            )
+                                        }
+                                    }}
+                                >
+                                    Unfollow
+                                </button>
+                            </div>
                         </li>
                         `
             })

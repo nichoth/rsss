@@ -44,6 +44,7 @@
     "@preact/signals": "^2.5.1",
     "@sqlite.org/sqlite-wasm": "^3.53.0-build1",
     "@substrate-system/a11y": "^0.0.17",
+    "@substrate-system/blur-hash": "^0.0.35",
     "@substrate-system/check-box": "^0.0.11",
     "@substrate-system/css-normalize": "^0.0.13",
     "@substrate-system/hamburger-two": "^0.0.11",

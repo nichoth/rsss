@@ -2,6 +2,7 @@ import { test } from '@substrate-system/tapzero'
 import type {
     DbAdapter,
     Feed,
+    FeedsResponse,
     Item,
     ItemsResponse,
     CountsResponse
@@ -29,10 +30,12 @@ function createMockAdapter ():DbAdapter & {
         _feeds: feeds,
         _items: items,
 
-        async getFeeds ():Promise<Feed[]> {
-            return [...feeds].sort((a, b) =>
-                (a.title || '').localeCompare(b.title || '')
-            )
+        async getFeeds ():Promise<FeedsResponse> {
+            return {
+                feeds: [...feeds].sort((a, b) =>
+                    (a.title || '').localeCompare(b.title || '')
+                )
+            }
         },
 
         async addFeed (url:string):Promise<Feed> {
@@ -211,7 +214,7 @@ test('adapter - getFeeds returns all feeds sorted by title', async t => {
     adapter._feeds[0].title = 'Zebra Feed'
     adapter._feeds[1].title = 'Alpha Feed'
 
-    const feeds = await adapter.getFeeds()
+    const { feeds } = await adapter.getFeeds()
 
     t.equal(feeds.length, 2, 'should return 2 feeds')
     t.equal(feeds[0].title, 'Alpha Feed', 'feeds should be sorted by title')
@@ -229,7 +232,7 @@ test('adapter - deleteFeed removes feed and associated items', async t => {
 
     await adapter.deleteFeed(feed.id)
 
-    const feeds = await adapter.getFeeds()
+    const { feeds } = await adapter.getFeeds()
     const { items } = await adapter.getItems()
 
     t.equal(feeds.length, 0, 'feed should be deleted')

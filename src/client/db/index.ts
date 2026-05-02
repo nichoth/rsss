@@ -68,7 +68,10 @@ export {
     clearBootstrappedDb
 } from './bootstrap.js'
 export { getOutboxCount } from './push-sync.js'
-export { purgeStoredContent } from './content-storage.js'
+export {
+    purgeStoredContent,
+    clearFeedCache
+} from './content-storage.js'
 
 export const localFirstSupported = signal(false)
 

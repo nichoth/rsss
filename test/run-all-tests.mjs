@@ -69,6 +69,11 @@ const commands = [
         '| node --input-type=module | tap-spec'
     ].join(' '),
     [
+        'esbuild ./test/state-refresh-audit.ts --bundle',
+        '--platform=node --format=esm',
+        '| node --input-type=module | tap-spec'
+    ].join(' '),
+    [
         'esbuild ./test/index.ts --bundle',
         '--alias:cloudflare:workers=./test/cloudflare-workers-stub.ts',
         '--loader:.css=text',

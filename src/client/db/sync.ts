@@ -12,6 +12,11 @@ import {
     pushSync
 } from './push-sync.js'
 import {
+    evictByMaxAge,
+    evictByFeedSizeCap,
+    evictByAccountSizeCap
+} from './cache-eviction.js'
+import {
     isLocalFirstActive,
     setSyncDone,
     setSyncError,
@@ -118,6 +123,9 @@ async function runSyncCycle (
         throwIfDisabling(db)
         await pullSync(db, abortableFetch, { trackStatus: false })
         throwIfDisabling(db)
+        await evictByMaxAge(db).catch(() => {})
+        await evictByFeedSizeCap(db).catch(() => {})
+        await evictByAccountSizeCap(db).catch(() => {})
     } catch (err) {
         if (isCancellation(db, err)) return
         if (

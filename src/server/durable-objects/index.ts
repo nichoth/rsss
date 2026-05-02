@@ -89,7 +89,7 @@ const MANUAL_REFRESH_STORAGE_PREFIX = 'manual_refresh:'
 const ALARM_REFRESH_CURSOR_KEY = 'alarm_refresh_cursor'
 const PENDING_DELETION_KEY = 'pending_deletion'
 const MIGRATION_STATE_KEY = 'schema_migration'
-const USER_DO_MIGRATION_VERSION = 3
+const USER_DO_MIGRATION_VERSION = 4
 const SYNC_PAGE_LIMIT = 500
 const MAX_PARSED_FEED_ITEMS = 1000
 const MAX_FEED_TITLE_LENGTH = 8 * 1024
@@ -337,6 +337,7 @@ export class UserDO extends DurableObject<Env> {
             this.migrateAddUpdatedAt()
             this.migrateAddFeedFailureColumns()
             this.migrateAddItemThumbnail()
+            this.migrateAddLastPulledAt()
             await this.ctx.storage.put(MIGRATION_STATE_KEY, {
                 migration_v: USER_DO_MIGRATION_VERSION
             })
@@ -405,6 +406,61 @@ export class UserDO extends DurableObject<Env> {
         }
     }
 
+    private migrateAddLastPulledAt () {
+        const columns = this.sql.exec(
+            'PRAGMA table_info(feeds)'
+        ).toArray()
+        const hasLastPulledAt = columns.some((col: unknown) =>
+            (col as { name:string }).name === 'last_pulled_at'
+        )
+
+        if (!hasLastPulledAt) {
+            this.sql.exec(
+                'ALTER TABLE feeds ADD COLUMN last_pulled_at TEXT'
+            )
+            this.sql.exec(`
+                UPDATE feeds SET last_pulled_at = (
+                    SELECT MAX(pub_date) FROM items
+                    WHERE items.feed_id = feeds.id
+                    AND pub_date IS NOT NULL
+                )
+            `)
+        }
+    }
+
+    getFeedsWithUpdates ():string[] {
+        const rows = this.sql.exec(`
+            SELECT feeds.id FROM feeds
+            WHERE EXISTS (
+                SELECT 1 FROM items
+                WHERE items.feed_id = feeds.id
+                AND (
+                    feeds.last_pulled_at IS NULL
+                    OR items.pub_date > feeds.last_pulled_at
+                )
+            )
+        `).toArray() as Array<{ id:number }>
+        return rows.map(r => String(r.id))
+    }
+
+    private advanceFeedCursor (feedId:number):void {
+        this.sql.exec(
+            `UPDATE feeds SET last_pulled_at = (
+                SELECT MAX(pub_date) FROM items
+                WHERE feed_id = ? AND pub_date IS NOT NULL
+            ) WHERE id = ?`,
+            feedId,
+            feedId
+        )
+        const stillUnsynced = this.getFeedsWithUpdates()
+            .includes(String(feedId))
+        if (!stillUnsynced) {
+            this.broadcast('feed-updates-cleared', {
+                feedIds: [String(feedId)]
+            })
+        }
+    }
+
     private createRouter (): Hono {
         const app = new Hono()
 
@@ -451,7 +507,11 @@ export class UserDO extends DurableObject<Env> {
             const feeds = this.sql.exec(
                 'SELECT * FROM feeds ORDER BY title ASC'
             ).toArray()
-            return c.json({ feeds })
+            const feedsWithUpdates = this.getFeedsWithUpdates()
+            const feedUpdateStatus = feedsWithUpdates.length > 0 ?
+                'updates' :
+                'synced'
+            return c.json({ feeds, feedUpdateStatus, feedsWithUpdates })
         })
 
         // Add a new feed
@@ -571,6 +631,32 @@ export class UserDO extends DurableObject<Env> {
             return c.json({ feed })
         })
 
+        // Pending items for a feed (not yet pulled past last_pulled_at)
+        app.get('/feeds/:id/pending', (c) => {
+            const id = parseInt(c.req.param('id'), 10)
+            const rows = this.sql.exec(
+                `SELECT CAST(id AS TEXT) AS id,
+                    COALESCE(title, '') AS title,
+                    pub_date AS published_at
+                FROM items
+                WHERE feed_id = ?
+                  AND pub_date IS NOT NULL
+                  AND pub_date > COALESCE(
+                    (SELECT last_pulled_at FROM feeds WHERE id = ?),
+                    '1970-01-01'
+                  )
+                ORDER BY pub_date DESC
+                LIMIT 50`,
+                id,
+                id
+            ).toArray() as Array<{
+                id:string
+                title:string
+                published_at:string
+            }>
+            return c.json({ items: rows })
+        })
+
         // Delete a feed
         app.delete('/feeds/:id', async (c) => {
             const id = parseInt(c.req.param('id'), 10)
@@ -633,6 +719,7 @@ export class UserDO extends DurableObject<Env> {
             try {
                 await validateFeedUrl(feed.url)
                 await this.fetchFeed(feed)
+                this.advanceFeedCursor(feed.id)
             } catch (_err) {
                 const err = _err as FeedFetchError
                 return c.json(
@@ -652,9 +739,10 @@ export class UserDO extends DurableObject<Env> {
                 .toArray() as unknown as Feed[]
 
             this.ctx.waitUntil((async () => {
-                await Promise.all(
-                    feeds.map(feed => this.fetchFeed(feed))
-                )
+                await Promise.all(feeds.map(async feed => {
+                    await this.fetchFeed(feed)
+                    this.advanceFeedCursor(feed.id)
+                }))
                 this.broadcast('refresh-complete', {
                     refreshed: feeds.length
                 })
@@ -1059,6 +1147,10 @@ export class UserDO extends DurableObject<Env> {
         }
     }
 
+    protected async doFetchFeedText (url:string):Promise<string> {
+        return fetchFeedText(url)
+    }
+
     /**
      * Fetch and parse an RSS/Atom feed
      */
@@ -1068,7 +1160,7 @@ export class UserDO extends DurableObject<Env> {
             feed.url
         )
         try {
-            const text = await fetchFeedText(feed.url)
+            const text = await this.doFetchFeedText(feed.url)
             console.log(
                 '[DO] Feed response length:',
                 text.length
@@ -1098,6 +1190,11 @@ export class UserDO extends DurableObject<Env> {
                     feed.id
                 )
             }
+
+            // Snapshot unsynced set before inserting to detect
+            // newly-unsynced feeds (avoids re-broadcasting spam).
+            const wasAlreadyUnsynced = this.getFeedsWithUpdates()
+                .includes(String(feed.id))
 
             // Insert new items
             const newItems:NewFeedItem[] = []
@@ -1162,6 +1259,12 @@ export class UserDO extends DurableObject<Env> {
             }
 
             await this.updateNewItemThumbnails(newItems)
+
+            if (newItems.length > 0 && !wasAlreadyUnsynced) {
+                this.broadcast('feed-updates-available', {
+                    feedIds: [String(feed.id)]
+                })
+            }
 
             if (parsedFeed.isTooLarge) {
                 this.sql.exec(

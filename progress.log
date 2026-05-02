@@ -1,5 +1,11 @@
 ## Codebase Patterns
 
+- The `items_updated_at` trigger in `src/shared/schema.ts` fires on any
+  UPDATE to items rows and sets `updated_at = datetime('now')`. Cache
+  eviction tests that verify post-eviction item ordering must NOT use
+  `ORDER BY updated_at` for verification queries — use `ORDER BY guid ASC`
+  or another stable column instead, because eviction UPDATEs cause
+  `updated_at` to change.
 - Server-side URL fetch helpers in `src/server/feed-fetch.ts` should share
   `fetchValidatedResponse` so URL validation, DNS pre-resolution, manual
   redirect handling, timeout, and blocked-host checks stay consistent.
@@ -3177,4 +3183,463 @@ Thread: https://ampcode.com/threads/unknown
     parse, or content-type failures so feed ingestion can keep going.
   - OG image extraction intentionally rejects `http:` image URLs, even when
     found on valid pages, to avoid mixed-content blocking in the client.
+---
+## 2026-05-01 - US-123
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added `feed_cache_policy` table to local SQLite schema.
+  - Added `FEED_CACHE_POLICY_SQL` constant to `src/client/db/local-schema.ts`
+    with the exact DDL from the acceptance criteria.
+  - Applied it in `src/client/db/sqlite-worker.ts` `applySchema` (production
+    OPFS path) and in `src/client/db/sqlite-init.ts` `openLocalDb` (test-mode
+    in-memory path).
+  - Re-exported `FEED_CACHE_POLICY_SQL` from `sqlite-init.ts` alongside the
+    existing `SYNC_META_SQL` and `OUTBOX_SQL` exports.
+  - Created `test/feed-cache-policy.ts` with 21 assertions covering column
+    existence, NOT NULL / nullable constraints, `updated_at` default,
+    INSERT OR REPLACE upsert, and all-null optional columns.
+  - Registered `feed-cache-policy.js` in `test/index.ts`.
+- Files changed:
+  - `src/client/db/local-schema.ts`
+  - `src/client/db/sqlite-worker.ts`
+  - `src/client/db/sqlite-init.ts`
+  - `test/feed-cache-policy.ts`
+  - `test/index.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Schema additions must be applied in both `sqlite-worker.ts` (`applySchema`)
+    for production OPFS opens and in `sqlite-init.ts` (`openLocalDb`) for
+    test-mode in-memory opens; missing either means tests or production diverge.
+  - `FEED_CACHE_POLICY_SQL` is the new per-feed cache policy table; NULL on
+    optional columns means "inherit site-wide default" (US-124 adds those).
+---
+
+## 2026-05-01 - US-124
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added site-wide cache defaults to local-first-settings.
+  - Exported `CacheMode` type alias (`'text' | 'text_images'`).
+  - Added module-level default constants `DEFAULT_CACHE_MODE`, `DEFAULT_MAX_SIZE_BYTES`, `DEFAULT_MAX_AGE_SECONDS`.
+  - Added three exported signals: `defaultCacheMode` (default `'text_images'`), `defaultMaxSizeBytes` (default 50 MB), `defaultMaxAgeSeconds` (default 30 days).
+  - Extended `loadLocalFirstSettings` to read all three new fields inside the existing `batch(...)`, with safe fallback for missing/corrupt values.
+  - Extended `saveLocalFirstSettings` to write all three new fields alongside existing ones; no new localStorage key.
+  - Added four new tests in `test/local-first-settings.ts`: initial defaults, round-trip, missing-field fallback, corrupt-value fallback.
+- Files changed:
+  - `src/client/local-first-settings.ts`
+  - `test/local-first-settings.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Cache-mode validation should use an explicit allowlist (`=== 'text' || === 'text_images'`) rather than truthy check, since any string is truthy.
+  - Use `typeof x === 'number' && isFinite(x)` to guard numeric settings; `null`, strings, and `NaN`/`Infinity` all fail correctly.
+---
+
+## 2026-05-01 - US-125
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added `cached_images` table to local schema.
+  - Added `CACHED_IMAGES_SQL` constant to `src/client/db/local-schema.ts` with
+    CREATE TABLE (id, url UNIQUE, feed_id, item_id, size_bytes, cached_at) and
+    two indexes (feed_idx, item_idx).
+  - Wired `CACHED_IMAGES_SQL` into both schema-apply paths: `openLocalDb` in
+    `sqlite-init.ts` and `applySchema` in `sqlite-worker.ts`.
+  - Re-exported `CACHED_IMAGES_SQL` from `sqlite-init.ts`.
+  - Created `src/client/db/cached-images.ts` with four helpers:
+    `recordCachedImage` (INSERT OR IGNORE), `sumByFeed`, `sumTotal`,
+    `deleteByFeed`.
+  - Added `test/cached-images.ts` with 8 tests covering schema shape, record,
+    idempotency, sum-by-feed, sum-total (including empty), delete-by-feed, and
+    idempotent delete. All 21 assertions pass.
+  - Registered `cached-images.js` in `test/index.ts`.
+- Files changed:
+  - `src/client/db/local-schema.ts`
+  - `src/client/db/sqlite-init.ts`
+  - `src/client/db/sqlite-worker.ts`
+  - `src/client/db/cached-images.ts` (new)
+  - `test/cached-images.ts` (new)
+  - `test/index.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Both `sqlite-init.ts` (test/direct path) and `sqlite-worker.ts` (OPFS
+    worker path) maintain independent `applySchema` calls; new tables must be
+    added to both.
+  - `@substrate-system/tapzero` does not expose `t.pass()`; use an assertion
+    like `t.equal(value, expected, msg)` instead.
+---
+
+## 2026-05-01 - US-126
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Cached item images via Cache Storage during pull-sync.
+  - Created `src/client/db/image-cache.ts` with `cacheItemImages(db, item,
+    policy, fetchFn?, cacheStorage?)` that: parses `<img src>` URLs from
+    `item.content` and `item.description`, resolves effective cache mode
+    (`policy?.cache_mode ?? defaultCacheMode.value`), skips when mode is
+    `'text'`, skips URLs already recorded in `cached_images`, fetches new
+    URLs, stores responses in a `rsss-images-v1` Cache Storage bucket, and
+    records a `cached_images` row via `recordCachedImage`. Fetch and cache
+    errors are caught per-URL and logged without aborting the loop.
+  - Hooked `cacheItemImages` into `src/client/db/pull-sync.ts`: upserted
+    items are collected per sync page (when `storeContent` is on), and after
+    each COMMIT the function is called outside the transaction with a
+    per-feed `feed_cache_policy` lookup (cached in a Map to avoid redundant
+    queries).
+  - Created `test/image-cache.ts` with 16 assertions: text mode skips,
+    text_images mode caches and records, already-cached URLs skipped, fetch
+    errors do not write rows, null policy falls back to defaultCacheMode,
+    duplicate URLs are deduplicated.
+  - Registered `image-cache.js` in `test/index.ts`.
+- Files changed:
+  - `src/client/db/image-cache.ts` (new)
+  - `src/client/db/pull-sync.ts`
+  - `test/image-cache.ts` (new)
+  - `test/index.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Inject both `fetchFn` and `cacheStorage` as optional parameters on
+    image-caching helpers so tests can mock them without touching globals.
+  - Do not use `new URL()` for side-effects (ESLint `no-new`); a
+    `!/^https?:\/\//i.test(url)` guard is simpler and avoids the issue.
+  - Image caching must happen OUTSIDE the pull-sync SQLite transaction so
+    network fetches do not hold the write lock open.
+---
+
+## 2026-05-01 - US-127
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added site-wide cache controls section to /settings.
+  - Added `<section class="settings-section cache-section">` titled "Cache"
+    placed after the local-first section and before the per-feed list.
+  - Section contains: radio group for `defaultCacheMode` ("Text only" /
+    "Text and images"), number input for `defaultMaxSizeBytes` (MB display),
+    number input for `defaultMaxAgeSeconds` (days display).
+  - Inputs convert MB<->bytes and days<->seconds; changes call
+    `saveLocalFirstSettings()` and update signals via `batch(...)`.
+  - Helper text "These defaults apply to feeds with no override." placed at
+    section top.
+  - Styling in `.cache-section` with nested selectors and existing variables.
+  - Added `batch` import from `@preact/signals` to `settings.ts`.
+  - Added focused tests for section ordering, radio state, radio change,
+    size input display/update, age input display/update, and persistence.
+- Files changed:
+  - `src/client/routes/settings.ts`
+  - `src/client/routes/settings.css`
+  - `test/settings-route.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `batch` from `@preact/signals` must be imported explicitly in route
+    components; it is not re-exported from the preact signals hooks package.
+  - Settings-route tests use `--loader:.css=text` esbuild flag to handle CSS
+    imports; run via `./node_modules/.bin/esbuild ./test/settings-route.ts
+    --bundle --loader:.css=text | ./node_modules/.bin/tapout`.
+  - tapzero does not have `t.notOk`; use `t.ok(!value, msg)` instead.
+---
+## 2026-05-01 - US-128
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Per-feed cache controls in /settings feed list.
+  - New `src/client/db/feed-cache-policy.ts` with `FeedCachePolicyRow`,
+    `EffectivePolicy`, `resolveEffectivePolicy`, `getFeedCachePolicy`,
+    `upsertFeedCachePolicy`, `loadFeedPolicies`, and `feedPolicies` signal.
+  - Settings route loads per-feed policies from local DB in a `useEffect`
+    whenever feeds or sync state changes.
+  - Each feed row now shows the effective cache mode label with a `(default)`
+    tag when the value is inherited from site defaults.
+  - Added `<details class="feed-cache-controls">` per feed row with:
+    cache mode select (Use default / Text only / Text + images),
+    max-size number input (blank = default), max-age number input (blank =
+    default).
+  - Handlers optimistically update the `feedPolicies` signal, then persist
+    via `upsertFeedCachePolicy`; gracefully no-ops when no local DB.
+  - When all three policy fields are NULL, the row is deleted from
+    `feed_cache_policy` (clean state).
+  - Added 5 focused tests covering: default label rendering, override label,
+    controls existence, signal update on select change, clearing to default.
+  - Updated `settings.css` with styles for `.feed-cache-mode`,
+    `.feed-cache-controls`, `.feed-cache-form`, `.cache-field-label`.
+- Files changed:
+  - `src/client/db/feed-cache-policy.ts` (new)
+  - `src/client/routes/settings.ts`
+  - `src/client/routes/settings.css`
+  - `test/settings-route.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Per-feed policy state lives in `feedPolicies` signal
+    (`src/client/db/feed-cache-policy.ts`); import it instead of
+    querying the DB directly in components.
+  - `resolveEffectivePolicy` is the shared helper for effective policy
+    resolution (cache_mode, max_size_bytes, max_age_seconds with default
+    fallbacks); use it everywhere instead of inline `?? default` patterns.
+  - Optimistic signal update before DB write lets tests verify behavior
+    without a real OPFS database.
+---
+
+## 2026-05-01 - US-129
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Per-feed cache controls on the feed-reader page.
+  - Added imports for `feedPolicies`, `loadFeedPolicies`, `upsertFeedCachePolicy`,
+    `resolveEffectivePolicy`, `FeedCachePolicyRow`, `CacheMode`, `getBootstrappedDb`,
+    and `getLocalDb` to `feed-reader.ts`.
+  - Added a `useEffect` that loads the feed policy for `selectedFeed` whenever
+    the selected feed changes.
+  - Added `saveFeedPolicy`, `handleFeedCacheModeChange`, `handleFeedMaxSizeChange`,
+    and `handleFeedMaxAgeChange` — identical logic to the helpers in settings.ts,
+    reusing `feedPolicies` signal and `upsertFeedCachePolicy` with no duplication.
+  - Added a `<details class="feed-cache-controls">` panel in the items-header,
+    visible only when a feed is selected, showing the same mode/size/age controls.
+  - Added CSS for `.feed-cache-controls` inside `.route.feed-reader { ... }` using
+    nested selectors and variables from `_variables.css`.
+- Files changed:
+  - `src/client/routes/feed-reader.ts`
+  - `src/client/routes/feed-reader.css`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - The `feedPolicies` signal is shared module state; changes written from
+    feed-reader.ts are immediately visible in settings.ts on navigation — no
+    extra refresh or re-fetch is needed for the cross-page consistency criterion.
+  - Per-feed controls need a `useEffect` that depends on `selectedFeed?.id` to
+    load the policy for the newly selected feed when the user navigates to a
+    different feed-reader route.
+---
+
+## 2026-05-01 - US-130
+- What was implemented: Added per-feed and account-total storage display to /settings.
+  - Added `formatBytes(n:number):string` to `src/client/util.ts` using decimal
+    (1 KB = 1000 bytes) to match the cache-size settings convention.
+  - Created `src/client/db/storage-usage.ts` with:
+    - `getTextBytesForFeed(db, feedId)` — sums `LENGTH(content) + LENGTH(description)` for items in a feed.
+    - `getTextBytesTotal(db)` — account-wide text bytes.
+    - `loadStorageUsage(db, feedIds)` — populates `feedStorageBytes` and `totalStorageBytes` signals.
+  - Updated `src/client/routes/settings.ts` to call `loadStorageUsage` in a `useEffect`,
+    show "Total storage used: X" in the cache section header, and show "X cached" per
+    feed row via `.feed-storage`.
+  - Added `.feed-storage` and `.cache-total` styles to `settings.css` using existing variables.
+  - Created `test/storage-usage.ts` with 10 tests covering `formatBytes` and both query
+    functions; registered in `test/index.ts`.
+- Files changed:
+  - `src/client/util.ts`
+  - `src/client/db/storage-usage.ts` (new)
+  - `src/client/routes/settings.ts`
+  - `src/client/routes/settings.css`
+  - `test/storage-usage.ts` (new)
+  - `test/index.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `formatBytes` is now in `src/client/util.ts`; import from there for any future
+    human-readable byte formatting (US-131 clear-cache, US-134 account cap input).
+  - `feedStorageBytes` and `totalStorageBytes` are module-level signals in
+    `storage-usage.ts`; call `loadStorageUsage(db, ids)` to refresh them after any
+    operation that changes cached content (clear, evict).
+  - The `_resetStorageUsage()` helper is exported for test isolation.
+---
+
+## 2026-05-01 - US-131
+- What was implemented: Clear-cache action per feed.
+  - Added `clearFeedCache(db, feedId, cacheStorage)` to `content-storage.ts`:
+    queries `cached_images` URLs for the feed, nulls `content` and `description`
+    on all items for that feed, calls `deleteByFeed` to remove image rows, evicts
+    each URL from the `rsss-images-v1` Cache Storage bucket, and returns the evicted
+    URL list.
+  - Exported `clearFeedCache` from `src/client/db/index.ts`.
+  - Added `handleClearFeedCache(feedId, feedTitle)` handler in `settings.ts` with a
+    `confirm()` dialog; after clearing, calls `loadStorageUsage` to refresh the per-feed
+    and account-total storage display.
+  - Added a "Clear cache" button inside `<details class="feed-cache-controls">` in the
+    settings feed list template.
+  - Added `handleClearFeedCache` and `loadStorageUsage` import to `feed-reader.ts`;
+    added a "Clear cache" button inside the `<details class="feed-cache-controls">` panel.
+  - Created `test/content-storage.ts` with 5 tests: nulls text only for the target feed,
+    removes cached_images rows, returns the evicted URL list, is idempotent, returns
+    empty array when no images.
+  - Registered `test/content-storage.ts` in `test/index.ts`.
+- Files changed:
+  - `src/client/db/content-storage.ts`
+  - `src/client/db/index.ts`
+  - `src/client/routes/settings.ts`
+  - `src/client/routes/feed-reader.ts`
+  - `test/content-storage.ts` (new)
+  - `test/index.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `clearFeedCache` accepts a `cacheStorage` parameter (defaults to `caches`) so tests
+    can mock the Cache Storage API without a real browser environment.
+  - Always call `loadStorageUsage(db, feedIds)` after mutating cached content to keep
+    the `feedStorageBytes` and `totalStorageBytes` signals current.
+  - The `handleClearFeedCache` pattern (confirm + clear + refresh) is identical in both
+    settings.ts and feed-reader.ts; future eviction actions should follow the same shape.
+---
+
+## 2026-05-01 - US-132
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Evict cached items older than max_age on sync cycle.
+  - Created `src/client/open-item-registry.ts` — module-level registry for the
+    currently open item ID (`setCurrentlyOpenItemId` / `getCurrentlyOpenItemId` /
+    `_resetOpenItemRegistry`).
+  - Modified `src/client/state.ts` to import `setCurrentlyOpenItemId` and
+    update the registry via an `effect` whenever `state.routeItem.value` changes.
+  - Created `src/client/db/cache-eviction.ts` exporting `evictByMaxAge(db, cacheStorage?)`
+    which: iterates all feeds, resolves effective `max_age_seconds` (per-feed or
+    site default), nulls `content`/`description` on stale items, deletes associated
+    `cached_images` rows, evicts URLs from Cache Storage, and skips the currently-
+    open item ID from the registry.
+  - Modified `src/client/db/sync.ts` to call `await evictByMaxAge(db).catch(() => {})`
+    after `pullSync` in `runSyncCycle`, so eviction runs each sync cycle without
+    blocking the rest of the cycle on failure.
+  - Created `test/cache-eviction.ts` with 15 passing tests covering: site-default
+    TTL fallback, per-feed override, currently-open item skip, accurate counts.
+  - Registered `test/cache-eviction.ts` in `test/index.ts`.
+- Files changed:
+  - `src/client/open-item-registry.ts` (new)
+  - `src/client/state.ts`
+  - `src/client/db/cache-eviction.ts` (new)
+  - `src/client/db/sync.ts`
+  - `test/cache-eviction.ts` (new)
+  - `test/index.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Open-item skip: put the registry in `src/client/open-item-registry.ts`
+    (not `state.ts`) to avoid circular deps with `db/sync.ts → db/cache-eviction.ts
+    → state.ts → db/sync.ts`.
+  - `evictByMaxAge` uses `caches` (Cache Storage) as an optional parameter for
+    testability — same pattern as `clearFeedCache` in `content-storage.ts`.
+  - Eviction in `runSyncCycle` wraps `.catch(() => {})` so cache eviction errors
+    never abort or mask sync errors.
+  - Dynamic `IN (?,?,?)` clauses: build `ph = ids.map(() => '?').join(', ')` and
+    pass `ids` as the bind array — tested and working with the SQLite WASM layer.
+---
+
+## 2026-05-01 - US-133
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Evict by per-feed size cap on sync cycle.
+  - Added `evictByFeedSizeCap(db, cacheStorage?):Promise<{feedsTrimmed:number, bytesFreed:number}>`
+    to `src/client/db/cache-eviction.ts`.
+  - For each feed: computes current size (text + images) via SUM queries, compares against
+    effective `max_size_bytes` (per-feed override or site default via `resolveEffectivePolicy`).
+    If over cap, queries items with non-null content/description or cached_images, sorted
+    oldest-first by `updated_at ASC`, skipping the currently-open item ID. Evicts items one
+    by one (null text, delete cached_images, evict Cache Storage URLs) until under cap.
+  - Updated import in `src/client/db/sync.ts` to also import `evictByFeedSizeCap` and added
+    `await evictByFeedSizeCap(db).catch(() => {})` after `evictByMaxAge` in `runSyncCycle`.
+  - Added 5 tests in `test/cache-eviction.ts`: no-op when under cap, per-feed override
+    respected, site default used when no override, oldest-first ordering, currently-open item
+    skipped.
+- Files changed:
+  - `src/client/db/cache-eviction.ts`
+  - `src/client/db/sync.ts`
+  - `test/cache-eviction.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - The `items_updated_at` trigger fires AFTER UPDATE ON items whenever `updated_at` is
+    unchanged — this resets `updated_at` to `datetime('now')`. Test verification SELECTs
+    for evicted items must use a STABLE ordering (guid, id) rather than `updated_at ASC`,
+    because the trigger changes `updated_at` on any UPDATE that nulls content/description.
+  - `evictByFeedSizeCap` opens the Cache Storage bucket lazily (only when the first batch
+    of images needs eviction) to avoid an unnecessary async call when no images are present.
+  - The `queryOneDb` import from `local-db.js` was not previously imported in
+    `cache-eviction.ts`; it was added to support per-feed text and image size SUM queries.
+---
+## 2026-05-01 - US-134
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Account-wide cache size cap with eviction and settings UI.
+  - Added `defaultAccountMaxSizeBytes:Signal<number>` (default 500_000_000) to
+    `src/client/local-first-settings.ts`, persisted in the same `LS_KEY` JSON;
+    missing field falls back to the default.
+  - Added `evictByAccountSizeCap(db):Promise<{bytesFreed:number}>` to
+    `src/client/db/cache-eviction.ts`: queries total text+image size across all
+    feeds, evicts oldest items across all feeds until total is under the cap,
+    skips the currently-open item.
+  - Called `evictByAccountSizeCap` in `src/client/db/sync.ts` after
+    `evictByFeedSizeCap` in the sync cycle.
+  - Added "Total cache size (MB)" number input to the Cache section in
+    `src/client/routes/settings.ts`, bound to `defaultAccountMaxSizeBytes`.
+  - Added 4 tests in `test/cache-eviction.ts`: no-op when under cap, trims
+    over cap across multiple feeds, skips currently-open item, evicts
+    oldest-first across feeds.
+- Files changed:
+  - `src/client/local-first-settings.ts`
+  - `src/client/db/cache-eviction.ts`
+  - `src/client/db/sync.ts`
+  - `src/client/routes/settings.ts`
+  - `test/cache-eviction.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - The `items_updated_at` trigger fires on any UPDATE to item rows (including
+    content=NULL eviction UPDATEs), resetting `updated_at = datetime('now')`.
+    Eviction test verification queries must use a stable ordering column
+    (`guid`, `id`) rather than `updated_at` to avoid ordering flips.
+  - `evictByAccountSizeCap` fetches the candidate items list once before the
+    eviction loop, so trigger-induced `updated_at` changes during the loop do
+    not affect eviction order.
+---
+
+## 2026-05-01 - US-135
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added `feedUpdateStatus` and `feedsWithUpdates` signals to `AppState`.
+  - Added `feedUpdateStatus:Signal<'synced'|'updates'>` to the `AppState` type, initialized to `'synced'`.
+  - Added `feedsWithUpdates:Signal<string[]>` to the `AppState` type, initialized to `[]`.
+  - Updated `test/local-first-opfs-persistence.ts` mock state to include both new signals.
+- Files changed:
+  - `src/client/state.ts`
+  - `test/local-first-opfs-persistence.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - When adding fields to `AppState`, also update any test files that construct a mock `AppState` object (e.g., `test/local-first-opfs-persistence.ts`'s `makeState()` helper).
+---
+
+## 2026-05-01 - US-136
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Track per-user, per-feed last-pulled cursor on the server.
+  - Added `last_pulled_at TEXT` (nullable) to `feeds` in `src/shared/schema.ts`.
+  - Bumped `USER_DO_MIGRATION_VERSION` to 4 and added `migrateAddLastPulledAt()` that backfills `last_pulled_at` to `MAX(pub_date)` per feed.
+  - Added `getFeedsWithUpdates()` public helper returning IDs of feeds with items newer than `last_pulled_at`.
+  - Added private `advanceFeedCursor(feedId)` that sets `last_pulled_at = MAX(pub_date)` for a feed.
+  - Called `advanceFeedCursor` in `POST /feeds/:id/refresh` and in each feed in `POST /feeds/refresh` (waitUntil block).
+  - Added `test/feed-cursor.ts` with 11 tests covering helper behavior and route-level cursor advancement.
+  - Updated `test/do-migrations.ts` for version 4 and 5 PRAGMA queries.
+  - Updated `test/do-handlers.ts` SQL mock to handle `last_pulled_at` updates.
+- Files changed:
+  - `src/shared/schema.ts`
+  - `src/server/durable-objects/index.ts`
+  - `test/feed-cursor.ts`
+  - `test/do-migrations.ts`
+  - `test/do-handlers.ts`
+  - `test/index.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - When adding SQL queries to DO routes, update `do-handlers.ts` SQL mock or tests fail with "Unexpected SQL".
+  - `validateFeedUrl` does no network I/O (only URL parsing and hostname checks), so route tests that call refresh routes don't need to mock it.
+  - `getFeedsWithUpdates` is made public (no `private` keyword) to be accessible via `Object.create(UserDO.prototype)` in tests.
+---
+
+## 2026-05-01 - US-137
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Include feed-update status in initial fetch response.
+  - `GET /feeds` in the DO now returns `feedUpdateStatus:'synced'|'updates'` and `feedsWithUpdates:string[]` computed via `getFeedsWithUpdates()`.
+  - Added `FeedsResponse` type to `src/client/db/types.ts` and updated `DbAdapter.getFeeds()` to return it.
+  - Updated `remoteAdapter.getFeeds()` to parse and return the new fields (defaults to 'synced'/[] for back-compat).
+  - Updated `localAdapter.getFeeds()` to return `{ feeds }` (no status fields, local-first doesn't track cursor).
+  - Updated `State.loadFeeds` to batch-set `feedUpdateStatus` and `feedsWithUpdates` from the response.
+  - Updated test mocks (`test/db-adapter.ts`, `test/local-adapter.ts`) for new return type.
+  - Extended `test/feed-cursor.ts` with GET /feeds bootstrap response shape tests.
+- Files changed:
+  - `src/server/durable-objects/index.ts`
+  - `src/client/db/types.ts`
+  - `src/client/db/remote-adapter.ts`
+  - `src/client/db/local-adapter.ts`
+  - `src/client/state.ts`
+  - `test/db-adapter.ts`
+  - `test/local-adapter.ts`
+  - `test/feed-cursor.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - When changing `DbAdapter.getFeeds()` return type from array to object, all test mocks and test call sites using the array result need updating.
+  - The `createCursorHarness` in feed-cursor.ts overrides `getFeedsWithUpdates` on the prototype for the GET /feeds route to control what status the route returns.
 ---

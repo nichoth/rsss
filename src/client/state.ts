@@ -15,6 +15,7 @@ import {
     getRemoteItemByRoute,
     localTabLockRevision
 } from './db/index.js'
+import { setCurrentlyOpenItemId } from './open-item-registry.js'
 import type {
     CountsResponse,
     Feed,
@@ -160,6 +161,8 @@ export type AppState = {
     authError:Signal<string|null>,
     feeds:Signal<Feed[]>,
     feedsLoading:Signal<boolean>,
+    feedUpdateStatus:Signal<'synced'|'updates'>,
+    feedsWithUpdates:Signal<string[]>,
     items:Signal<Item[]>,
     itemsLoading:Signal<boolean>,
     itemsTotal:Signal<number>,
@@ -189,6 +192,8 @@ export function State ():AppState {
         ),
         feeds: signal<Feed[]>([]),
         feedsLoading: signal<boolean>(false),
+        feedUpdateStatus: signal<'synced'|'updates'>('synced'),
+        feedsWithUpdates: signal<string[]>([]),
         items: signal<Item[]>([]),
         itemsLoading: signal(false),
         itemsTotal: signal(0),
@@ -286,6 +291,10 @@ export function State ():AppState {
                     routeItemRequest = null
                 }
             })
+    })
+
+    effect(() => {
+        setCurrentlyOpenItemId(state.routeItem.value?.id ?? null)
     })
 
     /**
@@ -441,6 +450,7 @@ State.handleSyncAuthError = function (
     return true
 }
 
+// local-first DB sync, NOT server feed pull -- safe to call automatically
 State.refreshAfterSync = async function (
     state:AppState
 ):Promise<void> {
@@ -525,7 +535,51 @@ State.openEventStream = function (state:AppState):void {
     source.addEventListener('refresh-complete', () => {
         debug('SSE refresh-complete')
         clearRefreshFeedsSafetyTimeout()
-        state.feedsLoading.value = false
+        // local-first DB sync, NOT server feed pull
+        batch(() => {
+            state.feedsLoading.value = false
+            state.feedsWithUpdates.value = []
+            state.feedUpdateStatus.value = 'synced'
+        })
+    })
+
+    source.addEventListener('feed-updates-available', (ev) => {
+        debug('SSE feed-updates-available', ev.data)
+        try {
+            const { feedIds } = JSON.parse(ev.data) as {
+                feedIds:string[]
+            }
+            batch(() => {
+                const current = state.feedsWithUpdates.value
+                const merged = Array.from(
+                    new Set([...current, ...feedIds])
+                )
+                state.feedsWithUpdates.value = merged
+                state.feedUpdateStatus.value = 'updates'
+            })
+        } catch (err) {
+            debug('feed-updates-available parse error:', err)
+        }
+    })
+
+    source.addEventListener('feed-updates-cleared', (ev) => {
+        debug('SSE feed-updates-cleared', ev.data)
+        try {
+            const { feedIds } = JSON.parse(ev.data) as {
+                feedIds:string[]
+            }
+            batch(() => {
+                const cleared = new Set(feedIds)
+                const remaining = state.feedsWithUpdates.value
+                    .filter(id => !cleared.has(id))
+                state.feedsWithUpdates.value = remaining
+                if (remaining.length === 0) {
+                    state.feedUpdateStatus.value = 'synced'
+                }
+            })
+        } catch (err) {
+            debug('feed-updates-cleared parse error:', err)
+        }
     })
 
     source.addEventListener('error', (ev) => {
@@ -1025,9 +1079,15 @@ State.loadFeeds = async function (
         const adapter = await getAdapter(
             state.user.value?.did
         )
-        const feeds = await adapter.getFeeds()
+        const data = await adapter.getFeeds()
         batch(() => {
-            state.feeds.value = feeds
+            state.feeds.value = data.feeds
+            state.feedUpdateStatus.value = (
+                data.feedUpdateStatus ?? 'synced'
+            )
+            state.feedsWithUpdates.value = (
+                data.feedsWithUpdates ?? []
+            )
             state.feedsLoading.value = false
         })
     } catch (err) {
@@ -1288,6 +1348,24 @@ State.markAllRead = async function (
     } catch (err) {
         debug('Error marking all read:', err)
     }
+}
+
+/**
+ * Refresh a single feed and advance the client cursor
+ */
+State.refreshFeed = async function (
+    state:AppState,
+    feedId:string
+):Promise<void> {
+    await api.post(`feeds/${feedId}/refresh`)
+    batch(() => {
+        const remaining = state.feedsWithUpdates.value
+            .filter(id => id !== feedId)
+        state.feedsWithUpdates.value = remaining
+        if (remaining.length === 0) {
+            state.feedUpdateStatus.value = 'synced'
+        }
+    })
 }
 
 /**

@@ -31,7 +31,8 @@ function createConstructorContext (storedVersion:number | null) {
                         return result([
                             { name: 'updated_at' },
                             { name: 'last_error' },
-                            { name: 'last_status' }
+                            { name: 'last_status' },
+                            { name: 'last_pulled_at' }
                         ])
                     }
                     if (query.includes('PRAGMA table_info(items)')) {
@@ -68,7 +69,7 @@ function createConstructorContext (storedVersion:number | null) {
 
 test('UserDO skips migration introspection when version is current',
     async t => {
-        const currentMigrationVersion = 3
+        const currentMigrationVersion = 4
         const setup = createConstructorContext(currentMigrationVersion)
 
         const userDo = new UserDO(setup.ctx, {} as never)
@@ -108,12 +109,12 @@ test('UserDO reruns migrations when stored version is stale', async t => {
     t.ok(userDo, 'Durable Object constructed successfully')
     t.equal(
         introspectionQueries.length,
-        4,
+        5,
         'stale migration version runs all column checks'
     )
     t.deepEqual(
         setup.writes,
-        [{ migration_v: 3 }],
+        [{ migration_v: 4 }],
         'current migration version is persisted'
     )
 })
