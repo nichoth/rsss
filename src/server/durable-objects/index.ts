@@ -452,6 +452,13 @@ export class UserDO extends DurableObject<Env> {
             feedId,
             feedId
         )
+        const stillUnsynced = this.getFeedsWithUpdates()
+            .includes(String(feedId))
+        if (!stillUnsynced) {
+            this.broadcast('feed-updates-cleared', {
+                feedIds: [String(feedId)]
+            })
+        }
     }
 
     private createRouter (): Hono {
@@ -1114,6 +1121,10 @@ export class UserDO extends DurableObject<Env> {
         }
     }
 
+    protected async doFetchFeedText (url:string):Promise<string> {
+        return fetchFeedText(url)
+    }
+
     /**
      * Fetch and parse an RSS/Atom feed
      */
@@ -1123,7 +1134,7 @@ export class UserDO extends DurableObject<Env> {
             feed.url
         )
         try {
-            const text = await fetchFeedText(feed.url)
+            const text = await this.doFetchFeedText(feed.url)
             console.log(
                 '[DO] Feed response length:',
                 text.length
@@ -1153,6 +1164,11 @@ export class UserDO extends DurableObject<Env> {
                     feed.id
                 )
             }
+
+            // Snapshot unsynced set before inserting to detect
+            // newly-unsynced feeds (avoids re-broadcasting spam).
+            const wasAlreadyUnsynced = this.getFeedsWithUpdates()
+                .includes(String(feed.id))
 
             // Insert new items
             const newItems:NewFeedItem[] = []
@@ -1217,6 +1233,12 @@ export class UserDO extends DurableObject<Env> {
             }
 
             await this.updateNewItemThumbnails(newItems)
+
+            if (newItems.length > 0 && !wasAlreadyUnsynced) {
+                this.broadcast('feed-updates-available', {
+                    feedIds: [String(feed.id)]
+                })
+            }
 
             if (parsedFeed.isTooLarge) {
                 this.sql.exec(

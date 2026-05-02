@@ -307,6 +307,10 @@ test('fetchFeed records feed too large when parsed rows are truncated',
                     return { toArray: () => [] }
                 }
 
+                if (query.includes('SELECT feeds.id FROM feeds')) {
+                    return { toArray: () => [] }
+                }
+
                 throw new Error(`Unexpected SQL: ${query}`)
             }
         }
@@ -408,6 +412,10 @@ test('fetchFeed stores og image for newly inserted items', async t => {
                     thumbnail: params[0],
                     id: params[1]
                 }
+                return { toArray: () => [] }
+            }
+
+            if (query.includes('SELECT feeds.id FROM feeds')) {
                 return { toArray: () => [] }
             }
 
@@ -529,6 +537,10 @@ test('fetchFeed caps concurrent og image requests at four', async t => {
 
             if (query.includes('UPDATE items SET thumbnail_url = ?')) {
                 thumbnailUpdates++
+                return { toArray: () => [] }
+            }
+
+            if (query.includes('SELECT feeds.id FROM feeds')) {
                 return { toArray: () => [] }
             }
 
@@ -668,6 +680,10 @@ test('fetchFeed silently handles og failures, uses parser image', async t => {
                 return { toArray: () => [] }
             }
 
+            if (query.includes('SELECT feeds.id FROM feeds')) {
+                return { toArray: () => [] }
+            }
+
             throw new Error(`Unexpected SQL: ${query}`)
         }
     }
@@ -789,6 +805,10 @@ test('fetchFeed records non-duplicate item insert failures', async t => {
                 return { toArray: () => [] }
             }
 
+            if (query.includes('SELECT feeds.id FROM feeds')) {
+                return { toArray: () => [] }
+            }
+
             throw new Error(`Unexpected SQL: ${query}`)
         }
     }
@@ -887,6 +907,10 @@ test('fetchFeed stays quiet when article URL exceeds redirect budget',
                 }
 
                 if (query.includes('UPDATE items SET thumbnail_url = ?')) {
+                    return { toArray: () => [] }
+                }
+
+                if (query.includes('SELECT feeds.id FROM feeds')) {
                     return { toArray: () => [] }
                 }
 
@@ -1008,6 +1032,10 @@ test('fetchFeed resolves og image after multi-hop article redirects',
                         thumbnail: params[0],
                         id: params[1]
                     }
+                    return { toArray: () => [] }
+                }
+
+                if (query.includes('SELECT feeds.id FROM feeds')) {
                     return { toArray: () => [] }
                 }
 
@@ -1141,6 +1169,10 @@ test('fetchFeed falls back to feed image when article redirects loop',
                     return { toArray: () => [] }
                 }
 
+                if (query.includes('SELECT feeds.id FROM feeds')) {
+                    return { toArray: () => [] }
+                }
+
                 throw new Error(`Unexpected SQL: ${query}`)
             }
         }
@@ -1258,6 +1290,10 @@ test('fetchFeed leaves thumbnail null when article loops and feed has none',
                     return { toArray: () => [] }
                 }
 
+                if (query.includes('SELECT feeds.id FROM feeds')) {
+                    return { toArray: () => [] }
+                }
+
                 throw new Error(`Unexpected SQL: ${query}`)
             }
         }
@@ -1359,6 +1395,10 @@ test('fetchFeed loudly reports feed-XML redirect overflow', async t => {
                     status: params[1],
                     id: params[2]
                 }
+                return { toArray: () => [] }
+            }
+
+            if (query.includes('SELECT feeds.id FROM feeds')) {
                 return { toArray: () => [] }
             }
 

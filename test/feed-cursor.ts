@@ -115,9 +115,13 @@ interface CursorDoType {
     }
 }
 
-function createCursorHarness (pendingFeedIds:string[] = []) {
+function createCursorHarness (
+    pendingFeedIds:string[] = [],
+    getUpdatesOverride?:() => string[]
+) {
     const feeds:FeedRow[] = [feedRow(1, 'https://a.example/feed', null)]
     const cursorUpdates:number[] = []
+    const broadcasts:BroadcastCall[] = []
     const waitUntilPromises:Promise<unknown>[] = []
     const storage = new Map<string, unknown>()
 
@@ -152,12 +156,14 @@ function createCursorHarness (pendingFeedIds:string[] = []) {
     }
 
     userDo.fetchFeed = async () => {}
-    userDo.broadcast = () => {}
-    userDo.getFeedsWithUpdates = () => pendingFeedIds
+    userDo.broadcast = (event, data) => { broadcasts.push({ event, data }) }
+    userDo.getFeedsWithUpdates = getUpdatesOverride ??
+        (() => pendingFeedIds)
 
     return {
         app: userDo.createRouter(),
         cursorUpdates,
+        broadcasts,
         waitUntilPromises
     }
 }
@@ -184,6 +190,218 @@ test('cursor advances after full refresh for each feed', async t => {
     t.equal(cursorUpdates.length, 1, 'cursor updated for the one feed')
     t.equal(cursorUpdates[0], 1, 'cursor updated for feed 1')
 })
+
+test('feed-updates-cleared emitted after per-feed refresh catches feed up',
+    async t => {
+        // getFeedsWithUpdates returns [] after cursor advance (feed is synced)
+        const { app, broadcasts } = createCursorHarness([], () => [])
+
+        const res = await app.request('/feeds/1/refresh', { method: 'POST' })
+        const body = await res.json() as { success:boolean }
+
+        t.equal(res.status, 200, 'refresh returns 200')
+        t.equal(body.success, true, 'refresh reports success')
+
+        const clearedBroadcasts = broadcasts.filter(
+            b => b.event === 'feed-updates-cleared'
+        )
+        t.equal(
+            clearedBroadcasts.length,
+            1,
+            'feed-updates-cleared emitted once'
+        )
+        t.deepEqual(
+            (clearedBroadcasts[0].data as { feedIds:string[] }).feedIds,
+            ['1'],
+            'cleared payload contains the feed ID'
+        )
+    }
+)
+
+test('feed-updates-cleared not emitted if feed still has newer items', async t => {
+    // getFeedsWithUpdates returns ['1'] even after cursor advance (still unsynced)
+    const { app, broadcasts } = createCursorHarness([], () => ['1'])
+
+    await app.request('/feeds/1/refresh', { method: 'POST' })
+
+    const clearedBroadcasts = broadcasts.filter(
+        b => b.event === 'feed-updates-cleared'
+    )
+    t.equal(
+        clearedBroadcasts.length,
+        0,
+        'feed-updates-cleared not emitted when feed still has new items'
+    )
+})
+
+// ---- SSE broadcast tests ----
+
+interface BroadcastCall {
+    event:string
+    data:unknown
+}
+
+interface FetchFeedDoType {
+    sql:{ exec:(q:string, ...p:unknown[]) => QueryResult }
+    broadcasts:BroadcastCall[]
+    getFeedsWithUpdates:() => string[]
+    broadcast:(event:string, data:unknown) => void
+    parseFeed:(text:string) => {
+        title:string|null
+        description:string|null
+        link:string|null
+        isTooLarge?:boolean
+        items:Array<{
+            guid:string|null
+            title:string|null
+            link:string|null
+            description:string|null
+            content:string|null
+            author:string|null
+            pubDate:string|null
+            imageUrl:string|null
+        }>
+    }
+    doFetchFeedText:(url:string) => Promise<string>
+    updateNewItemThumbnails:(items:unknown[]) => Promise<void>
+    rowsWritten:(result:unknown) => number
+    fetchFeed:(feed:FeedRow) => Promise<void>
+}
+
+function createFetchFeedHarness (opts:{
+    initialUnsyncedIds?:string[]
+    postInsertUnsyncedIds?:string[]
+    newItemCount?:number
+} = {}) {
+    const broadcasts:BroadcastCall[] = []
+    const {
+        initialUnsyncedIds = [],
+        postInsertUnsyncedIds = ['1'],
+        newItemCount = 1
+    } = opts
+
+    let getFeedsCallCount = 0
+    let _insertCallCount = 0
+
+    const userDo = Object.create(UserDO.prototype) as FetchFeedDoType
+    userDo.broadcasts = broadcasts
+
+    userDo.sql = {
+        exec (query:string) {
+            if (
+                query.includes('INSERT OR IGNORE INTO items') ||
+                query.includes('INSERT OR REPLACE INTO items')
+            ) {
+                _insertCallCount++
+                return {
+                    toArray: () => [],
+                    one: () => null,
+                    rowsWritten: newItemCount
+                } as unknown as QueryResult
+            }
+            if (query.includes('SELECT id FROM items')) {
+                return result(newItemCount > 0 ? [{ id: 1 }] : [])
+            }
+            if (query.includes('UPDATE feeds SET')) {
+                return result([])
+            }
+            return result([])
+        }
+    }
+
+    userDo.broadcast = (event, data) => {
+        broadcasts.push({ event, data })
+    }
+
+    userDo.getFeedsWithUpdates = () => {
+        getFeedsCallCount++
+        return getFeedsCallCount === 1 ?
+            initialUnsyncedIds :
+            postInsertUnsyncedIds
+    }
+
+    userDo.doFetchFeedText = async () => {
+        return '<rss/>'
+    }
+
+    userDo.parseFeed = () => ({
+        title: 'Test Feed',
+        description: null,
+        link: null,
+        items: newItemCount > 0 ? [{
+            guid: 'item-1',
+            title: 'Item 1',
+            link: null,
+            description: null,
+            content: null,
+            author: null,
+            pubDate: '2026-05-01',
+            imageUrl: null
+        }] : []
+    })
+
+    userDo.updateNewItemThumbnails = async () => {}
+
+    userDo.rowsWritten = (res:unknown) => {
+        if (res && typeof res === 'object' &&
+            'rowsWritten' in res) {
+            return (res as { rowsWritten:number }).rowsWritten
+        }
+        return newItemCount
+    }
+
+    return {
+        userDo,
+        broadcasts,
+        feed: feedRow(1, 'https://a.example/feed', null)
+    }
+}
+
+test('fetchFeed emits feed-updates-available when new items arrive for new feed',
+    async t => {
+        const { userDo, broadcasts, feed } = createFetchFeedHarness({
+            initialUnsyncedIds: [],
+            newItemCount: 1
+        })
+
+        await userDo.fetchFeed(feed)
+
+        const availableBroadcasts = broadcasts.filter(
+            b => b.event === 'feed-updates-available'
+        )
+        t.equal(
+            availableBroadcasts.length,
+            1,
+            'feed-updates-available emitted once'
+        )
+        t.deepEqual(
+            (availableBroadcasts[0].data as { feedIds:string[] }).feedIds,
+            ['1'],
+            'payload contains the feed ID'
+        )
+    }
+)
+
+test(
+    'fetchFeed does not emit feed-updates-available when feed already unsynced',
+    async t => {
+        const { userDo, broadcasts, feed } = createFetchFeedHarness({
+            initialUnsyncedIds: ['1'],
+            newItemCount: 1
+        })
+
+        await userDo.fetchFeed(feed)
+
+        const availableBroadcasts = broadcasts.filter(
+            b => b.event === 'feed-updates-available'
+        )
+        t.equal(
+            availableBroadcasts.length,
+            0,
+            'feed-updates-available not re-emitted for already-unsynced feed'
+        )
+    }
+)
 
 // ---- GET /feeds bootstrap response shape tests ----
 
