@@ -3,7 +3,7 @@
  * Uses the Cloudflare backend via ky HTTP client
  */
 
-import ky from 'ky'
+import ky, { HTTPError } from 'ky'
 import type {
     DbAdapter,
     Feed,
@@ -12,6 +12,16 @@ import type {
     ItemsResponse,
     CountsResponse
 } from './types.js'
+
+export class FetchFullThrottledError extends Error {
+    retryAfterSeconds:number
+
+    constructor (retryAfterSeconds:number) {
+        super('fetch_full_throttled')
+        this.name = 'FetchFullThrottledError'
+        this.retryAfterSeconds = retryAfterSeconds
+    }
+}
 
 function csrfToken ():string|undefined {
     return document.cookie.split(';')
@@ -131,5 +141,26 @@ export const remoteAdapter:DbAdapter = {
             { feed_id: feedId } :
             {}
         await api.post('items/mark-all-read', { json: body })
+    }
+}
+
+export async function fetchFullArticle (
+    itemId:number,
+    opts:{ force?:boolean } = {}
+):Promise<{ item:Item }> {
+    try {
+        const response = await api.post(`items/${itemId}/fetch-full`, {
+            json: { force: opts.force === true }
+        })
+        return response.json<{ item:Item }>()
+    } catch (err) {
+        if (err instanceof HTTPError && err.response.status === 429) {
+            const header = err.response.headers.get('Retry-After')
+            const seconds = header ? Number.parseInt(header, 10) : 5
+            throw new FetchFullThrottledError(
+                Number.isFinite(seconds) && seconds > 0 ? seconds : 5
+            )
+        }
+        throw err
     }
 }

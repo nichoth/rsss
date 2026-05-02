@@ -149,6 +149,91 @@ test('full sync upserts feeds and items', async (t) => {
     }
 })
 
+test('full sync round-trips item full_content columns', async (t) => {
+    storeContent.value = true
+    const db = await openLocalDb('did:test:pull-fullcontent')
+    try {
+        const syncData = {
+            feeds: [FEED],
+            items: [{
+                ...ITEM,
+                full_content: '<p>fetched body</p>',
+                full_content_fetched_at: '2026-04-30 12:00:00',
+                full_content_status: 'succeeded'
+            }],
+            syncedAt: '2026-01-02 00:00:00',
+            latestUpdatedAt: '2026-01-01 00:00:00',
+            isFullSync: true
+        }
+        await pullSync(db, makeFetch(syncData))
+
+        const item = queryOne<{
+            full_content:string|null
+            full_content_fetched_at:string|null
+            full_content_status:string|null
+        }>(
+            db,
+            'SELECT full_content, full_content_fetched_at, ' +
+            'full_content_status FROM items WHERE id = 10'
+        )
+        t.equal(
+            item?.full_content,
+            '<p>fetched body</p>',
+            'full_content is mirrored locally'
+        )
+        t.equal(
+            item?.full_content_fetched_at,
+            '2026-04-30 12:00:00',
+            'full_content_fetched_at is mirrored'
+        )
+        t.equal(
+            item?.full_content_status,
+            'succeeded',
+            'full_content_status is mirrored'
+        )
+    } finally {
+        db.close()
+    }
+})
+
+test('full_content stripped when storeContent is false', async (t) => {
+    storeContent.value = false
+    const db = await openLocalDb('did:test:pull-fullcontent-nostore')
+    try {
+        const syncData = {
+            feeds: [FEED],
+            items: [{
+                ...ITEM,
+                full_content: '<p>fetched body</p>',
+                full_content_fetched_at: '2026-04-30 12:00:00',
+                full_content_status: 'succeeded'
+            }],
+            syncedAt: '2026-01-02 00:00:00',
+            latestUpdatedAt: '2026-01-01 00:00:00',
+            isFullSync: true
+        }
+        await pullSync(db, makeFetch(syncData))
+
+        const item = queryOne<{
+            full_content:string|null
+            full_content_status:string|null
+        }>(
+            db,
+            'SELECT full_content, full_content_status ' +
+            'FROM items WHERE id = 10'
+        )
+        t.equal(item?.full_content, null, 'full_content dropped at upsert')
+        t.equal(
+            item?.full_content_status,
+            'succeeded',
+            'status preserved (privacy gate is body-only)'
+        )
+    } finally {
+        storeContent.value = true
+        db.close()
+    }
+})
+
 test('full sync stores item thumbnail_url', async (t) => {
     storeContent.value = true
     const db = await openLocalDb('did:test:pull-thumbnail')

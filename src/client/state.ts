@@ -24,8 +24,14 @@ import type {
 } from './db/types.js'
 import {
     PullSyncAuthError,
-    SyncBillingError
+    SyncBillingError,
+    upsertItem as pullSyncUpsertItem
 } from './db/pull-sync.js'
+import {
+    fetchFullArticle as remoteFetchFullArticle,
+    FetchFullThrottledError
+} from './db/remote-adapter.js'
+import { storeContent } from './local-first-settings.js'
 import {
     getOutboxCount,
     PushSyncAuthError,
@@ -1348,6 +1354,79 @@ State.markAllRead = async function (
     } catch (err) {
         debug('Error marking all read:', err)
     }
+}
+
+/**
+ * Per-tab tracking for in-flight on-demand article fetches. Only one
+ * item is open in the reader at a time, so a single nullable signal
+ * is sufficient.
+ */
+export const articleFetchingItemId:Signal<number|null> = signal(null)
+export const articleFetchError:Signal<{
+    itemId:number
+    message:string
+}|null> = signal(null)
+
+State.fetchFullArticle = async function (
+    state:AppState,
+    itemId:number,
+    opts:{ force?:boolean } = {}
+):Promise<void> {
+    batch(() => {
+        articleFetchingItemId.value = itemId
+        articleFetchError.value = null
+    })
+
+    let result:{ item:Item }
+    try {
+        result = await remoteFetchFullArticle(itemId, opts)
+    } catch (err) {
+        const message = err instanceof FetchFullThrottledError ?
+            `Try again in ${err.retryAfterSeconds}s` :
+            err instanceof Error ? err.message : String(err)
+        batch(() => {
+            articleFetchingItemId.value = null
+            articleFetchError.value = { itemId, message }
+        })
+        debug('fetchFullArticle error:', err)
+        return
+    }
+
+    const updated = result.item
+
+    // Mirror the row into the local DB if local-first is active.
+    const did = state.user.value?.did
+    if (did) {
+        const db = getLocalDb(did)
+        if (db) {
+            try {
+                await pullSyncUpsertItem(
+                    db,
+                    updated as unknown as Record<string, unknown>,
+                    storeContent.value
+                )
+            } catch (err) {
+                debug('fetchFullArticle local upsert error:', err)
+            }
+        }
+    }
+
+    batch(() => {
+        state.items.value = state.items.value.map(
+            existing => existing.id === itemId ? {
+                ...existing,
+                ...updated
+            } : existing
+        )
+        if (state.routeItem.value?.id === itemId) {
+            state.routeItem.value = {
+                ...state.routeItem.value,
+                ...updated
+            }
+        }
+        articleFetchingItemId.value = null
+        articleFetchError.value = null
+    })
 }
 
 /**

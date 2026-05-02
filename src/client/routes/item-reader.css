@@ -117,6 +117,30 @@
         padding-left: 1rem;
     }
 
+    & .article-fetch-status {
+        color: var(--color-text-secondary);
+        font-style: italic;
+        margin-bottom: 1rem;
+    }
+
+    & .article-fetch-status.failed {
+        font-style: normal;
+    }
+
+    & .article-fetch-retry {
+        margin-left: 0.75rem;
+    }
+
+    & .article-publisher-link {
+        margin-top: 2rem;
+        padding-top: 1rem;
+        border-top: 1px solid var(--color-border);
+
+        & a {
+            color: var(--color-primary);
+        }
+    }
+
     /* Header link */
     & .header-link {
         color: var(--color-text-secondary);

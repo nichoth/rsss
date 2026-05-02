@@ -6,7 +6,9 @@ import {
     TABLES_SQL,
     INDEXES_SQL,
     TRIGGERS_SQL,
-    DEAD_LETTER_OUTBOX_SQL
+    DEAD_LETTER_OUTBOX_SQL,
+    ALL_FULL_CONTENT_STATUSES,
+    FETCH_FULL_MIN_INTERVAL_MS
 } from '../../shared/schema.js'
 import { itemRouteCandidates } from '../../shared/item-route.js'
 import {
@@ -19,6 +21,7 @@ import {
     fetchOgImage,
     validateFeedUrl
 } from '../feed-fetch.js'
+import { fetchFullArticle } from '../article-fetch.js'
 
 export interface Env {
     USER:DurableObjectNamespace<UserDO>
@@ -89,8 +92,9 @@ const MANUAL_REFRESH_STORAGE_PREFIX = 'manual_refresh:'
 const ALARM_REFRESH_CURSOR_KEY = 'alarm_refresh_cursor'
 const PENDING_DELETION_KEY = 'pending_deletion'
 const MIGRATION_STATE_KEY = 'schema_migration'
-const USER_DO_MIGRATION_VERSION = 4
+const USER_DO_MIGRATION_VERSION = 5
 const SYNC_PAGE_LIMIT = 500
+const FETCH_FULL_THROTTLE_PREFIX = 'fetch_full:'
 const MAX_PARSED_FEED_ITEMS = 1000
 const MAX_FEED_TITLE_LENGTH = 8 * 1024
 const MAX_FEED_DESCRIPTION_LENGTH = 64 * 1024
@@ -105,7 +109,9 @@ const ITEM_COLUMNS = `
     items.id, items.feed_id, items.guid, items.title, items.link,
     items.description, items.content, items.author, items.pub_date,
     items.thumbnail_url, items.is_read, items.is_starred, items.created_at,
-    items.updated_at
+    items.updated_at,
+    items.full_content, items.full_content_fetched_at,
+    items.full_content_status
 `
 const ITEM_SYNC_COLUMNS = `
     ${ITEM_COLUMNS},
@@ -142,6 +148,26 @@ interface ManualRefreshState {
 
 interface ManualRefreshLimit {
     retryAfterSeconds:number
+}
+
+interface FetchFullThrottleState {
+    last_attempt_at?:number
+}
+
+interface FetchFullThrottleLimit {
+    retryAfterSeconds:number
+}
+
+function fetchFullThrottleKey (itemId:number):string {
+    return `${FETCH_FULL_THROTTLE_PREFIX}${itemId}`
+}
+
+function fetchFullRetryAfterSeconds (
+    attemptedAt:number,
+    now:number
+):number {
+    const remainingMs = FETCH_FULL_MIN_INTERVAL_MS - (now - attemptedAt)
+    return Math.max(1, Math.ceil(remainingMs / 1000))
 }
 
 type SyncRowKind = 'feed' | 'item'
@@ -338,6 +364,7 @@ export class UserDO extends DurableObject<Env> {
             this.migrateAddFeedFailureColumns()
             this.migrateAddItemThumbnail()
             this.migrateAddLastPulledAt()
+            this.migrateAddItemFullContent()
             await this.ctx.storage.put(MIGRATION_STATE_KEY, {
                 migration_v: USER_DO_MIGRATION_VERSION
             })
@@ -403,6 +430,28 @@ export class UserDO extends DurableObject<Env> {
 
         if (!hasThumbnailUrl) {
             this.sql.exec('ALTER TABLE items ADD COLUMN thumbnail_url TEXT')
+        }
+    }
+
+    private migrateAddItemFullContent () {
+        const cols = this.sql.exec('PRAGMA table_info(items)').toArray()
+        const has = (name:string) => cols.some(
+            (col:unknown) => (col as { name:string }).name === name
+        )
+        if (!has('full_content')) {
+            this.sql.exec(
+                'ALTER TABLE items ADD COLUMN full_content TEXT'
+            )
+        }
+        if (!has('full_content_fetched_at')) {
+            this.sql.exec(
+                'ALTER TABLE items ADD COLUMN full_content_fetched_at TEXT'
+            )
+        }
+        if (!has('full_content_status')) {
+            this.sql.exec(
+                'ALTER TABLE items ADD COLUMN full_content_status TEXT'
+            )
         }
     }
 
@@ -1053,6 +1102,99 @@ export class UserDO extends DurableObject<Env> {
             })
         })
 
+        // Fetch the full article body for an item (on-demand). Returns
+        // the row after the attempt completed; the caller distinguishes
+        // success vs failure by inspecting full_content_status.
+        app.post('/items/:id/fetch-full', async (c) => {
+            const rawId = c.req.param('id')
+            const id = Number.parseInt(rawId, 10)
+            if (!Number.isFinite(id) || id <= 0 || String(id) !== rawId) {
+                return c.json({ error: 'invalid_id' }, 400)
+            }
+
+            let body:{ force?:boolean } = {}
+            const text = await c.req.text()
+            if (text) {
+                try {
+                    body = JSON.parse(text) as { force?:boolean }
+                    if (typeof body !== 'object' || body === null) {
+                        return c.json({ error: 'invalid_body' }, 400)
+                    }
+                } catch {
+                    return c.json({ error: 'invalid_body' }, 400)
+                }
+            }
+            const force = body.force === true
+
+            const item = this.sql.exec(
+                `SELECT ${ITEM_COLUMNS} FROM items WHERE id = ?`, id
+            ).one() as Record<string, unknown> | null
+            if (!item) {
+                return c.json({ error: 'Item not found' }, 404)
+            }
+
+            const link = (item.link as string|null) || ''
+            if (!link) {
+                return c.json({ error: 'item_has_no_link' }, 409)
+            }
+
+            // Cache hit: row is already succeeded and force not set.
+            if (
+                !force &&
+                item.full_content_status === 'succeeded' &&
+                typeof item.full_content === 'string' &&
+                item.full_content.length > 0
+            ) {
+                return c.json({ item })
+            }
+
+            if (!force) {
+                const limit = await this.claimFetchFullAttempt(id)
+                if (limit) {
+                    const response = c.json({
+                        error: 'fetch_full_throttled'
+                    }, 429)
+                    response.headers.set(
+                        'Retry-After',
+                        String(limit.retryAfterSeconds)
+                    )
+                    return response
+                }
+            }
+
+            const result = await this.doFetchFullArticle(link)
+            if (!ALL_FULL_CONTENT_STATUSES.includes(result.status)) {
+                // Defensive: should never happen.
+                return c.json({ error: 'invalid_status' }, 500)
+            }
+
+            if (result.status === 'succeeded') {
+                this.sql.exec(
+                    'UPDATE items SET full_content = ?, ' +
+                    'full_content_fetched_at = ?, ' +
+                    'full_content_status = ? WHERE id = ?',
+                    result.html,
+                    result.fetchedAt,
+                    'succeeded',
+                    id
+                )
+            } else {
+                // Preserve any prior full_content on failure.
+                this.sql.exec(
+                    'UPDATE items SET ' +
+                    "full_content_fetched_at = datetime('now'), " +
+                    'full_content_status = ? WHERE id = ?',
+                    result.status,
+                    id
+                )
+            }
+
+            const updated = this.sql.exec(
+                `SELECT ${ITEM_COLUMNS} FROM items WHERE id = ?`, id
+            ).one()
+            return c.json({ item: updated })
+        })
+
         app.get('/internal/account/deletion', async (c) => {
             const pending = await this.ctx.storage.get<PendingDeletion>(
                 PENDING_DELETION_KEY
@@ -1149,6 +1291,10 @@ export class UserDO extends DurableObject<Env> {
 
     protected async doFetchFeedText (url:string):Promise<string> {
         return fetchFeedText(url)
+    }
+
+    protected async doFetchFullArticle (link:string) {
+        return fetchFullArticle(link)
     }
 
     /**
@@ -1830,6 +1976,29 @@ export class UserDO extends DurableObject<Env> {
             last_manual_refresh_at: now
         })
 
+        return null
+    }
+
+    private async claimFetchFullAttempt (
+        itemId:number,
+        now = Date.now()
+    ):Promise<FetchFullThrottleLimit|null> {
+        const key = fetchFullThrottleKey(itemId)
+        const stored = await this.ctx.storage
+            .get<FetchFullThrottleState>(key)
+        const storedAt = stored?.last_attempt_at
+
+        if (
+            typeof storedAt === 'number' &&
+            Number.isFinite(storedAt) &&
+            now - storedAt < FETCH_FULL_MIN_INTERVAL_MS
+        ) {
+            return {
+                retryAfterSeconds: fetchFullRetryAfterSeconds(storedAt, now)
+            }
+        }
+
+        await this.ctx.storage.put(key, { last_attempt_at: now })
         return null
     }
 
