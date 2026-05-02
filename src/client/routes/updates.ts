@@ -2,7 +2,8 @@ import { html } from 'htm/preact'
 import { type FunctionComponent } from 'preact'
 import { useEffect, useRef } from 'preact/hooks'
 import { signal, type Signal } from '@preact/signals'
-import { type AppState } from '../state.js'
+import { type AppState, State } from '../state.js'
+import { Button } from '../components/button.js'
 import './updates.css'
 
 interface PendingItem {
@@ -18,6 +19,10 @@ interface FeedPreview {
 }
 
 type PreviewMap = Map<string, Signal<FeedPreview>>
+type RefreshMap = Map<string, {
+    spinning:Signal<boolean>
+    error:Signal<string|null>
+}>
 
 async function fetchPreview (
     feedId:string,
@@ -44,7 +49,9 @@ const FeedRow:FunctionComponent<{
     feedId:string
     title:string
     previewMap:PreviewMap
-}> = function ({ feedId, title, previewMap }) {
+    refreshMap:RefreshMap
+    state:AppState
+}> = function ({ feedId, title, previewMap, refreshMap, state }) {
     if (!previewMap.has(feedId)) {
         previewMap.set(feedId, signal<FeedPreview>({
             loading: false,
@@ -52,7 +59,14 @@ const FeedRow:FunctionComponent<{
             error: null
         }))
     }
+    if (!refreshMap.has(feedId)) {
+        refreshMap.set(feedId, {
+            spinning: signal(false),
+            error: signal<string|null>(null)
+        })
+    }
     const preview = previewMap.get(feedId)!
+    const refresh = refreshMap.get(feedId)!
 
     function handleToggle (ev:Event) {
         const details = ev.currentTarget as HTMLDetailsElement
@@ -63,12 +77,35 @@ const FeedRow:FunctionComponent<{
         }
     }
 
+    async function handleRefresh () {
+        refresh.error.value = null
+        try {
+            await State.refreshFeed(state, feedId)
+        } catch (err) {
+            refresh.error.value = err instanceof Error ?
+                err.message :
+                'Refresh failed'
+        }
+    }
+
     const pv = preview.value
 
     return html`
         <li class="updates-feed-item" key=${feedId}>
             <details onToggle=${handleToggle}>
-                <summary class="feed-title">${title}</summary>
+                <summary class="feed-summary">
+                    <span class="feed-title">${title}</span>
+                    <${Button}
+                        isSpinning=${refresh.spinning}
+                        onClick=${handleRefresh}
+                        class="btn-refresh"
+                    >
+                        Refresh
+                    <//>
+                </summary>
+                ${refresh.error.value && html`
+                    <p class="refresh-error">${refresh.error.value}</p>
+                `}
                 <div class="pending-preview">
                     ${pv.loading && html`
                         <p class="preview-loading">Loading...</p>
@@ -105,6 +142,7 @@ export const UpdatesRoute:FunctionComponent<{
     state:AppState
 }> = function ({ state }) {
     const previewMapRef = useRef<PreviewMap>(new Map())
+    const refreshMapRef = useRef<RefreshMap>(new Map())
 
     useEffect(() => {
         if (!state.authLoading.value && !state.isAuthenticated.value) {
@@ -139,6 +177,8 @@ export const UpdatesRoute:FunctionComponent<{
                             feedId=${f.id}
                             title=${f.title}
                             previewMap=${previewMapRef.current}
+                            refreshMap=${refreshMapRef.current}
+                            state=${state}
                         />
                     `)}
                 </ul>`

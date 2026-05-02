@@ -2264,7 +2264,7 @@
         "Verify in browser using dev-browser skill: on /updates with at least one pending feed, click Refresh on one row, confirm the row disappears and the header indicator updates correctly (still 'updates' if other feeds remain, 'synced' if that was the last one)"
       ],
       "priority": 143,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

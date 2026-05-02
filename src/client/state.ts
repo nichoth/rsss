@@ -1345,6 +1345,24 @@ State.markAllRead = async function (
 }
 
 /**
+ * Refresh a single feed and advance the client cursor
+ */
+State.refreshFeed = async function (
+    state:AppState,
+    feedId:string
+):Promise<void> {
+    await api.post(`feeds/${feedId}/refresh`)
+    batch(() => {
+        const remaining = state.feedsWithUpdates.value
+            .filter(id => id !== feedId)
+        state.feedsWithUpdates.value = remaining
+        if (remaining.length === 0) {
+            state.feedUpdateStatus.value = 'synced'
+        }
+    })
+}
+
+/**
  * Clear selected item and navigate back to list
  */
 State.clearSelectedItem = function (state:AppState):void {
