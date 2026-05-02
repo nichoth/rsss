@@ -240,6 +240,10 @@ function makeState ():AppState {
         authError: signal(null),
         feeds: signal([]),
         feedsLoading: signal(false),
+        feedSyncStatus: signal<
+            'inactive'|'updates'|'syncing'|'error'|'synced'
+        >('inactive'),
+        feedUpdateCounts: signal<Record<string, number>>({}),
         feedUpdateStatus: signal<'synced'|'updates'>('synced'),
         feedsWithUpdates: signal<string[]>([]),
         items: signal([]),

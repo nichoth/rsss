@@ -241,6 +241,48 @@ test('handleSyncAuthError sends auth failures to login', async t => {
     t.equal(routes.pop(), '/login', 'routes push auth failure to login')
 })
 
+test('State exposes feed sync status as the single source of truth',
+    t => {
+        const state = State()
+
+        t.equal(
+            state.feedSyncStatus.value,
+            'inactive',
+            'feed sync status defaults to inactive'
+        )
+        t.deepEqual(
+            state.feedUpdateCounts.value,
+            {},
+            'feed update counts default to an empty object'
+        )
+        t.equal(
+            state.feedUpdateStatus.value,
+            'synced',
+            'legacy status derives an empty-count state as synced'
+        )
+        t.deepEqual(
+            state.feedsWithUpdates.value,
+            [],
+            'legacy update feed list derives from empty counts'
+        )
+
+        state.feedUpdateCounts.value = { 1: 2, 3: 1 }
+        state.feedSyncStatus.value = 'updates'
+
+        t.equal(
+            state.feedUpdateStatus.value,
+            'updates',
+            'legacy status derives updates from feedSyncStatus'
+        )
+        t.deepEqual(
+            state.feedsWithUpdates.value,
+            ['1', '3'],
+            'legacy feed list derives from feedUpdateCounts keys'
+        )
+
+        state.cleanup()
+    })
+
 test('State auth effect loads once for the final rapid auth value',
     async t => {
         const originals = {

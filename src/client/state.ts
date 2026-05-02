@@ -1,4 +1,5 @@
 import {
+    type ReadonlySignal,
     type Signal,
     signal,
     computed,
@@ -167,8 +168,12 @@ export type AppState = {
     authError:Signal<string|null>,
     feeds:Signal<Feed[]>,
     feedsLoading:Signal<boolean>,
-    feedUpdateStatus:Signal<'synced'|'updates'>,
-    feedsWithUpdates:Signal<string[]>,
+    feedSyncStatus:Signal<
+        'inactive'|'updates'|'syncing'|'error'|'synced'
+    >,
+    feedUpdateCounts:Signal<Record<string, number>>,
+    feedUpdateStatus:ReadonlySignal<'synced'|'updates'>,
+    feedsWithUpdates:ReadonlySignal<string[]>,
     items:Signal<Item[]>,
     itemsLoading:Signal<boolean>,
     itemsTotal:Signal<number>,
@@ -180,6 +185,28 @@ export type AppState = {
     selectedFeedId:Signal<number|null>,
     isAuthenticated:Signal<boolean>,
     cleanup:() => void
+}
+
+function updateCountsFromFeedIds (
+    current:Record<string, number>,
+    feedIds:string[]
+):Record<string, number> {
+    const next = { ...current }
+    for (const feedId of feedIds) {
+        next[feedId] = next[feedId] ?? 1
+    }
+    return next
+}
+
+function clearFeedUpdateCounts (
+    current:Record<string, number>,
+    feedIds:string[]
+):Record<string, number> {
+    const next = { ...current }
+    for (const feedId of feedIds) {
+        delete next[feedId]
+    }
+    return next
 }
 
 export function State ():AppState {
@@ -198,8 +225,20 @@ export function State ():AppState {
         ),
         feeds: signal<Feed[]>([]),
         feedsLoading: signal<boolean>(false),
-        feedUpdateStatus: signal<'synced'|'updates'>('synced'),
-        feedsWithUpdates: signal<string[]>([]),
+        feedSyncStatus: signal<
+            'inactive'|'updates'|'syncing'|'error'|'synced'
+        >('inactive'),
+        feedUpdateCounts: signal<Record<string, number>>({}),
+        // Compatibility views for existing /updates code. New writers
+        // update feedSyncStatus/feedUpdateCounts as the single source.
+        feedUpdateStatus: computed<'synced'|'updates'>(() => (
+            state.feedSyncStatus.value === 'updates' ?
+                'updates' :
+                'synced'
+        )),
+        feedsWithUpdates: computed<string[]>(() => (
+            Object.keys(state.feedUpdateCounts.value)
+        )),
         items: signal<Item[]>([]),
         itemsLoading: signal(false),
         itemsTotal: signal(0),
@@ -544,8 +583,8 @@ State.openEventStream = function (state:AppState):void {
         // local-first DB sync, NOT server feed pull
         batch(() => {
             state.feedsLoading.value = false
-            state.feedsWithUpdates.value = []
-            state.feedUpdateStatus.value = 'synced'
+            state.feedUpdateCounts.value = {}
+            state.feedSyncStatus.value = 'synced'
         })
     })
 
@@ -556,12 +595,11 @@ State.openEventStream = function (state:AppState):void {
                 feedIds:string[]
             }
             batch(() => {
-                const current = state.feedsWithUpdates.value
-                const merged = Array.from(
-                    new Set([...current, ...feedIds])
+                state.feedUpdateCounts.value = updateCountsFromFeedIds(
+                    state.feedUpdateCounts.value,
+                    feedIds
                 )
-                state.feedsWithUpdates.value = merged
-                state.feedUpdateStatus.value = 'updates'
+                state.feedSyncStatus.value = 'updates'
             })
         } catch (err) {
             debug('feed-updates-available parse error:', err)
@@ -575,12 +613,13 @@ State.openEventStream = function (state:AppState):void {
                 feedIds:string[]
             }
             batch(() => {
-                const cleared = new Set(feedIds)
-                const remaining = state.feedsWithUpdates.value
-                    .filter(id => !cleared.has(id))
-                state.feedsWithUpdates.value = remaining
-                if (remaining.length === 0) {
-                    state.feedUpdateStatus.value = 'synced'
+                const counts = clearFeedUpdateCounts(
+                    state.feedUpdateCounts.value,
+                    feedIds
+                )
+                state.feedUpdateCounts.value = counts
+                if (Object.keys(counts).length === 0) {
+                    state.feedSyncStatus.value = 'synced'
                 }
             })
         } catch (err) {
@@ -1088,11 +1127,13 @@ State.loadFeeds = async function (
         const data = await adapter.getFeeds()
         batch(() => {
             state.feeds.value = data.feeds
-            state.feedUpdateStatus.value = (
+            state.feedUpdateCounts.value = data.feedUpdateCounts ??
+                updateCountsFromFeedIds(
+                    {},
+                    data.feedsWithUpdates ?? []
+                )
+            state.feedSyncStatus.value = (
                 data.feedUpdateStatus ?? 'synced'
-            )
-            state.feedsWithUpdates.value = (
-                data.feedsWithUpdates ?? []
             )
             state.feedsLoading.value = false
         })
@@ -1438,11 +1479,13 @@ State.refreshFeed = async function (
 ):Promise<void> {
     await api.post(`feeds/${feedId}/refresh`)
     batch(() => {
-        const remaining = state.feedsWithUpdates.value
-            .filter(id => id !== feedId)
-        state.feedsWithUpdates.value = remaining
-        if (remaining.length === 0) {
-            state.feedUpdateStatus.value = 'synced'
+        const counts = clearFeedUpdateCounts(
+            state.feedUpdateCounts.value,
+            [feedId]
+        )
+        state.feedUpdateCounts.value = counts
+        if (Object.keys(counts).length === 0) {
+            state.feedSyncStatus.value = 'synced'
         }
     })
 }

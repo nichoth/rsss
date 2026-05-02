@@ -1,5 +1,9 @@
 ## Codebase Patterns
 
+- Feed update UI state in `src/client/state.ts` now uses
+  `feedSyncStatus` and `feedUpdateCounts` as the source of truth. Older
+  `feedUpdateStatus` and `feedsWithUpdates` are computed compatibility
+  views, so writers should update the new signals.
 - The `items_updated_at` trigger in `src/shared/schema.ts` fires on any
   UPDATE to items rows and sets `updated_at = datetime('now')`. Cache
   eviction tests that verify post-eviction item ordering must NOT use
@@ -25,6 +29,33 @@
   because esbuild stdin/eval wrappers change the module URL.
 - Feed bootstrap state is carried by `GET /feeds`; add new feed bootstrap
   fields to the `FeedsResponse` type and mirror them in `remoteAdapter`.
+
+## 2026-05-02 13:24 PDT - US-147
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added canonical feed sync signals to client app
+  state.
+  - Added `feedSyncStatus` with inactive, updates, syncing, error, and
+    synced states.
+  - Added `feedUpdateCounts` as the per-feed pending item count map.
+  - Kept `feedUpdateStatus` and `feedsWithUpdates` as computed compatibility
+    views over the new source-of-truth signals.
+  - Updated SSE, bootstrap feed loading, and per-feed refresh state writes
+    to update the new signals inside existing `batch()` blocks.
+  - Added focused coverage for defaults and derived compatibility state.
+- Files changed:
+  - `src/client/state.ts`
+  - `test/state-auth-storage.ts`
+  - `test/local-first-opfs-persistence.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Feed update UI writers should set `feedSyncStatus` and
+    `feedUpdateCounts`; the older fields should be treated as read-only
+    derived views for existing `/updates` consumers.
+  - SSE `feed-updates-available` carries feed IDs, not counts, so state
+    preserves existing counts and uses `1` for newly observed IDs until a
+    bootstrap response provides exact counts.
+---
 
 ## 2026-05-02 13:19 PDT - US-146
 Thread: https://ampcode.com/threads/unknown
