@@ -26,6 +26,7 @@ import { syncSubscriptions } from '../src/client/local-first-settings.js'
 import { billingStatus } from '../src/client/billing-status.js'
 import { State, type AppState } from '../src/client/state.js'
 import { remoteAdapter } from '../src/client/db/remote-adapter.js'
+import { mockFeeds } from './mock.js'
 
 type ErrorCtor = new () => Error
 type StateWithSyncAuth = typeof State & {
@@ -152,6 +153,18 @@ function authState ():AppState {
     } as unknown) as AppState
 }
 
+function feedState ():AppState {
+    return ({
+        user: signal(null),
+        feeds: signal([]),
+        feedsLoading: signal(false),
+        feedSyncStatus: signal<
+            'inactive'|'updates'|'syncing'|'error'|'synced'
+        >('inactive'),
+        feedUpdateCounts: signal<Record<string, number>>({})
+    } as unknown) as AppState
+}
+
 function itemByRouteResponse ():Response {
     return new Response(JSON.stringify({
         item: {
@@ -172,6 +185,120 @@ function itemByRouteResponse ():Response {
         }
     }))
 }
+
+test('loadFeeds hydrates synced status from empty update counts',
+    async t => {
+        const originalFetch = globalThis.fetch
+
+        syncSubscriptions.value = false
+        _resetAdapterCache()
+
+        try {
+            globalThis.fetch = async () => new Response(JSON.stringify({
+                feeds: mockFeeds,
+                feedUpdateCounts: {}
+            }))
+
+            const state = feedState()
+
+            await State.loadFeeds(state)
+
+            t.equal(
+                state.feedSyncStatus.value,
+                'synced',
+                'empty feed update counts hydrate synced status'
+            )
+            t.deepEqual(
+                state.feedUpdateCounts.value,
+                {},
+                'stores the empty count map'
+            )
+            t.equal(
+                state.feedsLoading.value,
+                false,
+                'clears loading after bootstrap hydration'
+            )
+        } finally {
+            globalThis.fetch = originalFetch
+            _resetAdapterCache()
+        }
+    })
+
+test('loadFeeds hydrates update status from non-empty update counts',
+    async t => {
+        const originalFetch = globalThis.fetch
+
+        syncSubscriptions.value = false
+        _resetAdapterCache()
+
+        try {
+            globalThis.fetch = async () => new Response(JSON.stringify({
+                feeds: mockFeeds,
+                feedUpdateCounts: {
+                    1: 2,
+                    2: 1
+                }
+            }))
+
+            const state = feedState()
+
+            await State.loadFeeds(state)
+
+            t.equal(
+                state.feedSyncStatus.value,
+                'updates',
+                'non-empty feed update counts hydrate updates status'
+            )
+            t.deepEqual(
+                state.feedUpdateCounts.value,
+                {
+                    1: 2,
+                    2: 1
+                },
+                'stores the response count map'
+            )
+        } finally {
+            globalThis.fetch = originalFetch
+            _resetAdapterCache()
+        }
+    })
+
+test('loadFeeds keeps inactive status after bootstrap failure',
+    async t => {
+        const originalFetch = globalThis.fetch
+
+        syncSubscriptions.value = false
+        _resetAdapterCache()
+
+        try {
+            globalThis.fetch = async () => {
+                throw new Error('bootstrap failed')
+            }
+
+            const state = feedState()
+
+            await State.loadFeeds(state)
+
+            t.equal(
+                state.feedSyncStatus.value,
+                'inactive',
+                'failed bootstrap leaves feed sync status inactive'
+            )
+            t.deepEqual(
+                state.feedUpdateCounts.value,
+                {},
+                'failed bootstrap leaves update counts unchanged'
+            )
+            t.equal(
+                state.feedsLoading.value,
+                false,
+                'clears loading after bootstrap failure'
+            )
+        } finally {
+            globalThis.fetch = originalFetch
+            _resetAdapterCache()
+        }
+    })
 
 test('checkAuth does not persist authenticated user to localStorage',
     async t => {

@@ -1126,15 +1126,19 @@ State.loadFeeds = async function (
         )
         const data = await adapter.getFeeds()
         batch(() => {
-            state.feeds.value = data.feeds
-            state.feedUpdateCounts.value = data.feedUpdateCounts ??
+            const feedUpdateCounts = data.feedUpdateCounts ??
                 updateCountsFromFeedIds(
                     {},
                     data.feedsWithUpdates ?? []
                 )
-            state.feedSyncStatus.value = (
-                data.feedUpdateStatus ?? 'synced'
-            )
+            const pendingUpdates = Object.values(feedUpdateCounts)
+                .reduce((sum, count) => sum + count, 0)
+
+            state.feeds.value = data.feeds
+            state.feedUpdateCounts.value = feedUpdateCounts
+            state.feedSyncStatus.value = pendingUpdates > 0 ?
+                'updates' :
+                'synced'
             state.feedsLoading.value = false
         })
     } catch (err) {

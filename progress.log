@@ -29,6 +29,9 @@
   because esbuild stdin/eval wrappers change the module URL.
 - Feed bootstrap state is carried by `GET /feeds`; add new feed bootstrap
   fields to the `FeedsResponse` type and mirror them in `remoteAdapter`.
+- `State.loadFeeds` derives header feed sync status from canonical
+  `feedUpdateCounts`; treat legacy `feedUpdateStatus` as compatibility data,
+  not the client state hydration source.
 
 ## 2026-05-02 13:24 PDT - US-147
 Thread: https://ampcode.com/threads/unknown
@@ -3741,4 +3744,26 @@ Thread: https://ampcode.com/threads/unknown
 - **Learnings for future iterations:**
   - When changing `DbAdapter.getFeeds()` return type from array to object, all test mocks and test call sites using the array result need updating.
   - The `createCursorHarness` in feed-cursor.ts overrides `getFeedsWithUpdates` on the prototype for the GET /feeds route to control what status the route returns.
+---
+
+## 2026-05-02 13:28 PDT - US-148
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Hydrated feed sync status from bootstrap counts.
+  - Updated `State.loadFeeds` to assign `feedUpdateCounts` from the
+    bootstrap response inside the existing `batch()` block.
+  - Derived `feedSyncStatus` from the sum of update counts, using `synced`
+    for zero pending items and `updates` for non-zero pending items.
+  - Preserved the existing failure path so bootstrap errors leave the header
+    sync status `inactive`.
+  - Added focused state coverage for empty counts, non-empty counts, and
+    bootstrap failure.
+- Files changed:
+  - `src/client/state.ts`
+  - `test/state-auth-storage.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `State.loadFeeds` should treat `feedUpdateCounts` as the canonical
+    bootstrap source for feed sync status; legacy `feedUpdateStatus` is no
+    longer the state hydration source.
 ---
