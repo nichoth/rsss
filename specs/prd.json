@@ -2282,7 +2282,7 @@
         "Verify in browser using dev-browser skill: leave the app idle for 60 seconds with the network tab open, confirm no `/api/feeds/refresh` or `/api/feeds/:id/refresh` requests fire without a click"
       ],
       "priority": 144,
-      "passes": false,
+      "passes": true,
       "notes": ""
     }
   ]

@@ -450,6 +450,7 @@ State.handleSyncAuthError = function (
     return true
 }
 
+// local-first DB sync, NOT server feed pull -- safe to call automatically
 State.refreshAfterSync = async function (
     state:AppState
 ):Promise<void> {
@@ -534,7 +535,12 @@ State.openEventStream = function (state:AppState):void {
     source.addEventListener('refresh-complete', () => {
         debug('SSE refresh-complete')
         clearRefreshFeedsSafetyTimeout()
-        state.feedsLoading.value = false
+        // local-first DB sync, NOT server feed pull
+        batch(() => {
+            state.feedsLoading.value = false
+            state.feedsWithUpdates.value = []
+            state.feedUpdateStatus.value = 'synced'
+        })
     })
 
     source.addEventListener('feed-updates-available', (ev) => {
