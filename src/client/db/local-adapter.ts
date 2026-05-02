@@ -2,6 +2,7 @@ import type { Sqlite3Db } from './sqlite-init.js'
 import type {
     DbAdapter,
     Feed,
+    FeedsResponse,
     Item,
     ItemsResponse,
     CountsResponse
@@ -90,11 +91,12 @@ async function upsertUpdateItemOutbox (
 
 export function createLocalAdapter (db:Sqlite3Db):DbAdapter {
     return {
-        async getFeeds ():Promise<Feed[]> {
-            return queryDb<Feed>(
+        async getFeeds ():Promise<FeedsResponse> {
+            const feeds = await queryDb<Feed>(
                 db,
                 'SELECT * FROM feeds ORDER BY title ASC'
             )
+            return { feeds }
         },
 
         async addFeed (url:string):Promise<Feed> {

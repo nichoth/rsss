@@ -97,33 +97,39 @@ test('getFeedsWithUpdates returns empty when all feeds caught up', t => {
 
 // ---- Route-level cursor advancement tests ----
 
-function createCursorHarness () {
+interface CursorDoType {
+    sql:{ exec:(q:string, ...p:unknown[]) => QueryResult }
+    ctx:{
+        storage:{
+            get:<T>(key:string) => Promise<T|undefined>
+            put:(key:string, value:unknown) => Promise<void>
+            delete:(key:string) => Promise<void>
+        }
+        waitUntil:(p:Promise<unknown>) => void
+    }
+    fetchFeed:(feed:FeedRow) => Promise<void>
+    broadcast:(event:string, data:unknown) => void
+    getFeedsWithUpdates:() => string[]
+    createRouter:() => {
+        request:(path:string, init?:RequestInit) => Promise<Response>
+    }
+}
+
+function createCursorHarness (pendingFeedIds:string[] = []) {
     const feeds:FeedRow[] = [feedRow(1, 'https://a.example/feed', null)]
     const cursorUpdates:number[] = []
     const waitUntilPromises:Promise<unknown>[] = []
     const storage = new Map<string, unknown>()
 
-    const userDo = Object.create(UserDO.prototype) as {
-        sql:{ exec:(q:string, ...p:unknown[]) => QueryResult }
-        ctx:{
-            storage:{
-                get:<T>(key:string) => Promise<T|undefined>
-                put:(key:string, value:unknown) => Promise<void>
-                delete:(key:string) => Promise<void>
-            }
-            waitUntil:(p:Promise<unknown>) => void
-        }
-        fetchFeed:(feed:FeedRow) => Promise<void>
-        broadcast:(event:string, data:unknown) => void
-        createRouter:() => {
-            request:(path:string, init?:RequestInit) => Promise<Response>
-        }
-    }
+    const userDo = Object.create(UserDO.prototype) as CursorDoType
 
     userDo.sql = {
         exec (query:string, ...params:unknown[]) {
             if (query.includes('SELECT * FROM feeds WHERE id = ?')) {
                 return result(feeds.filter(f => f.id === params[0]))
+            }
+            if (query.includes('SELECT * FROM feeds ORDER BY title ASC')) {
+                return result([...feeds])
             }
             if (query.includes('SELECT * FROM feeds')) {
                 return result([...feeds])
@@ -147,6 +153,7 @@ function createCursorHarness () {
 
     userDo.fetchFeed = async () => {}
     userDo.broadcast = () => {}
+    userDo.getFeedsWithUpdates = () => pendingFeedIds
 
     return {
         app: userDo.createRouter(),
@@ -177,3 +184,53 @@ test('cursor advances after full refresh for each feed', async t => {
     t.equal(cursorUpdates.length, 1, 'cursor updated for the one feed')
     t.equal(cursorUpdates[0], 1, 'cursor updated for feed 1')
 })
+
+// ---- GET /feeds bootstrap response shape tests ----
+
+test('GET /feeds includes feedUpdateStatus synced when no pending feeds',
+    async t => {
+        const { app } = createCursorHarness([])
+        const res = await app.request('/feeds')
+        const body = await res.json() as {
+            feeds:unknown[]
+            feedUpdateStatus:string
+            feedsWithUpdates:string[]
+        }
+
+        t.equal(res.status, 200, 'GET /feeds returns 200')
+        t.ok(Array.isArray(body.feeds), 'feeds array present')
+        t.equal(
+            body.feedUpdateStatus,
+            'synced',
+            'feedUpdateStatus is synced when no pending feeds'
+        )
+        t.deepEqual(
+            body.feedsWithUpdates,
+            [],
+            'feedsWithUpdates is empty when no pending feeds'
+        )
+    }
+)
+
+test('GET /feeds includes feedUpdateStatus updates when feeds pending',
+    async t => {
+        const { app } = createCursorHarness(['1'])
+        const res = await app.request('/feeds')
+        const body = await res.json() as {
+            feeds:unknown[]
+            feedUpdateStatus:string
+            feedsWithUpdates:string[]
+        }
+
+        t.equal(
+            body.feedUpdateStatus,
+            'updates',
+            'feedUpdateStatus is updates when feeds have newer items'
+        )
+        t.deepEqual(
+            body.feedsWithUpdates,
+            ['1'],
+            'feedsWithUpdates contains the pending feed ID'
+        )
+    }
+)

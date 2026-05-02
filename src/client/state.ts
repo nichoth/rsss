@@ -1034,9 +1034,15 @@ State.loadFeeds = async function (
         const adapter = await getAdapter(
             state.user.value?.did
         )
-        const feeds = await adapter.getFeeds()
+        const data = await adapter.getFeeds()
         batch(() => {
-            state.feeds.value = feeds
+            state.feeds.value = data.feeds
+            state.feedUpdateStatus.value = (
+                data.feedUpdateStatus ?? 'synced'
+            )
+            state.feedsWithUpdates.value = (
+                data.feedsWithUpdates ?? []
+            )
             state.feedsLoading.value = false
         })
     } catch (err) {

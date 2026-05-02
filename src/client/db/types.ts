@@ -44,11 +44,17 @@ export interface CountsResponse {
     total:number
 }
 
+export interface FeedsResponse {
+    feeds:Feed[]
+    feedUpdateStatus?:'synced'|'updates'
+    feedsWithUpdates?:string[]
+}
+
 /**
  * Database adapter interface
  */
 export interface DbAdapter {
-    getFeeds():Promise<Feed[]>
+    getFeeds():Promise<FeedsResponse>
     addFeed(url:string):Promise<Feed>
     deleteFeed(id:number):Promise<void>
 

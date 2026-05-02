@@ -2154,7 +2154,7 @@
         "Verify in browser using dev-browser skill: load the app with at least one feed that has unpulled items (e.g. by manually setting `last_pulled_at` back), confirm the header indicator shows 'updates' immediately on first paint"
       ],
       "priority": 137,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

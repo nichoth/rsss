@@ -500,7 +500,11 @@ export class UserDO extends DurableObject<Env> {
             const feeds = this.sql.exec(
                 'SELECT * FROM feeds ORDER BY title ASC'
             ).toArray()
-            return c.json({ feeds })
+            const feedsWithUpdates = this.getFeedsWithUpdates()
+            const feedUpdateStatus = feedsWithUpdates.length > 0 ?
+                'updates' :
+                'synced'
+            return c.json({ feeds, feedUpdateStatus, feedsWithUpdates })
         })
 
         // Add a new feed

@@ -44,7 +44,7 @@ test('getFeeds returns all feeds', async (t) => {
     await seedDb(db)
     const adapter = createLocalAdapter(db)
     try {
-        const feeds = await adapter.getFeeds()
+        const { feeds } = await adapter.getFeeds()
         t.equal(feeds.length, 2, 'returns 2 feeds')
         t.equal(feeds[0].title, 'Feed One', 'first feed title')
         t.equal(feeds[1].title, 'Feed Two', 'second feed title')
@@ -214,7 +214,7 @@ test('addFeed inserts a feed and returns it', async (t) => {
         t.ok(feed.created_at, 'created_at is set')
         t.ok(feed.updated_at, 'updated_at is set')
 
-        const feeds = await adapter.getFeeds()
+        const { feeds } = await adapter.getFeeds()
         t.equal(feeds.length, 1, 'one feed in db')
     } finally {
         db.close()
@@ -260,7 +260,7 @@ test('deleteFeed removes feed and its items', async (t) => {
     const adapter = createLocalAdapter(db)
     try {
         await adapter.deleteFeed(1)
-        const feeds = await adapter.getFeeds()
+        const { feeds } = await adapter.getFeeds()
         t.equal(feeds.length, 1, 'one feed remains')
         t.equal(feeds[0].title, 'Feed Two', 'feed two remains')
 

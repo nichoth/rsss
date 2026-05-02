@@ -3617,3 +3617,29 @@ Thread: https://ampcode.com/threads/unknown
   - `validateFeedUrl` does no network I/O (only URL parsing and hostname checks), so route tests that call refresh routes don't need to mock it.
   - `getFeedsWithUpdates` is made public (no `private` keyword) to be accessible via `Object.create(UserDO.prototype)` in tests.
 ---
+
+## 2026-05-01 - US-137
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Include feed-update status in initial fetch response.
+  - `GET /feeds` in the DO now returns `feedUpdateStatus:'synced'|'updates'` and `feedsWithUpdates:string[]` computed via `getFeedsWithUpdates()`.
+  - Added `FeedsResponse` type to `src/client/db/types.ts` and updated `DbAdapter.getFeeds()` to return it.
+  - Updated `remoteAdapter.getFeeds()` to parse and return the new fields (defaults to 'synced'/[] for back-compat).
+  - Updated `localAdapter.getFeeds()` to return `{ feeds }` (no status fields, local-first doesn't track cursor).
+  - Updated `State.loadFeeds` to batch-set `feedUpdateStatus` and `feedsWithUpdates` from the response.
+  - Updated test mocks (`test/db-adapter.ts`, `test/local-adapter.ts`) for new return type.
+  - Extended `test/feed-cursor.ts` with GET /feeds bootstrap response shape tests.
+- Files changed:
+  - `src/server/durable-objects/index.ts`
+  - `src/client/db/types.ts`
+  - `src/client/db/remote-adapter.ts`
+  - `src/client/db/local-adapter.ts`
+  - `src/client/state.ts`
+  - `test/db-adapter.ts`
+  - `test/local-adapter.ts`
+  - `test/feed-cursor.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - When changing `DbAdapter.getFeeds()` return type from array to object, all test mocks and test call sites using the array result need updating.
+  - The `createCursorHarness` in feed-cursor.ts overrides `getFeedsWithUpdates` on the prototype for the GET /feeds route to control what status the route returns.
+---

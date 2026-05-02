@@ -7,6 +7,7 @@ import ky from 'ky'
 import type {
     DbAdapter,
     Feed,
+    FeedsResponse,
     Item,
     ItemsResponse,
     CountsResponse
@@ -32,10 +33,20 @@ const api = ky.create({
 })
 
 export const remoteAdapter:DbAdapter = {
-    async getFeeds ():Promise<Feed[]> {
+    async getFeeds ():Promise<FeedsResponse> {
         const response = await api.get('feeds')
-        const data = await response.json<{ feeds:Feed[] }>()
-        return data.feeds
+        const data = await response.json<{
+            feeds:Feed[]
+            feedUpdateStatus?:string
+            feedsWithUpdates?:string[]
+        }>()
+        return {
+            feeds: data.feeds,
+            feedUpdateStatus: data.feedUpdateStatus === 'updates' ?
+                'updates' :
+                'synced',
+            feedsWithUpdates: data.feedsWithUpdates ?? []
+        }
     },
 
     async addFeed (url:string):Promise<Feed> {
