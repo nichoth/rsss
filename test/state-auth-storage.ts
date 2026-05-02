@@ -32,6 +32,12 @@ type ErrorCtor = new () => Error
 type StateWithSyncAuth = typeof State & {
     handleSyncAuthError?:(state:AppState, err:unknown) => boolean
 }
+type QueuedRefreshTimer = () => void
+
+interface QueuedRefreshSafetyTimerStub {
+    restore:() => void
+    runSafetyTimers:() => void
+}
 
 class FakeBroadcastChannel {
     static channels:FakeBroadcastChannel[] = []
@@ -97,6 +103,59 @@ function stubRefreshSafetyTimer ():() => void {
             value: originalClearTimeout,
             configurable: true
         })
+    }
+}
+
+function stubQueuedRefreshSafetyTimer ():QueuedRefreshSafetyTimerStub {
+    const originalSetTimeout = globalThis.setTimeout
+    const originalClearTimeout = globalThis.clearTimeout
+    const timers = new Map<number, QueuedRefreshTimer>()
+    let nextId = 1
+
+    Object.defineProperty(globalThis, 'setTimeout', {
+        value: (
+            handler:TimerHandler,
+            timeout?:number,
+            ...args:unknown[]
+        ) => {
+            if (timeout !== 60_000) {
+                return originalSetTimeout(handler, timeout, ...args)
+            }
+
+            const id = nextId++
+            timers.set(id, () => {
+                if (typeof handler === 'function') {
+                    handler(...args)
+                }
+            })
+            return id
+        },
+        configurable: true
+    })
+    Object.defineProperty(globalThis, 'clearTimeout', {
+        value: (id?:number) => {
+            if (typeof id === 'number' && timers.delete(id)) return
+            originalClearTimeout(id)
+        },
+        configurable: true
+    })
+
+    return {
+        restore: () => {
+            Object.defineProperty(globalThis, 'setTimeout', {
+                value: originalSetTimeout,
+                configurable: true
+            })
+            Object.defineProperty(globalThis, 'clearTimeout', {
+                value: originalClearTimeout,
+                configurable: true
+            })
+        },
+        runSafetyTimers: () => {
+            for (const timer of Array.from(timers.values())) {
+                timer()
+            }
+        }
     }
 }
 
@@ -289,6 +348,53 @@ test('loadFeeds hydrates update status from non-empty update counts',
                     2: 1
                 },
                 'stores the response count map'
+            )
+        } finally {
+            globalThis.fetch = originalFetch
+            _resetAdapterCache()
+        }
+    })
+
+test('loadFeeds flips synced status back to updates on later counts',
+    async t => {
+        const originalFetch = globalThis.fetch
+        let feedLoads = 0
+
+        syncSubscriptions.value = false
+        _resetAdapterCache()
+
+        try {
+            globalThis.fetch = async () => {
+                feedLoads += 1
+                return new Response(JSON.stringify({
+                    feeds: mockFeeds,
+                    feedUpdateCounts: feedLoads === 1 ?
+                        {} :
+                        { 1: 4 }
+                }))
+            }
+
+            const state = feedState()
+
+            await State.loadFeeds(state)
+
+            t.equal(
+                state.feedSyncStatus.value,
+                'synced',
+                'empty reload counts render the sticky green state'
+            )
+
+            await State.loadFeeds(state)
+
+            t.equal(
+                state.feedSyncStatus.value,
+                'updates',
+                'later non-empty reload counts move the dot to updates'
+            )
+            t.deepEqual(
+                state.feedUpdateCounts.value,
+                { 1: 4 },
+                'stores the latest pending count map'
             )
         } finally {
             globalThis.fetch = originalFetch
@@ -521,6 +627,39 @@ test('refreshFeeds clears update counts and marks feed sync as synced',
         } finally {
             globalThis.fetch = originalFetch
             restoreTimeout()
+        }
+    })
+
+test('refreshFeeds keeps synced status after idle timer window',
+    async t => {
+        const originalFetch = globalThis.fetch
+        const timerStub = stubQueuedRefreshSafetyTimer()
+
+        try {
+            globalThis.fetch = async () => new Response(JSON.stringify({
+                success: true
+            }))
+
+            const state = feedState()
+            state.feedUpdateCounts.value = { 1: 2 }
+            state.feedSyncStatus.value = 'updates'
+
+            await State.refreshFeeds(state)
+            timerStub.runSafetyTimers()
+
+            t.equal(
+                state.feedSyncStatus.value,
+                'synced',
+                'successful sync stays green after the idle window'
+            )
+            t.deepEqual(
+                state.feedUpdateCounts.value,
+                {},
+                'idle window does not restore stale pending counts'
+            )
+        } finally {
+            globalThis.fetch = originalFetch
+            timerStub.restore()
         }
     })
 

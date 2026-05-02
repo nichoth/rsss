@@ -2410,7 +2410,7 @@
         "Verify in browser using dev-browser skill: trigger a sync to green, reload the page, confirm header is still green when no new updates exist"
       ],
       "priority": 151,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

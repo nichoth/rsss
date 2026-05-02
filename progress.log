@@ -3824,3 +3824,24 @@ Thread: https://ampcode.com/threads/unknown
     timer, otherwise a successful refresh can leave a long-lived timer in
     the test browser.
 ---
+
+## 2026-05-02 14:00 PDT - US-151
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added focused sticky-green feed sync regressions.
+  - Covered the reload path where empty bootstrap counts keep the header in
+    the synced state.
+  - Covered the next reload path where non-empty bootstrap counts move the
+    header back to the updates state and store the latest count map.
+  - Covered the post-refresh idle timer window so a successful sync keeps the
+    synced state and does not restore stale pending counts.
+- Files changed:
+  - `test/state-auth-storage.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Sticky green is implemented by deriving bootstrap status from
+    `feedUpdateCounts` in `State.loadFeeds`, not by persisting a separate
+    timestamp or status key.
+  - The refresh safety timeout only guards `feedsLoading`; feed sync status
+    should remain synced after a successful refresh.
+---
