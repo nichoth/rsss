@@ -5,6 +5,9 @@
   `/api/feeds/refresh`, clear `feedSyncError`, then set `synced` with empty
   `feedUpdateCounts` on success or `error` with the latest message on
   failure.
+- `FeedStatus` exposes `aria-label` for every feed sync state and uses a
+  keyed status wrapper so error-only attributes such as `title` are removed
+  when moving from `error` back to `syncing` or `synced`.
 - Feed update UI state in `src/client/state.ts` now uses
   `feedSyncStatus`, `feedUpdateCounts`, and `feedSyncError` as the source
   of truth. Older `feedUpdateStatus` and `feedsWithUpdates` are computed
@@ -37,6 +40,31 @@
 - `State.loadFeeds` derives header feed sync status from canonical
   `feedUpdateCounts`; treat legacy `feedUpdateStatus` as compatibility data,
   not the client state hydration source.
+
+## 2026-05-02 14:14 PDT - US-152
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Made feed sync retry status recover cleanly in the
+  header.
+  - Added retry-path coverage for `State.refreshFeeds` from `error` to
+    `syncing` to `synced`.
+  - Added retry-path coverage for a second failure replacing the previous
+    feed sync error message.
+  - Added accessible `aria-label` text for `FeedStatus` states.
+  - Keyed the feed status wrapper so old error-only `title` attributes are
+    removed when retrying.
+- Files changed:
+  - `src/client/components/feed-status.ts`
+  - `test/header-component.ts`
+  - `test/state-auth-storage.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `FeedStatus` should expose every feed sync state through `aria-label`,
+    not only visible dot color or `title`.
+  - When an `htm`/Preact branch adds attributes only in an error state,
+    keying the wrapper by status prevents stale empty attributes during
+    status transitions.
+---
 
 ## 2026-05-02 13:24 PDT - US-147
 Thread: https://ampcode.com/threads/unknown

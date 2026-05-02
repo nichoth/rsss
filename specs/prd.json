@@ -2429,7 +2429,7 @@
         "Verify in browser using dev-browser skill: force a sync failure, click Sync again with network restored, confirm dot goes yellow then green"
       ],
       "priority": 152,
-      "passes": false,
+      "passes": true,
       "notes": ""
     }
   ]

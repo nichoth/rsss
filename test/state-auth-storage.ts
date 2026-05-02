@@ -700,6 +700,106 @@ test('refreshFeeds stores latest error message on failure',
         }
     })
 
+test('refreshFeeds retries from error state and recovers to synced',
+    async t => {
+        const originalFetch = globalThis.fetch
+        const restoreTimeout = stubRefreshSafetyTimer()
+        let resolveRefresh:(response:Response) => void = () => {}
+
+        try {
+            globalThis.fetch = async () => new Promise<Response>(resolve => {
+                resolveRefresh = resolve
+            })
+
+            const state = feedState()
+            state.feedSyncStatus.value = 'error'
+            state.feedSyncError.value = 'first outage'
+
+            const refresh = State.refreshFeeds(state)
+            await nextTask()
+
+            t.equal(
+                state.feedSyncStatus.value,
+                'syncing',
+                'retry switches an error state to syncing immediately'
+            )
+            t.equal(
+                state.feedSyncError.value,
+                null,
+                'retry clears the old error while the request is active'
+            )
+
+            resolveRefresh(new Response(JSON.stringify({
+                success: true
+            })))
+            await refresh
+
+            t.equal(
+                state.feedSyncStatus.value,
+                'synced',
+                'successful retry marks feed sync as synced'
+            )
+            t.equal(
+                state.feedSyncError.value,
+                null,
+                'successful retry does not restore the old error'
+            )
+        } finally {
+            globalThis.fetch = originalFetch
+            restoreTimeout()
+        }
+    })
+
+test('refreshFeeds retries from error and replaces a second failure',
+    async t => {
+        const originalFetch = globalThis.fetch
+        const restoreTimeout = stubRefreshSafetyTimer()
+        let rejectRefresh:(err:Error) => void = () => {}
+
+        try {
+            globalThis.fetch = async () => new Promise<Response>(
+                (_resolve, reject) => {
+                    rejectRefresh = reject
+                }
+            )
+
+            const state = feedState()
+            state.feedSyncStatus.value = 'error'
+            state.feedSyncError.value = 'first outage'
+
+            const refresh = State.refreshFeeds(state)
+            await nextTask()
+
+            t.equal(
+                state.feedSyncStatus.value,
+                'syncing',
+                'retry enters syncing before the second failure'
+            )
+            t.equal(
+                state.feedSyncError.value,
+                null,
+                'retry removes stale error text before failing again'
+            )
+
+            rejectRefresh(new Error('second outage'))
+            await refresh.catch(() => undefined)
+
+            t.equal(
+                state.feedSyncStatus.value,
+                'error',
+                'second failed retry returns to error state'
+            )
+            t.equal(
+                state.feedSyncError.value,
+                'second outage',
+                'latest retry error replaces the previous message'
+            )
+        } finally {
+            globalThis.fetch = originalFetch
+            restoreTimeout()
+        }
+    })
+
 test('State auth effect loads once for the final rapid auth value',
     async t => {
         const originals = {

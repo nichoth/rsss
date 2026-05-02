@@ -16,6 +16,10 @@ import { billingStatus } from '../src/client/billing-status.js'
 
 type FeedSyncStatus = 'inactive'|'updates'|'syncing'|'error'|'synced'
 
+function nextTask ():Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, 0))
+}
+
 function headerState (
     user:{ did:string; handle:string; avatar?:string }|null = null,
     options:{
@@ -337,6 +341,80 @@ test('Header feed status is hidden for anonymous users', t => {
             root.querySelectorAll('.feed-status .dot').length,
             0,
             'does not render a feed dot when signed out'
+        )
+    } finally {
+        render(null, root)
+        root.remove()
+    }
+})
+
+test('Header feed status exposes only the latest retry error', async t => {
+    const body = document.querySelector('body') as HTMLElement
+    const root = document.createElement('div')
+    body.appendChild(root)
+
+    const user = {
+        did: 'did:plc:test123',
+        handle: 'alice.bsky.social'
+    }
+    const state = headerState(user, {
+        feedSyncStatus: 'error',
+        feedSyncError: 'first outage'
+    })
+
+    try {
+        render(html`<${Header} state=${state} />`, root)
+
+        let status = root.querySelector('.feed-status') as HTMLElement
+        t.equal(
+            status.getAttribute('title'),
+            'first outage',
+            'initial error title exposes the first failure'
+        )
+        t.equal(
+            status.getAttribute('aria-label'),
+            'Feed sync error: first outage',
+            'initial error label exposes the first failure'
+        )
+
+        state.feedSyncStatus.value = 'syncing'
+        state.feedSyncError.value = null
+        await nextTask()
+
+        status = root.querySelector('.feed-status') as HTMLElement
+        t.equal(
+            status.getAttribute('title'),
+            null,
+            'retry syncing state removes the old error title'
+        )
+        t.equal(
+            status.getAttribute('aria-label'),
+            'Feed sync status: syncing',
+            'retry syncing state replaces the old error label'
+        )
+
+        state.feedSyncStatus.value = 'error'
+        state.feedSyncError.value = 'second outage'
+        await nextTask()
+
+        status = root.querySelector('.feed-status') as HTMLElement
+        t.equal(
+            status.getAttribute('title'),
+            'second outage',
+            'retry failure title exposes only the latest error'
+        )
+        t.equal(
+            status.getAttribute('aria-label'),
+            'Feed sync error: second outage',
+            'retry failure label exposes only the latest error'
+        )
+        t.ok(
+            !(status.getAttribute('title') ?? '').includes('first'),
+            'old error is not stacked into the title'
+        )
+        t.ok(
+            !(status.getAttribute('aria-label') ?? '').includes('first'),
+            'old error is not stacked into the label'
         )
     } finally {
         render(null, root)

@@ -22,13 +22,18 @@ export const FeedStatus:FunctionComponent<{
         .reduce((sum, value) => sum + value, 0)
     const error = state.feedSyncError.value ?? 'Feed sync failed'
     const color = DOT_COLORS[status]
+    const label = status === 'updates' && count > 0 ?
+        `Feed sync status: ${count} updates` :
+        `Feed sync status: ${status}`
 
     if (status === 'error') {
         return html`
             <span
+                key=${status}
                 class="feed-status"
                 role="status"
                 aria-live="polite"
+                aria-label=${`Feed sync error: ${error}`}
                 title=${error}
             >
                 <${Dot} color=${color} />
@@ -39,9 +44,11 @@ export const FeedStatus:FunctionComponent<{
 
     return html`
         <span
+            key=${status}
             class="feed-status"
             role="status"
             aria-live="polite"
+            aria-label=${label}
         >
             <${Dot} color=${color} />
             ${status === 'updates' && count > 0 ? count : ''}
