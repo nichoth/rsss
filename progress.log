@@ -3504,3 +3504,35 @@ Thread: https://ampcode.com/threads/unknown
   - Dynamic `IN (?,?,?)` clauses: build `ph = ids.map(() => '?').join(', ')` and
     pass `ids` as the bind array — tested and working with the SQLite WASM layer.
 ---
+
+## 2026-05-01 - US-133
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Evict by per-feed size cap on sync cycle.
+  - Added `evictByFeedSizeCap(db, cacheStorage?):Promise<{feedsTrimmed:number, bytesFreed:number}>`
+    to `src/client/db/cache-eviction.ts`.
+  - For each feed: computes current size (text + images) via SUM queries, compares against
+    effective `max_size_bytes` (per-feed override or site default via `resolveEffectivePolicy`).
+    If over cap, queries items with non-null content/description or cached_images, sorted
+    oldest-first by `updated_at ASC`, skipping the currently-open item ID. Evicts items one
+    by one (null text, delete cached_images, evict Cache Storage URLs) until under cap.
+  - Updated import in `src/client/db/sync.ts` to also import `evictByFeedSizeCap` and added
+    `await evictByFeedSizeCap(db).catch(() => {})` after `evictByMaxAge` in `runSyncCycle`.
+  - Added 5 tests in `test/cache-eviction.ts`: no-op when under cap, per-feed override
+    respected, site default used when no override, oldest-first ordering, currently-open item
+    skipped.
+- Files changed:
+  - `src/client/db/cache-eviction.ts`
+  - `src/client/db/sync.ts`
+  - `test/cache-eviction.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - The `items_updated_at` trigger fires AFTER UPDATE ON items whenever `updated_at` is
+    unchanged — this resets `updated_at` to `datetime('now')`. Test verification SELECTs
+    for evicted items must use a STABLE ordering (guid, id) rather than `updated_at ASC`,
+    because the trigger changes `updated_at` on any UPDATE that nulls content/description.
+  - `evictByFeedSizeCap` opens the Cache Storage bucket lazily (only when the first batch
+    of images needs eviction) to avoid an unnecessary async call when no images are present.
+  - The `queryOneDb` import from `local-db.js` was not previously imported in
+    `cache-eviction.ts`; it was added to support per-feed text and image size SUM queries.
+---

@@ -5,18 +5,24 @@ import {
     openLocalDb,
     setTestMode
 } from '../src/client/db/sqlite-init.js'
-import { evictByMaxAge } from '../src/client/db/cache-eviction.js'
+import {
+    evictByMaxAge,
+    evictByFeedSizeCap
+} from '../src/client/db/cache-eviction.js'
 import {
     setCurrentlyOpenItemId,
     _resetOpenItemRegistry
 } from '../src/client/open-item-registry.js'
 import { upsertFeedCachePolicy } from '../src/client/db/feed-cache-policy.js'
 import { recordCachedImage } from '../src/client/db/cached-images.js'
+import { defaultMaxSizeBytes } from '../src/client/local-first-settings.js'
 
 setTestMode(true, wasmUrl as string)
 
+const OLDER_DATE = '2023-01-01T00:00:00Z'
 const OLD_DATE = '2000-01-01T00:00:00Z'
 const BASE_DATE = '2024-01-01T00:00:00Z'
+const NEWER_DATE = '2025-01-01T00:00:00Z'
 const FUTURE_DATE = '2099-12-31T00:00:00Z'
 
 function mockCacheStorage () {
@@ -268,6 +274,240 @@ test(
                 'img2 evicted'
             )
         } finally {
+            db.close()
+        }
+    }
+)
+
+// --- evictByFeedSizeCap tests ---
+
+test(
+    'evictByFeedSizeCap no-op when feed is under cap',
+    async (t) => {
+        _resetOpenItemRegistry()
+        const db = await openLocalDb('did:test:sizecap-noop')
+        try {
+            db.exec(`
+                INSERT INTO feeds (url, title, created_at, updated_at)
+                VALUES ('https://a.com/feed', 'A',
+                        '${BASE_DATE}', '${BASE_DATE}')
+            `)
+            db.exec(`
+                INSERT INTO items
+                    (feed_id, guid, title, link, content, description,
+                     created_at, updated_at)
+                VALUES (1, 'g1', 'T1', 'http://a', 'abc', NULL,
+                        '${BASE_DATE}', '${BASE_DATE}')
+            `)
+            await upsertFeedCachePolicy(db, 1, {
+                cache_mode: null,
+                max_size_bytes: 10_000,
+                max_age_seconds: null
+            })
+            const { storage } = mockCacheStorage()
+            const result = await evictByFeedSizeCap(db, storage)
+
+            t.equal(result.feedsTrimmed, 0, 'no feeds trimmed')
+            t.equal(result.bytesFreed, 0, 'no bytes freed')
+
+            const rows: Array<{ content: string | null }> = []
+            db.exec({
+                sql: 'SELECT content FROM items',
+                rowMode: 'object',
+                resultRows: rows
+            })
+            t.equal(rows[0].content, 'abc', 'content preserved')
+        } finally {
+            db.close()
+        }
+    }
+)
+
+test(
+    'evictByFeedSizeCap respects per-feed max_size_bytes override',
+    async (t) => {
+        _resetOpenItemRegistry()
+        const db = await openLocalDb('did:test:sizecap-per-feed')
+        try {
+            db.exec(`
+                INSERT INTO feeds (url, title, created_at, updated_at)
+                VALUES
+                    ('https://a.com/feed', 'A', '${BASE_DATE}', '${BASE_DATE}'),
+                    ('https://b.com/feed', 'B', '${BASE_DATE}', '${BASE_DATE}')
+            `)
+            db.exec(`
+                INSERT INTO items
+                    (feed_id, guid, title, link, content, description,
+                     created_at, updated_at)
+                VALUES
+                    (1, 'g1', 'T1', 'http://a', 'hello', 'world',
+                     '${OLD_DATE}', '${OLD_DATE}'),
+                    (2, 'g2', 'T2', 'http://b', 'hello', NULL,
+                     '${OLD_DATE}', '${OLD_DATE}')
+            `)
+            await upsertFeedCachePolicy(db, 1, {
+                cache_mode: null,
+                max_size_bytes: 5,
+                max_age_seconds: null
+            })
+            const { storage } = mockCacheStorage()
+            const result = await evictByFeedSizeCap(db, storage)
+
+            t.equal(result.feedsTrimmed, 1, 'only feed 1 trimmed')
+
+            const rows: Array<{ feed_id: number; content: string | null }> = []
+            db.exec({
+                sql: 'SELECT feed_id, content FROM items ORDER BY feed_id',
+                rowMode: 'object',
+                resultRows: rows
+            })
+            t.equal(rows[0].content, null, 'feed 1 item content evicted')
+            t.equal(rows[1].content, 'hello', 'feed 2 item preserved')
+        } finally {
+            db.close()
+        }
+    }
+)
+
+test(
+    'evictByFeedSizeCap uses site default when no per-feed override',
+    async (t) => {
+        _resetOpenItemRegistry()
+        const saved = defaultMaxSizeBytes.value
+        defaultMaxSizeBytes.value = 5
+        const db = await openLocalDb('did:test:sizecap-default')
+        try {
+            db.exec(`
+                INSERT INTO feeds (url, title, created_at, updated_at)
+                VALUES ('https://a.com/feed', 'A',
+                        '${BASE_DATE}', '${BASE_DATE}')
+            `)
+            db.exec(`
+                INSERT INTO items
+                    (feed_id, guid, title, link, content, description,
+                     created_at, updated_at)
+                VALUES (1, 'g1', 'T1', 'http://a', 'hello world', NULL,
+                        '${OLD_DATE}', '${OLD_DATE}')
+            `)
+            const { storage } = mockCacheStorage()
+            const result = await evictByFeedSizeCap(db, storage)
+
+            t.equal(result.feedsTrimmed, 1, 'feed trimmed using site default')
+            t.ok(result.bytesFreed > 0, 'bytes freed')
+
+            const rows: Array<{ content: string | null }> = []
+            db.exec({
+                sql: 'SELECT content FROM items',
+                rowMode: 'object',
+                resultRows: rows
+            })
+            t.equal(rows[0].content, null, 'content nulled')
+        } finally {
+            defaultMaxSizeBytes.value = saved
+            db.close()
+        }
+    }
+)
+
+test(
+    'evictByFeedSizeCap evicts oldest-first',
+    async (t) => {
+        _resetOpenItemRegistry()
+        const db = await openLocalDb('did:test:sizecap-oldest-first')
+        try {
+            db.exec(`
+                INSERT INTO feeds (url, title, created_at, updated_at)
+                VALUES ('https://a.com/feed', 'A',
+                        '${BASE_DATE}', '${BASE_DATE}')
+            `)
+            db.exec(`
+                INSERT INTO items
+                    (feed_id, guid, title, link, content, description,
+                     created_at, updated_at)
+                VALUES
+                    (1, 'gA', 'A', 'http://a1', 'hello world', NULL,
+                     '${OLDER_DATE}', '${OLDER_DATE}'),
+                    (1, 'gB', 'B', 'http://a2', 'hello world', NULL,
+                     '${OLD_DATE}', '${OLD_DATE}'),
+                    (1, 'gC', 'C', 'http://a3', 'hello world', NULL,
+                     '${NEWER_DATE}', '${NEWER_DATE}')
+            `)
+            await upsertFeedCachePolicy(db, 1, {
+                cache_mode: null,
+                max_size_bytes: 15,
+                max_age_seconds: null
+            })
+            const { storage } = mockCacheStorage()
+            const result = await evictByFeedSizeCap(db, storage)
+
+            t.equal(result.feedsTrimmed, 1, 'feed trimmed')
+
+            const rows: Array<{ guid: string; content: string | null }> = []
+            db.exec({
+                sql: 'SELECT guid, content FROM items ORDER BY guid ASC',
+                rowMode: 'object',
+                resultRows: rows
+            })
+            t.equal(rows[0].content, null, 'item gA evicted')
+            t.equal(rows[1].content, null, 'item gB evicted')
+            t.equal(rows[2].content, 'hello world', 'item gC preserved')
+        } finally {
+            db.close()
+        }
+    }
+)
+
+test(
+    'evictByFeedSizeCap skips currently-open item id',
+    async (t) => {
+        _resetOpenItemRegistry()
+        const db = await openLocalDb('did:test:sizecap-open-item')
+        try {
+            db.exec(`
+                INSERT INTO feeds (url, title, created_at, updated_at)
+                VALUES ('https://a.com/feed', 'A',
+                        '${BASE_DATE}', '${BASE_DATE}')
+            `)
+            db.exec(`
+                INSERT INTO items
+                    (feed_id, guid, title, link, content, description,
+                     created_at, updated_at)
+                VALUES
+                    (1, 'gA', 'A', 'http://a1', 'hello', NULL,
+                     '${OLD_DATE}', '${OLD_DATE}'),
+                    (1, 'gB', 'B', 'http://a2', 'hello world', NULL,
+                     '${OLDER_DATE}', '${OLDER_DATE}')
+            `)
+            await upsertFeedCachePolicy(db, 1, {
+                cache_mode: null,
+                max_size_bytes: 5,
+                max_age_seconds: null
+            })
+
+            const idRows: Array<{ id: number; guid: string }> = []
+            db.exec({
+                sql: 'SELECT id, guid FROM items ORDER BY updated_at ASC',
+                rowMode: 'object',
+                resultRows: idRows
+            })
+            const openId = idRows[0].id
+            setCurrentlyOpenItemId(openId)
+
+            const { storage } = mockCacheStorage()
+            const result = await evictByFeedSizeCap(db, storage)
+
+            t.equal(result.feedsTrimmed, 1, 'feed trimmed')
+
+            const rows: Array<{ guid: string; content: string | null }> = []
+            db.exec({
+                sql: 'SELECT guid, content FROM items ORDER BY updated_at ASC',
+                rowMode: 'object',
+                resultRows: rows
+            })
+            t.equal(rows[0].content, 'hello', 'open item A preserved')
+            t.equal(rows[1].content, null, 'non-open item B evicted')
+        } finally {
+            _resetOpenItemRegistry()
             db.close()
         }
     }
