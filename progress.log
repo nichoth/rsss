@@ -1,9 +1,9 @@
 ## Codebase Patterns
 
 - Feed update UI state in `src/client/state.ts` now uses
-  `feedSyncStatus` and `feedUpdateCounts` as the source of truth. Older
-  `feedUpdateStatus` and `feedsWithUpdates` are computed compatibility
-  views, so writers should update the new signals.
+  `feedSyncStatus`, `feedUpdateCounts`, and `feedSyncError` as the source
+  of truth. Older `feedUpdateStatus` and `feedsWithUpdates` are computed
+  compatibility views, so writers should update the new signals.
 - The `items_updated_at` trigger in `src/shared/schema.ts` fires on any
   UPDATE to items rows and sets `updated_at = datetime('now')`. Cache
   eviction tests that verify post-eviction item ordering must NOT use
@@ -58,6 +58,32 @@ Thread: https://ampcode.com/threads/unknown
   - SSE `feed-updates-available` carries feed IDs, not counts, so state
     preserves existing counts and uses `1` for newly observed IDs until a
     bootstrap response provides exact counts.
+---
+
+## 2026-05-02 13:36 PDT - US-149
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Updated the header feed status indicator to render
+  one canonical dot for every feed sync state.
+  - Mapped `feedSyncStatus` to dot colors for inactive, updates, syncing,
+    error, and synced.
+  - Rendered the summed pending update count for the updates state.
+  - Added `feedSyncError` to app state and exposed it through the error
+    state's `title` attribute.
+  - Kept anonymous users from seeing the header feed dot.
+  - Narrowed an older sponsor iframe test to assert security attributes for
+    the currently rendered iframe.
+- Files changed:
+  - `src/client/components/feed-status.ts`
+  - `src/client/state.ts`
+  - `test/header-component.ts`
+  - `test/local-first-opfs-persistence.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Feed status UI should read `feedSyncStatus`, `feedUpdateCounts`, and
+    `feedSyncError`; `feedUpdateStatus` is only a legacy compatibility view.
+  - `htm` renders `title=${null}` as an empty attribute in this component
+    path, so branch the markup when an attribute must be omitted.
 ---
 
 ## 2026-05-02 13:19 PDT - US-146

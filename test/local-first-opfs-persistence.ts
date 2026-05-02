@@ -243,6 +243,7 @@ function makeState ():AppState {
         feedSyncStatus: signal<
             'inactive'|'updates'|'syncing'|'error'|'synced'
         >('inactive'),
+        feedSyncError: signal<string|null>(null),
         feedUpdateCounts: signal<Record<string, number>>({}),
         feedUpdateStatus: signal<'synced'|'updates'>('synced'),
         feedsWithUpdates: signal<string[]>([]),

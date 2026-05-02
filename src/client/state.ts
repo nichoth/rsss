@@ -171,6 +171,7 @@ export type AppState = {
     feedSyncStatus:Signal<
         'inactive'|'updates'|'syncing'|'error'|'synced'
     >,
+    feedSyncError:Signal<string|null>,
     feedUpdateCounts:Signal<Record<string, number>>,
     feedUpdateStatus:ReadonlySignal<'synced'|'updates'>,
     feedsWithUpdates:ReadonlySignal<string[]>,
@@ -228,6 +229,7 @@ export function State ():AppState {
         feedSyncStatus: signal<
             'inactive'|'updates'|'syncing'|'error'|'synced'
         >('inactive'),
+        feedSyncError: signal<string|null>(null),
         feedUpdateCounts: signal<Record<string, number>>({}),
         // Compatibility views for existing /updates code. New writers
         // update feedSyncStatus/feedUpdateCounts as the single source.

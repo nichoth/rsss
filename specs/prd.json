@@ -2371,7 +2371,7 @@
         "Verify in browser using dev-browser skill: load app while signed in, confirm dot color matches state and count appears when status is 'updates'"
       ],
       "priority": 149,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
