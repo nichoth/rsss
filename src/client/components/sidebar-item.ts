@@ -10,7 +10,7 @@ export const SidebarItem:FunctionComponent<{
     starred:boolean  // two options -- starred, or all items
 }> = function (props) {
     const { state, starred } = props
-    const { showStarredOnly, counts, route } = state
+    const { showStarredOnly, showUnreadOnly, counts, route } = state
 
     const isActive = useComputed<boolean>(() => {
         // Not active if we're on a feed-specific route
@@ -36,7 +36,11 @@ export const SidebarItem:FunctionComponent<{
     >
         <span>${props.children}</span>
         <span class="badge">
-            ${starred ? counts.value.starred : counts.value.unread}
+            ${starred ?
+                counts.value.starred :
+                (showUnreadOnly.value ?
+                    counts.value.unread :
+                    counts.value.total)}
         </span>
     </button>`
 }
