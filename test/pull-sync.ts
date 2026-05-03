@@ -121,6 +121,101 @@ async function withMockedNow (
     }
 }
 
+test('full sync writes last_pulled_at on insert', async (t) => {
+    storeContent.value = true
+    const db = await openLocalDb('did:test:pull-cursor-insert')
+    try {
+        const syncData = {
+            feeds: [{ ...FEED, last_pulled_at: '2026-04-15 00:00:00' }],
+            items: [],
+            syncedAt: '2026-04-16 00:00:00',
+            latestUpdatedAt: '2026-04-15 00:00:00',
+            isFullSync: true
+        }
+        await pullSync(db, makeFetch(syncData))
+
+        const feed = queryOne<{ last_pulled_at:string|null }>(
+            db, 'SELECT last_pulled_at FROM feeds WHERE id = 1'
+        )
+        t.equal(
+            feed?.last_pulled_at,
+            '2026-04-15 00:00:00',
+            'last_pulled_at is written on insert'
+        )
+    } finally {
+        db.close()
+    }
+})
+
+test('full sync writes last_pulled_at as NULL when server sends NULL',
+    async (t) => {
+        storeContent.value = true
+        const db = await openLocalDb('did:test:pull-cursor-null')
+        try {
+            const syncData = {
+                feeds: [{ ...FEED, last_pulled_at: null }],
+                items: [],
+                syncedAt: '2026-04-16 00:00:00',
+                latestUpdatedAt: '2026-04-15 00:00:00',
+                isFullSync: true
+            }
+            await pullSync(db, makeFetch(syncData))
+
+            const feed = queryOne<{ last_pulled_at:string|null }>(
+                db, 'SELECT last_pulled_at FROM feeds WHERE id = 1'
+            )
+            t.equal(
+                feed?.last_pulled_at,
+                null,
+                'last_pulled_at is NULL for never-refreshed feeds'
+            )
+        } finally {
+            db.close()
+        }
+    }
+)
+
+test('incremental sync updates last_pulled_at on existing rows',
+    async (t) => {
+        storeContent.value = true
+        const db = await openLocalDb('did:test:pull-cursor-update')
+        try {
+            const initial = {
+                feeds: [{ ...FEED, last_pulled_at: null }],
+                items: [],
+                syncedAt: '2026-04-15 00:00:00',
+                latestUpdatedAt: '2026-04-15 00:00:00',
+                isFullSync: true
+            }
+            await pullSync(db, makeFetch(initial))
+
+            const after = {
+                feeds: [{
+                    ...FEED,
+                    last_pulled_at: '2026-04-20 00:00:00',
+                    updated_at: '2026-04-20 00:00:00'
+                }],
+                items: [],
+                syncedAt: '2026-04-21 00:00:00',
+                latestUpdatedAt: '2026-04-20 00:00:00',
+                isFullSync: false
+            }
+            await pullSync(db, makeFetch(after))
+
+            const feed = queryOne<{ last_pulled_at:string|null }>(
+                db, 'SELECT last_pulled_at FROM feeds WHERE id = 1'
+            )
+            t.equal(
+                feed?.last_pulled_at,
+                '2026-04-20 00:00:00',
+                'last_pulled_at is updated via ON CONFLICT'
+            )
+        } finally {
+            db.close()
+        }
+    }
+)
+
 test('full sync upserts feeds and items', async (t) => {
     storeContent.value = true
     const db = await openLocalDb('did:test:pull-full')

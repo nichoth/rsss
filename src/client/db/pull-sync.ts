@@ -135,14 +135,15 @@ async function upsertFeed (
     await execDb(db, {
         sql: `INSERT INTO feeds
             (id, url, title, description, site_url, last_fetched,
-             created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             last_pulled_at, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 url = excluded.url,
                 title = excluded.title,
                 description = excluded.description,
                 site_url = excluded.site_url,
                 last_fetched = excluded.last_fetched,
+                last_pulled_at = excluded.last_pulled_at,
                 updated_at = excluded.updated_at`,
         bind: [
             feed.id as number,
@@ -151,6 +152,7 @@ async function upsertFeed (
             (feed.description as string|null) ?? null,
             (feed.site_url as string|null) ?? null,
             (feed.last_fetched as string|null) ?? null,
+            (feed.last_pulled_at as string|null) ?? null,
             feed.created_at as string,
             feed.updated_at as string
         ]

@@ -93,6 +93,7 @@ const ALARM_REFRESH_CURSOR_KEY = 'alarm_refresh_cursor'
 const PENDING_DELETION_KEY = 'pending_deletion'
 const MIGRATION_STATE_KEY = 'schema_migration'
 const USER_DO_MIGRATION_VERSION = 5
+const FEEDS_UPDATED_AT_BUMP_KEY = 'feeds_updated_at_bump_for_last_pulled_at'
 const SYNC_PAGE_LIMIT = 500
 const FETCH_FULL_THROTTLE_PREFIX = 'fetch_full:'
 const MAX_PARSED_FEED_ITEMS = 1000
@@ -102,8 +103,8 @@ const MAX_FEED_CONTENT_LENGTH = 1024 * 1024
 const FEED_TOO_LARGE_ERROR = 'feed too large'
 const FEED_TOO_LARGE_STATUS = 413
 const FEED_SYNC_COLUMNS = `
-    id, url, title, description, site_url, last_fetched, last_error,
-    last_status, created_at, updated_at
+    id, url, title, description, site_url, last_fetched, last_pulled_at,
+    last_error, last_status, created_at, updated_at
 `
 const ITEM_COLUMNS = `
     items.id, items.feed_id, items.guid, items.title, items.link,
@@ -368,6 +369,20 @@ export class UserDO extends DurableObject<Env> {
             await this.ctx.storage.put(MIGRATION_STATE_KEY, {
                 migration_v: USER_DO_MIGRATION_VERSION
             })
+        }
+
+        // One-time bump: re-emit every feed row to clients so they
+        // pick up the newly-projected `last_pulled_at` column.
+        // Guarded by its own storage key so it runs at most once
+        // per UserDO regardless of the schema migration version.
+        const feedsBumpDone = await this.ctx.storage.get<boolean>(
+            FEEDS_UPDATED_AT_BUMP_KEY
+        )
+        if (!feedsBumpDone) {
+            this.sql.exec(
+                "UPDATE feeds SET updated_at = datetime('now')"
+            )
+            await this.ctx.storage.put(FEEDS_UPDATED_AT_BUMP_KEY, true)
         }
 
         // 3. Create indexes and triggers (shared schema) - idempotent
@@ -839,22 +854,36 @@ export class UserDO extends DurableObject<Env> {
             const limit = parseInt(c.req.query('limit') || '50', 10)
             const offset = parseInt(c.req.query('offset') || '0', 10)
 
+            // Reading-list cursor filter: only items whose feed has been
+            // refreshed at least once and whose pub_date is at-or-before
+            // that cursor are visible. Items with NULL pub_date are
+            // admitted unconditionally so they cannot become invisible.
+            const cursorPredicate =
+                ' AND (' +
+                ' items.pub_date IS NULL' +
+                ' OR (' +
+                ' feeds.last_pulled_at IS NOT NULL' +
+                ' AND items.pub_date <= feeds.last_pulled_at' +
+                ' )' +
+                ' )'
+
             let query = `SELECT ${ITEM_SYNC_COLUMNS} ` +
-                'FROM items JOIN feeds ON items.feed_id = feeds.id WHERE 1=1'
+                'FROM items JOIN feeds ON items.feed_id = feeds.id WHERE 1=1' +
+                cursorPredicate
             const params: (string | number)[] = []
 
             if (feedId) {
-                query += ' AND feed_id = ?'
+                query += ' AND items.feed_id = ?'
                 params.push(parseInt(feedId, 10))
             }
 
             if (isRead !== undefined) {
-                query += ' AND is_read = ?'
+                query += ' AND items.is_read = ?'
                 params.push(isRead === 'true' ? 1 : 0)
             }
 
             if (isStarred !== undefined) {
-                query += ' AND is_starred = ?'
+                query += ' AND items.is_starred = ?'
                 params.push(isStarred === 'true' ? 1 : 0)
             }
 
@@ -864,20 +893,23 @@ export class UserDO extends DurableObject<Env> {
 
             const items = this.sql.exec(query, ...params).toArray()
 
-            // Get total count
-            let countQuery = 'SELECT COUNT(*) as count FROM items WHERE 1=1'
+            // Get total count -- mirror the cursor predicate so
+            // pagination totals match the visible page.
+            let countQuery = 'SELECT COUNT(*) as count FROM items' +
+                ' JOIN feeds ON items.feed_id = feeds.id WHERE 1=1' +
+                cursorPredicate
             const countParams: (string | number)[] = []
 
             if (feedId) {
-                countQuery += ' AND feed_id = ?'
+                countQuery += ' AND items.feed_id = ?'
                 countParams.push(parseInt(feedId, 10))
             }
             if (isRead !== undefined) {
-                countQuery += ' AND is_read = ?'
+                countQuery += ' AND items.is_read = ?'
                 countParams.push(isRead === 'true' ? 1 : 0)
             }
             if (isStarred !== undefined) {
-                countQuery += ' AND is_starred = ?'
+                countQuery += ' AND items.is_starred = ?'
                 countParams.push(isStarred === 'true' ? 1 : 0)
             }
 

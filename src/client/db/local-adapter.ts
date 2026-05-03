@@ -153,7 +153,17 @@ export function createLocalAdapter (db:Sqlite3Db):DbAdapter {
                 offset = 0
             } = options
 
-            let where = ' WHERE 1=1'
+            // Mirror the server's reading-list cursor predicate. Items
+            // with NULL pub_date pass unconditionally so they cannot
+            // become invisible when their feed has no cursor yet.
+            let where = ' WHERE 1=1' +
+                ' AND (' +
+                ' items.pub_date IS NULL' +
+                ' OR (' +
+                ' feeds.last_pulled_at IS NOT NULL' +
+                ' AND items.pub_date <= feeds.last_pulled_at' +
+                ' )' +
+                ' )'
             const params:(string|number)[] = []
 
             if (feedId !== undefined) {
@@ -171,7 +181,9 @@ export function createLocalAdapter (db:Sqlite3Db):DbAdapter {
 
             const countRow = await queryOneDb<{ count:number }>(
                 db,
-                'SELECT COUNT(*) as count FROM items' + where,
+                'SELECT COUNT(*) as count FROM items' +
+                ' JOIN feeds ON items.feed_id = feeds.id' +
+                where,
                 params
             )
 

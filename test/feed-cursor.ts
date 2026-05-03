@@ -648,3 +648,302 @@ test('GET /feeds/:id/pending honors limit of 50', async t => {
 
     t.equal(body.items.length, 50, 'returns at most 50 items')
 })
+
+// ---- GET /items reading-list cursor filter tests ----
+// These guard the change made for 003-defer-new-feed-items: items
+// from feeds whose `last_pulled_at IS NULL` MUST NOT appear in the
+// reading list, and items past the cursor are also excluded.
+
+interface ItemsHarness {
+    app:{
+        request:(path:string, init?:RequestInit) => Promise<Response>
+    }
+    capturedListQuery:{ value:string }
+    capturedCountQuery:{ value:string }
+}
+
+function createItemsHarness (opts:{
+    items?:Array<{
+        id:number
+        feed_id:number
+        pub_date:string|null
+        title:string
+    }>
+    feeds?:Array<{
+        id:number
+        last_pulled_at:string|null
+    }>
+} = {}):ItemsHarness {
+    const items = opts.items ?? []
+    const feeds = opts.feeds ?? []
+    const capturedListQuery = { value: '' }
+    const capturedCountQuery = { value: '' }
+
+    const userDo = Object.create(UserDO.prototype) as CursorDoType
+
+    function applyCursor (
+        rows:typeof items,
+        feedRows:typeof feeds
+    ):typeof items {
+        const byFeed = new Map(feedRows.map(f => [f.id, f.last_pulled_at]))
+        return rows.filter(item => {
+            if (item.pub_date === null) return true
+            const cursor = byFeed.get(item.feed_id) ?? null
+            if (cursor === null) return false
+            return item.pub_date <= cursor
+        })
+    }
+
+    userDo.sql = {
+        exec (query:string, ..._params:unknown[]) {
+            const upper = query.toUpperCase()
+            if (
+                upper.includes('SELECT') &&
+                upper.includes('FROM ITEMS') &&
+                upper.includes('JOIN FEEDS') &&
+                !upper.includes('COUNT(') &&
+                !upper.includes('PENDING')
+            ) {
+                capturedListQuery.value = query
+                // The handler is expected to filter via the cursor
+                // predicate inside SQL. The harness honors that by
+                // applying the predicate only if the query references
+                // `last_pulled_at`; otherwise it returns the raw set
+                // so an unfiltered handler regresses these tests.
+                const rows = query.includes('last_pulled_at')
+                    ? applyCursor(items, feeds)
+                    : items
+                return result(rows.map(i => ({
+                    id: i.id,
+                    feed_id: i.feed_id,
+                    title: i.title,
+                    pub_date: i.pub_date,
+                    feed_title: 'Feed'
+                })))
+            }
+            if (
+                upper.includes('SELECT COUNT(*)') &&
+                upper.includes('FROM ITEMS')
+            ) {
+                capturedCountQuery.value = query
+                const rows = query.includes('last_pulled_at')
+                    ? applyCursor(items, feeds)
+                    : items
+                return {
+                    toArray: () => [{ count: rows.length }],
+                    one: () => ({ count: rows.length })
+                } as unknown as QueryResult
+            }
+            return result([])
+        }
+    }
+
+    userDo.ctx = {
+        storage: {
+            async get<T> (_key:string) { return undefined as T|undefined },
+            async put (_key:string, _value:unknown) {},
+            async delete (_key:string) {}
+        },
+        waitUntil (_p:Promise<unknown>) {}
+    }
+
+    userDo.fetchFeed = async () => {}
+    userDo.broadcast = () => {}
+    userDo.getFeedsWithUpdates = () => []
+
+    return {
+        app: userDo.createRouter(),
+        capturedListQuery,
+        capturedCountQuery
+    }
+}
+
+test('GET /items list query references last_pulled_at cursor', async t => {
+    const { app, capturedListQuery, capturedCountQuery } = createItemsHarness()
+    await app.request('/items')
+
+    t.ok(
+        capturedListQuery.value.includes('last_pulled_at'),
+        'list query references last_pulled_at'
+    )
+    t.ok(
+        capturedListQuery.value.includes('pub_date'),
+        'list query compares against pub_date'
+    )
+    t.ok(
+        capturedCountQuery.value.includes('last_pulled_at'),
+        'count query references last_pulled_at'
+    )
+})
+
+test('GET /items excludes items from feeds with NULL cursor', async t => {
+    const { app } = createItemsHarness({
+        feeds: [
+            { id: 1, last_pulled_at: null },
+            { id: 2, last_pulled_at: '2026-04-15' }
+        ],
+        items: [
+            { id: 10, feed_id: 1, pub_date: '2026-04-01', title: 'Hidden' },
+            { id: 11, feed_id: 2, pub_date: '2026-04-10', title: 'Visible' }
+        ]
+    })
+
+    const res = await app.request('/items')
+    const body = await res.json() as {
+        items:Array<{ id:number; title:string }>
+        total:number
+    }
+
+    t.equal(body.items.length, 1, 'one item returned')
+    t.equal(body.items[0].title, 'Visible', 'visible item is from feed 2')
+    t.equal(body.total, 1, 'count reflects cursor filter')
+})
+
+test('GET /items excludes items past the cursor on synced feeds', async t => {
+    const { app } = createItemsHarness({
+        feeds: [
+            { id: 1, last_pulled_at: '2026-04-10' }
+        ],
+        items: [
+            { id: 10, feed_id: 1, pub_date: '2026-04-01', title: 'Old' },
+            { id: 11, feed_id: 1, pub_date: '2026-04-15', title: 'Newer' }
+        ]
+    })
+
+    const res = await app.request('/items')
+    const body = await res.json() as {
+        items:Array<{ title:string }>
+        total:number
+    }
+
+    t.equal(body.items.length, 1, 'one item returned')
+    t.equal(body.items[0].title, 'Old', 'item before cursor is included')
+    t.equal(body.total, 1, 'count matches list')
+})
+
+// ---- US2 regression: refresh promotes deferred posts ----
+
+test('advanceFeedCursor SQL sets last_pulled_at = MAX(pub_date)',
+    async t => {
+        let cursorSql = ''
+        const userDo = Object.create(UserDO.prototype) as {
+            sql:{ exec:(q:string, ...p:unknown[]) => QueryResult }
+            getFeedsWithUpdates:() => string[]
+            broadcast:() => void
+            advanceFeedCursor:(feedId:number) => void
+        }
+        userDo.sql = {
+            exec (query:string, ..._params:unknown[]) {
+                if (query.includes('UPDATE feeds SET last_pulled_at')) {
+                    cursorSql = query
+                }
+                return result([])
+            }
+        }
+        userDo.getFeedsWithUpdates = () => []
+        userDo.broadcast = () => {}
+
+        userDo.advanceFeedCursor(1)
+
+        t.ok(
+            cursorSql.includes('MAX(pub_date)'),
+            'SQL assigns MAX(pub_date) to last_pulled_at'
+        )
+        t.ok(
+            cursorSql.includes('WHERE feed_id = ?'),
+            'SQL filters items to the target feed'
+        )
+        t.ok(
+            cursorSql.includes('pub_date IS NOT NULL'),
+            'SQL guards against NULL pub_date'
+        )
+    }
+)
+
+test('US2: refresh of NULL-cursor feed advances exactly once', async t => {
+    const { app, cursorUpdates } = createCursorHarness()
+
+    const res = await app.request('/feeds/1/refresh', { method: 'POST' })
+
+    t.equal(res.status, 200, 'refresh returns 200')
+    t.equal(
+        cursorUpdates.length,
+        1,
+        'NULL-cursor feed gets advanced once on first refresh'
+    )
+    t.equal(
+        cursorUpdates[0],
+        1,
+        'cursor advance targets the right feed id'
+    )
+})
+
+test('US2: full refresh advances cursor on every subscribed feed',
+    async t => {
+        // Multi-feed harness: two feeds, both NULL cursor.
+        const userDo = Object.create(UserDO.prototype) as CursorDoType
+        const cursorIds:number[] = []
+        const waitUntilPromises:Promise<unknown>[] = []
+        const feeds = [
+            feedRow(1, 'https://a.example/feed', null),
+            feedRow(2, 'https://b.example/feed', null)
+        ]
+
+        userDo.sql = {
+            exec (query:string, ...params:unknown[]) {
+                if (query.includes('SELECT * FROM feeds')) {
+                    return result([...feeds])
+                }
+                if (
+                    query.includes('UPDATE feeds SET last_pulled_at')
+                ) {
+                    cursorIds.push(params[params.length - 1] as number)
+                }
+                return result([])
+            }
+        }
+        userDo.ctx = {
+            storage: {
+                async get<T> (_k:string) { return undefined as T|undefined },
+                async put (_k:string, _v:unknown) {},
+                async delete (_k:string) {}
+            },
+            waitUntil (p) { waitUntilPromises.push(p) }
+        }
+        userDo.fetchFeed = async () => {}
+        userDo.broadcast = () => {}
+        userDo.getFeedsWithUpdates = () => []
+
+        const res = await userDo.createRouter()
+            .request('/feeds/refresh', { method: 'POST' })
+        await Promise.all(waitUntilPromises)
+
+        t.equal(res.status, 200, 'full refresh returns 200')
+        t.deepEqual(
+            cursorIds.sort(),
+            [1, 2],
+            'every subscribed feed had its cursor advanced'
+        )
+    }
+)
+
+test('GET /items includes items with NULL pub_date', async t => {
+    const { app } = createItemsHarness({
+        feeds: [
+            { id: 1, last_pulled_at: null }
+        ],
+        items: [
+            { id: 10, feed_id: 1, pub_date: null, title: 'No date' }
+        ]
+    })
+
+    const res = await app.request('/items')
+    const body = await res.json() as {
+        items:Array<{ title:string }>
+        total:number
+    }
+
+    t.equal(body.items.length, 1, 'NULL pub_date item is visible')
+    t.equal(body.items[0].title, 'No date', 'correct item returned')
+    t.equal(body.total, 1, 'count includes the NULL pub_date item')
+})

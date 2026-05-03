@@ -12,12 +12,19 @@ import type { Sqlite3Db } from '../src/client/db/sqlite-init.js'
 setTestMode(true, wasmUrl as string)
 
 async function seedDb (db:Sqlite3Db) {
+    // Both feeds are seeded with `last_pulled_at` past the items'
+    // pub_dates so the reading-list cursor filter does not hide
+    // them. Tests that exercise the cursor explicitly seed their
+    // own fixture (see seedCursorDb below).
     db.exec(`
-        INSERT INTO feeds (url, title, created_at, updated_at)
+        INSERT INTO feeds
+            (url, title, last_pulled_at, created_at, updated_at)
         VALUES
             ('https://example.com/feed1', 'Feed One',
+             '2024-12-31T00:00:00Z',
              '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z'),
             ('https://example.com/feed2', 'Feed Two',
+             '2024-12-31T00:00:00Z',
              '2024-01-02T00:00:00Z', '2024-01-02T00:00:00Z');
 
         INSERT INTO items
@@ -680,3 +687,85 @@ test('items table exposes full_content columns', async (t) => {
         db.close()
     }
 })
+
+// ---- Reading-list cursor filter parity tests ----
+// These mirror the server's `last_pulled_at` filter so the
+// local-first read path returns the same set as the remote one.
+
+async function seedCursorDb (db:Sqlite3Db) {
+    db.exec(`
+        INSERT INTO feeds
+            (id, url, title, last_pulled_at,
+             created_at, updated_at)
+        VALUES
+            (1, 'https://example.com/synced', 'Synced',
+             '2026-04-15T00:00:00Z',
+             '2026-04-01T00:00:00Z', '2026-04-15T00:00:00Z'),
+            (2, 'https://example.com/unsynced', 'Unsynced',
+             NULL,
+             '2026-04-01T00:00:00Z', '2026-04-15T00:00:00Z');
+
+        INSERT INTO items
+            (feed_id, guid, title, link, is_read, is_starred,
+             created_at, updated_at, pub_date)
+        VALUES
+            (1, 'synced-old', 'Synced old',
+             'https://example.com/synced/old', 0, 0,
+             '2026-04-01T00:00:00Z', '2026-04-01T00:00:00Z',
+             '2026-04-01T00:00:00Z'),
+            (1, 'synced-new', 'Synced new',
+             'https://example.com/synced/new', 0, 0,
+             '2026-04-20T00:00:00Z', '2026-04-20T00:00:00Z',
+             '2026-04-20T00:00:00Z'),
+            (2, 'unsynced-1', 'Unsynced one',
+             'https://example.com/unsynced/1', 0, 0,
+             '2026-04-10T00:00:00Z', '2026-04-10T00:00:00Z',
+             '2026-04-10T00:00:00Z'),
+            (1, 'no-date', 'No date',
+             'https://example.com/synced/no-date', 0, 0,
+             '2026-04-05T00:00:00Z', '2026-04-05T00:00:00Z',
+             NULL);
+    `)
+}
+
+test('local getItems hides items from feeds with NULL cursor', async (t) => {
+    const db = await openLocalDb('did:test:cursor-null')
+    await seedCursorDb(db)
+    const adapter = createLocalAdapter(db)
+    try {
+        const result = await adapter.getItems()
+        const titles = result.items.map(i => i.title).sort()
+        t.deepEqual(
+            titles,
+            ['No date', 'Synced old'],
+            'only items from synced feeds (and NULL pub_date) are visible'
+        )
+        t.equal(
+            result.total,
+            2,
+            'total reflects cursor filter'
+        )
+    } finally {
+        db.close()
+    }
+})
+
+test('local getItems hides items past the cursor on synced feeds',
+    async (t) => {
+        const db = await openLocalDb('did:test:cursor-past')
+        await seedCursorDb(db)
+        const adapter = createLocalAdapter(db)
+        try {
+            const result = await adapter.getItems({ feedId: 1 })
+            const titles = result.items.map(i => i.title).sort()
+            t.deepEqual(
+                titles,
+                ['No date', 'Synced old'],
+                'newer items past the cursor are hidden'
+            )
+            t.equal(result.total, 2, 'total reflects cursor filter')
+        } finally {
+            db.close()
+        }
+    }
+)
