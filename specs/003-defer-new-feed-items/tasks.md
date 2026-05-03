@@ -29,10 +29,10 @@ independent implementation and testing of each story.
 **Purpose**: No new project scaffolding is required. This phase only
 captures the prep work needed to begin implementation cleanly.
 
-- [ ] T001 Confirm working tree is clean and on branch
+- [X] T001 Confirm working tree is clean and on branch
   `003-defer-new-feed-items` via `git status` from the repo root, so
   per-task commits stay scoped to this feature.
-- [ ] T002 Run `npm install` (idempotent) and then `npm test` to
+- [X] T002 Run `npm install` (idempotent) and then `npm test` to
   capture a baseline pass before changes; record any pre-existing
   flaky tests so they are not attributed to this feature.
 
@@ -51,7 +51,7 @@ the column to be populated client-side.
 same commit/PR per the constitution; they are listed as separate
 tasks for traceability only.
 
-- [ ] T003 Widen `FEED_SYNC_COLUMNS` in
+- [X] T003 Widen `FEED_SYNC_COLUMNS` in
   `/Users/nick/code/rsss/src/server/durable-objects/index.ts` to
   include `last_pulled_at` (currently 4 columns at the constant
   declaration; new list per `contracts/api-sync.md`:
@@ -59,7 +59,7 @@ tasks for traceability only.
   last_pulled_at, last_error, last_status, created_at, updated_at`).
   Verify the SELECT used by `/api/sync` uses this constant so the
   payload picks up the column without further edits.
-- [ ] T004 Update `upsertFeed` in
+- [X] T004 Update `upsertFeed` in
   `/Users/nick/code/rsss/src/client/db/pull-sync.ts` to include
   `last_pulled_at` in (a) the INSERT column list, (b) the bind
   vector (sourced from the wrapped row), and (c) the
@@ -67,7 +67,7 @@ tasks for traceability only.
   `last_pulled_at = excluded.last_pulled_at`. The client MUST NOT
   write this column from any other path (it is server-authoritative
   per data-model.md).
-- [ ] T005 Add a one-time, idempotent migration in
+- [X] T005 Add a one-time, idempotent migration in
   `/Users/nick/code/rsss/src/server/durable-objects/index.ts` that
   bumps `updated_at` for every feed row so existing client SQLite
   databases re-pull the row and pick up the newly-projected
@@ -96,21 +96,21 @@ add completing.
 
 ### Tests for User Story 1
 
-- [ ] T006 [P] [US1] Add an integration test in
+- [X] T006 [P] [US1] Add an integration test in
   `/Users/nick/code/rsss/test/feed-cursor.ts` (extending the existing
   file or adding sibling cases) that asserts: given a feed with
   `last_pulled_at IS NULL` and items with various `pub_date` values,
   the server query used by `GET /api/items` returns zero items for
   that feed. Cover the count(*) variant too so pagination totals
   match. Test MUST FAIL before T009 lands.
-- [ ] T007 [P] [US1] Add an integration test alongside
+- [X] T007 [P] [US1] Add an integration test alongside
   `/Users/nick/code/rsss/test/local-adapter.ts` that asserts:
   `localAdapter.getItems()` applies the same cursor predicate as the
   server. Use a fixture local SQLite with two feeds — one with a
   populated cursor, one with `last_pulled_at IS NULL` — and assert
   only items from the first feed are returned. Test MUST FAIL before
   T010 lands.
-- [ ] T008 [P] [US1] Add a test in
+- [X] T008 [P] [US1] Add a test in
   `/Users/nick/code/rsss/test/pull-sync.ts` (or a new sibling file
   if cleaner) that asserts the wrapped feed payload includes
   `last_pulled_at` and that `upsertFeed` writes it to the local DB
@@ -119,7 +119,7 @@ add completing.
 
 ### Implementation for User Story 1
 
-- [ ] T009 [US1] In
+- [X] T009 [US1] In
   `/Users/nick/code/rsss/src/server/durable-objects/index.ts`, modify
   the `GET /items` handler (the SQL that joins `feeds` on
   `items.feed_id = feeds.id`) to add the cursor predicate exactly as
@@ -129,19 +129,19 @@ add completing.
   identical predicate to the count(*) query that populates `total`,
   so pagination is consistent. Do NOT change `GET /feeds/:id/pending`
   or any per-feed unread-count query (FR-009).
-- [ ] T010 [US1] In
+- [X] T010 [US1] In
   `/Users/nick/code/rsss/src/client/db/local-adapter.ts`, modify
   `getItems()` to JOIN `items` with `feeds` on `feed_id` (if not
   already joined) and apply the same predicate from T009. Apply it to
   the count query as well. Do NOT change other adapter methods.
-- [ ] T011 [US1] In
+- [X] T011 [US1] In
   `/Users/nick/code/rsss/src/client/state.ts`, locate the add-feed
   success branch (search for the `addFeed` handler and the call to
   `loadItems(state)` flagged in research.md R7) and remove the
   `loadItems(...)` call. Keep `loadFeeds(...)` and `loadCounts(...)`
   in place. Wrap any sequential signal updates in `batch(() => ...)`
   per the global CLAUDE.md guidance on `@preact/signals`.
-- [ ] T012 [US1] Local browser verification of US1 per quickstart
+- [X] T012 [US1] Local browser verification of US1 per quickstart
   Step 2 (and the AC1, AC2, AC3, AC4 scenarios in spec.md):
   `npm start`, log in, note baseline reading list and counter, add a
   feed with ≥3 posts, confirm the reading list is unchanged, the
@@ -175,14 +175,14 @@ fails, treat that as a defect in this feature and fix it under T015.
 
 ### Tests for User Story 2
 
-- [ ] T013 [P] [US2] Add an integration test in
+- [X] T013 [P] [US2] Add an integration test in
   `/Users/nick/code/rsss/test/feed-cursor.ts` that asserts: starting
   from a feed with `last_pulled_at IS NULL` and N items, calling the
   server's `POST /feeds/refresh` flow (or `advanceFeedCursor`
   directly, whichever the test harness exposes) sets
   `last_pulled_at = MAX(items.pub_date)` and the subsequent
   `GET /items` query returns those N items. Covers US2 AC1.
-- [ ] T014 [P] [US2] Add an integration test in
+- [X] T014 [P] [US2] Add an integration test in
   `/Users/nick/code/rsss/test/feed-cursor.ts` for the mixed case
   (US2 AC2): M items pre-existing on a feed already at-cursor + N
   items on a freshly-added feed. After refresh, all M+N items are
@@ -191,7 +191,7 @@ fails, treat that as a defect in this feature and fix it under T015.
 
 ### Implementation for User Story 2
 
-- [ ] T015 [US2] No code change is expected here per research.md R2
+- [X] T015 [US2] No code change is expected here per research.md R2
   and R6. Verify by reading the existing `POST /feeds/refresh` and
   `POST /feeds/:id/refresh` handlers in
   `/Users/nick/code/rsss/src/server/durable-objects/index.ts` to
@@ -200,7 +200,7 @@ fails, treat that as a defect in this feature and fix it under T015.
   is absent for the NULL-cursor case, add it so the new feed's
   cursor gets set on first refresh; otherwise, mark this task done
   with a one-line note in the PR description.
-- [ ] T016 [US2] Local browser verification of US2 per quickstart
+- [X] T016 [US2] Local browser verification of US2 per quickstart
   Step 3 and Step 9 (multiple feeds added in rapid succession). With
   US1 already verified, click "Refresh Feeds" and confirm the new
   feed's posts appear in correct chronological position, the counter
@@ -231,7 +231,7 @@ sums correctly).
 
 ### Tests for User Story 3
 
-- [ ] T017 [P] [US3] If feasible to assert at the unit level, add a
+- [X] T017 [P] [US3] If feasible to assert at the unit level, add a
   test alongside
   `/Users/nick/code/rsss/test/sync.ts` (or `sync-cycle.ts` /
   `sync-invariant-static.mjs`, whichever is the closest fit) that
@@ -244,14 +244,14 @@ sums correctly).
 
 ### Implementation for User Story 3
 
-- [ ] T018 [US3] No code change is expected per research.md R6.
+- [X] T018 [US3] No code change is expected per research.md R6.
   Verify by reading the SSE handler in
   `/Users/nick/code/rsss/src/client/state.ts` (the
   `feed-updates-available` branch) and confirming it (a) increments
   per-feed pending counts and (b) sets the sync status to
   `"updates"` unless a dominant state is already active. Mark done
   with a one-line PR note if no change required.
-- [ ] T019 [US3] Local browser verification of US3 per quickstart
+- [X] T019 [US3] Local browser verification of US3 per quickstart
   Step 2's pill assertions, plus AC2: with the pill already at
   "updates available" from a prior add (post-T012), add a second
   feed and confirm the pill stays at "updates available" and the
@@ -270,25 +270,25 @@ None of these tasks gate the feature's correctness for the primary
 stories — they catch regressions to adjacent behavior the spec
 explicitly preserves (FR-007, FR-008, FR-009).
 
-- [ ] T020 [P] Local browser verification of the failure-path edge
+- [X] T020 [P] Local browser verification of the failure-path edge
   cases per quickstart Steps 4 (zero-item feed), 5 (duplicate feed),
   and 6 (invalid URL). Confirm the reading list, counter, and pill
   are unchanged in all three cases (FR-007, FR-008, SC-006).
-- [ ] T021 [P] Local browser verification of the cross-session
+- [X] T021 [P] Local browser verification of the cross-session
   persistence case per quickstart Step 8: add a feed, fully reload
   the page before clicking Refresh, confirm the reading list still
   excludes the new feed's items and the counter still reflects the
   pending count.
-- [ ] T022 [P] Local browser verification of local-first vs
+- [X] T022 [P] Local browser verification of local-first vs
   remote-fallback parity per quickstart Step 7: run Steps 1-3 once
   with `syncSubscriptions` on (local-first path) and once with it
   off or in a non-isolated context (remote-fallback path), and
   confirm identical user-visible behavior (Principle IV).
-- [ ] T023 Run `npm test && npm run lint` from the repo root and
+- [X] T023 Run `npm test && npm run lint` from the repo root and
   ensure both pass with no new failures relative to the T002
   baseline. Fix any issues introduced by this feature; do NOT mute
   unrelated pre-existing failures.
-- [ ] T024 Update `CLAUDE.md`'s "Recent Changes" entry for
+- [X] T024 Update `CLAUDE.md`'s "Recent Changes" entry for
   `003-defer-new-feed-items` if the running tally is stale, and
   confirm `specs/003-defer-new-feed-items/` is internally consistent
   (no dangling references to deleted contracts/files).
