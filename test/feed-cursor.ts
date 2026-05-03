@@ -821,6 +821,112 @@ test('GET /items excludes items past the cursor on synced feeds', async t => {
     t.equal(body.total, 1, 'count matches list')
 })
 
+// ---- US2 regression: refresh promotes deferred posts ----
+
+test('advanceFeedCursor SQL sets last_pulled_at = MAX(pub_date)',
+    async t => {
+        let cursorSql = ''
+        const userDo = Object.create(UserDO.prototype) as {
+            sql:{ exec:(q:string, ...p:unknown[]) => QueryResult }
+            getFeedsWithUpdates:() => string[]
+            broadcast:() => void
+            advanceFeedCursor:(feedId:number) => void
+        }
+        userDo.sql = {
+            exec (query:string, ..._params:unknown[]) {
+                if (query.includes('UPDATE feeds SET last_pulled_at')) {
+                    cursorSql = query
+                }
+                return result([])
+            }
+        }
+        userDo.getFeedsWithUpdates = () => []
+        userDo.broadcast = () => {}
+
+        userDo.advanceFeedCursor(1)
+
+        t.ok(
+            cursorSql.includes('MAX(pub_date)'),
+            'SQL assigns MAX(pub_date) to last_pulled_at'
+        )
+        t.ok(
+            cursorSql.includes('WHERE feed_id = ?'),
+            'SQL filters items to the target feed'
+        )
+        t.ok(
+            cursorSql.includes('pub_date IS NOT NULL'),
+            'SQL guards against NULL pub_date'
+        )
+    }
+)
+
+test('US2: refresh of NULL-cursor feed advances exactly once', async t => {
+    const { app, cursorUpdates } = createCursorHarness()
+
+    const res = await app.request('/feeds/1/refresh', { method: 'POST' })
+
+    t.equal(res.status, 200, 'refresh returns 200')
+    t.equal(
+        cursorUpdates.length,
+        1,
+        'NULL-cursor feed gets advanced once on first refresh'
+    )
+    t.equal(
+        cursorUpdates[0],
+        1,
+        'cursor advance targets the right feed id'
+    )
+})
+
+test('US2: full refresh advances cursor on every subscribed feed',
+    async t => {
+        // Multi-feed harness: two feeds, both NULL cursor.
+        const userDo = Object.create(UserDO.prototype) as CursorDoType
+        const cursorIds:number[] = []
+        const waitUntilPromises:Promise<unknown>[] = []
+        const feeds = [
+            feedRow(1, 'https://a.example/feed', null),
+            feedRow(2, 'https://b.example/feed', null)
+        ]
+
+        userDo.sql = {
+            exec (query:string, ...params:unknown[]) {
+                if (query.includes('SELECT * FROM feeds')) {
+                    return result([...feeds])
+                }
+                if (
+                    query.includes('UPDATE feeds SET last_pulled_at')
+                ) {
+                    cursorIds.push(params[params.length - 1] as number)
+                }
+                return result([])
+            }
+        }
+        userDo.ctx = {
+            storage: {
+                async get<T> (_k:string) { return undefined as T|undefined },
+                async put (_k:string, _v:unknown) {},
+                async delete (_k:string) {}
+            },
+            waitUntil (p) { waitUntilPromises.push(p) }
+        }
+        userDo.fetchFeed = async () => {}
+        userDo.broadcast = () => {}
+        userDo.getFeedsWithUpdates = () => []
+
+        const res = await userDo.createRouter()
+            .request('/feeds/refresh', { method: 'POST' })
+        await Promise.all(waitUntilPromises)
+
+        t.equal(res.status, 200, 'full refresh returns 200')
+        t.deepEqual(
+            cursorIds.sort(),
+            [1, 2],
+            'every subscribed feed had its cursor advanced'
+        )
+    }
+)
+
 test('GET /items includes items with NULL pub_date', async t => {
     const { app } = createItemsHarness({
         feeds: [
