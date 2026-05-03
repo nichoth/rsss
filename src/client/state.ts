@@ -1161,8 +1161,14 @@ State.addFeed = async function (
             state.user.value?.did
         )
         await adapter.addFeed(url)
+        // Do NOT reload items: a freshly-added feed has
+        // `last_pulled_at IS NULL`, so its items are
+        // intentionally hidden from the reading list until
+        // the reader clicks "Refresh Feeds". The un-synced
+        // counter and "updates available" pill are driven
+        // by the existing `feed-updates-available` SSE event
+        // emitted after the post-add background fetch.
         await State.loadFeeds(state)
-        await State.loadItems(state)
         await State.loadCounts(state)
     } catch (err) {
         if (
