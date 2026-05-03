@@ -28,7 +28,6 @@ TypeScript (Cloudflare Workers runtime, ES2022 lib): Follow standard conventions
 - 003-defer-new-feed-items: Added TypeScript (Cloudflare Workers + ES2022 lib) + Hono (server), Preact + `@preact/signals`
 - 002-full-article-fetch: Added TypeScript (Cloudflare Workers runtime, ES2022 lib)
 
-- 001-fix-og-image-redirects: Added TypeScript (Cloudflare Workers runtime, ES2022 lib) + `hono`, `@cloudflare/workers-types`, `fast-xml-parser`
 
 <!-- MANUAL ADDITIONS START -->
 <!-- MANUAL ADDITIONS END -->
