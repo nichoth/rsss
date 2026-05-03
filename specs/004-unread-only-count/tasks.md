@@ -75,7 +75,7 @@ disagrees with the visible list whenever the filter is off.
 > Write the test FIRST and confirm it FAILS against the unmodified
 > `sidebar-item.ts` before implementing T002.
 
-- [ ] T001 [US1] Add render test
+- [X] T001 [US1] Add render test
   `/Users/nick/code/rsss/test/sidebar-item.ts` that mounts
   `SidebarItem` with `starred=false` against a stub `AppState`
   (mirroring the pattern in `test/item-row.ts:1-15`) and asserts the
@@ -96,7 +96,7 @@ disagrees with the visible list whenever the filter is off.
 
 ### Implementation for User Story 1
 
-- [ ] T002 [US1] Edit
+- [X] T002 [US1] Edit
   `/Users/nick/code/rsss/src/client/components/sidebar-item.ts`
   line 39 to drive the All Items badge from `showUnreadOnly`. Pull
   `showUnreadOnly` out of `state` alongside the existing destructure
@@ -118,7 +118,7 @@ disagrees with the visible list whenever the filter is off.
   `feed-reader.ts:176-180` — `total` and `unread` are invariant
   under filter toggles per `contracts/sidebar-badge.md` Non-changes.
 
-- [ ] T003 [US1] Run `npm test && npm run lint` from
+- [X] T003 [US1] Run `npm test && npm run lint` from
   `/Users/nick/code/rsss` and confirm both pass — including the new
   `sidebar-item.ts` test added in T001.
 
@@ -131,7 +131,7 @@ disagrees with the visible list whenever the filter is off.
 **Purpose:** Constitution-mandated browser verification and
 cleanup.
 
-- [ ] T004 [US1] Execute the manual browser verification in
+- [X] T004 [US1] Execute the manual browser verification in
   `/Users/nick/code/rsss/specs/004-unread-only-count/quickstart.md`
   end-to-end (Tests 1–8) against a local `npm start` session. This
   is required by `CLAUDE.md` global rules and the constitution's
