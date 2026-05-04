@@ -102,10 +102,10 @@ export const FeedStatus:FunctionComponent<{
             aria-live="polite"
             aria-label=${legend.ariaLabel}
         >
-            <${Dot} color=${color} />
             ${legend.label ?
                 html`<span class="feed-status-legend">${legend.label}</span>` :
                 ''}
+            <${Dot} color=${color} />
         </span>
     `
 }

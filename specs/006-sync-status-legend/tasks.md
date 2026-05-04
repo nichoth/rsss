@@ -127,7 +127,7 @@ matches the visible text by suffix. (See `quickstart.md`.)
   and confirm both are green. Fix any lint or test failures
   surfaced.
 
-- [ ] T006 [US1] Run the manual browser verification from
+- [X] T006 [US1] Run the manual browser verification from
   `specs/006-sync-status-legend/quickstart.md`. Confirm every Done
   Condition: (i) all three in-scope states render the correct
   label, (ii) `aria-label` matches the visible label by suffix for
