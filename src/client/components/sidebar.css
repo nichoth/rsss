@@ -41,3 +41,11 @@
         color: var(--color-text-secondary);
     }
 }
+
+.feeds-list .feed-item {
+    & .feed-unread-count {
+        flex-shrink: 0;
+        min-width: 2rem;
+        text-align: center;
+    }
+}

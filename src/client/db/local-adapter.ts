@@ -243,10 +243,24 @@ export function createLocalAdapter (db:Sqlite3Db):DbAdapter {
                 'FROM items'
             )
 
+            const perFeedRows = await queryDb<{
+                feed_id:number
+                unread:number
+            }>(
+                db,
+                'SELECT feed_id, COUNT(*) as unread FROM items' +
+                ' WHERE is_read = 0 GROUP BY feed_id'
+            )
+            const perFeed:Record<string, number> = {}
+            for (const r of perFeedRows) {
+                perFeed[String(r.feed_id)] = r.unread
+            }
+
             return {
                 unread: row?.unread ?? 0,
                 starred: row?.starred ?? 0,
-                total: row?.total ?? 0
+                total: row?.total ?? 0,
+                perFeed
             }
         },
 

@@ -37,7 +37,7 @@ export default defineConfig(({ mode }) => {
             },
         },
         server: {
-            port: 8888,
+            port: 2222,
             host: true,
             // Use 127.0.0.1 (not localhost) so the OAuth loopback-client
             // redirect lands on the same origin as the session cookie.

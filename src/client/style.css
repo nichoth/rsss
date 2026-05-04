@@ -329,7 +329,7 @@ button {
 
 .items-header {
     display: flex;
-    align-items: center;
+    align-items: baseline;
     justify-content: space-between;
     padding: 0.75rem 1rem;
     background: var(--color-surface);

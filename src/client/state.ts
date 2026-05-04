@@ -246,7 +246,7 @@ export function State ():AppState {
         itemsTotal: signal(0),
         itemsOffset: signal(0),
         counts: signal<CountsResponse>(
-            { unread: 0, starred: 0, total: 0 }
+            { unread: 0, starred: 0, total: 0, perFeed: {} }
         ),
         showUnreadOnly: signal(false),
         showStarredOnly: signal(false),

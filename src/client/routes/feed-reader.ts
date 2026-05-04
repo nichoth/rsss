@@ -25,6 +25,7 @@ import { loadStorageUsage } from '../db/storage-usage.js'
 import { ItemRow } from '../components/item-row.js'
 import { Sidebar } from '../components/sidebar.js'
 import Debug from '@substrate-system/debug'
+import { NBSP } from '../constants.js'
 const debug = Debug('rsss:view')
 
 /**
@@ -229,9 +230,9 @@ export const FeedReader:FunctionComponent<{
                                     selectedFeed.id
                                 ] ?? null
                                 const eff = resolveEffectivePolicy(policy)
-                                const modeLabel = eff.cacheMode === 'text' ?
+                                const modeLabel = (eff.cacheMode === 'text' ?
                                     'Text only' :
-                                    'Text + images'
+                                    'Text + images')
                                 const sizeVal = policy?.max_size_bytes != null ?
                                     String(Math.round(
                                         policy.max_size_bytes / 1_000_000
@@ -245,7 +246,7 @@ export const FeedReader:FunctionComponent<{
                                 return html`
                                     <details class="feed-cache-controls">
                                         <summary>
-                                            Cache:
+                                            Cache:${NBSP}
                                             ${modeLabel}${
                                                 eff.isDefault.cacheMode ?
                                                     ' (default)' :
