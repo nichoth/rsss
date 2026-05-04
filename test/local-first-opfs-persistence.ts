@@ -251,7 +251,7 @@ function makeState ():AppState {
         itemsLoading: signal(false),
         itemsTotal: signal(0),
         itemsOffset: signal(0),
-        counts: signal({ unread: 0, starred: 0, total: 0 }),
+        counts: signal({ unread: 0, starred: 0, total: 0, perFeed: {} }),
         showUnreadOnly: signal(false),
         showStarredOnly: signal(false),
         pageSize: signal(20),

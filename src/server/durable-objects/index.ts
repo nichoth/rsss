@@ -967,11 +967,20 @@ export class UserDO extends DurableObject<Env> {
             const unread = this.sql.exec('SELECT COUNT(*) as count FROM items WHERE is_read = 0').one() as { count: number }
             const starred = this.sql.exec('SELECT COUNT(*) as count FROM items WHERE is_starred = 1').one() as { count: number }
             const total = this.sql.exec('SELECT COUNT(*) as count FROM items').one() as { count: number }
+            const perFeedRows = this.sql.exec(
+                'SELECT feed_id, COUNT(*) as unread FROM items' +
+                ' WHERE is_read = 0 GROUP BY feed_id'
+            ).toArray() as { feed_id:number; unread:number }[]
+            const perFeed:Record<string, number> = {}
+            for (const row of perFeedRows) {
+                perFeed[String(row.feed_id)] = row.unread
+            }
 
             return c.json({
                 unread: unread.count,
                 starred: starred.count,
-                total: total.count
+                total: total.count,
+                perFeed
             })
         })
 

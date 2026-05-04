@@ -211,6 +211,52 @@ test('getCounts returns correct unread, starred, total', async (t) => {
     }
 })
 
+test('getCounts.perFeed groups unread by feed_id', async (t) => {
+    const db = await openLocalDb('did:test:getcounts-perfeed')
+    await seedDb(db)
+    const adapter = createLocalAdapter(db)
+    try {
+        const counts = await adapter.getCounts()
+
+        t.equal(
+            counts.perFeed['1'],
+            1,
+            'feed 1 has 1 unread item (Item One)'
+        )
+        t.equal(
+            counts.perFeed['2'],
+            1,
+            'feed 2 has 1 unread item (Item Three)'
+        )
+        const sum = Object.values(counts.perFeed).reduce(
+            (a, b) => a + b,
+            0
+        )
+        t.equal(
+            sum,
+            counts.unread,
+            'sum of perFeed values equals unread'
+        )
+
+        // Mark Item One as read; feed 1 should drop out of perFeed
+        await adapter.updateItem(1, { is_read: true })
+        const after = await adapter.getCounts()
+
+        t.equal(
+            after.perFeed['1'],
+            undefined,
+            'feed 1 absent from perFeed when zero unread'
+        )
+        t.equal(
+            after.perFeed['2'],
+            1,
+            'feed 2 unchanged'
+        )
+    } finally {
+        db.close()
+    }
+})
+
 test('addFeed inserts a feed and returns it', async (t) => {
     const db = await openLocalDb('did:test:addfeed')
     const adapter = createLocalAdapter(db)

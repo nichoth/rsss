@@ -25,6 +25,7 @@ export const Sidebar:FunctionComponent<{
         feedsLoading,
         feeds,
         route,
+        counts,
     } = state
     const [showAddFeed, setShowAddFeed] = useState(false)
     const [addingFeed, setAddingFeed] = useState(false)
@@ -140,6 +141,9 @@ export const Sidebar:FunctionComponent<{
                     <div class="sidebar-item feed-item${
                         allFeeds ? ' active' : ''
                     }">
+                        <span class="badge feed-unread-count">
+                            ${counts.value.unread}
+                        </span>
                         <a class="feed-select" href="/">
                             All Feeds
                         </a>
@@ -158,6 +162,8 @@ export const Sidebar:FunctionComponent<{
                         )
                         const isActive = route.value ===
                             `/feed/${feedPath}`
+                        const feedUnread = counts.value
+                            .perFeed[String(feed.id)] ?? 0
                         return html`
                             <div
                                 class="sidebar-item feed-item ${
@@ -165,6 +171,9 @@ export const Sidebar:FunctionComponent<{
                                 }"
                                 key=${feed.id}
                             >
+                                <span class="badge feed-unread-count">
+                                    ${feedUnread}
+                                </span>
                                 <a
                                     class="feed-select"
                                     href="/feed/${feedPath}"

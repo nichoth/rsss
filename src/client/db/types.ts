@@ -49,6 +49,7 @@ export interface CountsResponse {
     unread:number
     starred:number
     total:number
+    perFeed:Record<string, number>
 }
 
 export interface FeedsResponse {

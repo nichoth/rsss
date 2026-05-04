@@ -40,7 +40,7 @@ Web app layout (Cloudflare Worker + DO backend, Preact SPA frontend):
 no new directories, no new build config — this feature reuses the
 already-established Cloudflare Worker + DO + Preact SPA layout.
 
-- [ ] T001 Pre-flight: confirm `npm test && npm run lint` pass on the
+- [X] T001 Pre-flight: confirm `npm test && npm run lint` pass on the
       current branch tip (so any later regressions are attributable to
       this feature, not pre-existing breakage). Working dir: repo root.
 
@@ -58,7 +58,7 @@ adapter shape test something to import.
 
 **CRITICAL:** No US1 task can begin until T002 is complete.
 
-- [ ] T002 Extend `CountsResponse` in `src/client/db/types.ts` to add
+- [X] T002 Extend `CountsResponse` in `src/client/db/types.ts` to add
       `perFeed:Record<string,number>` after the existing
       `unread`/`starred`/`total` fields. Match the no-space-after-colon
       style and ≤80-col rule (CLAUDE.md). Per
@@ -98,7 +98,7 @@ confirm sidebar counts do not change.
 > adapter test will fail because `getCounts()` does not yet emit
 > `perFeed`.
 
-- [ ] T003 [P] [US1] Add adapter shape test in `test/db-adapter.ts`
+- [X] T003 [P] [US1] Add adapter shape test in `test/db-adapter.ts`
       (extend the existing file). Cover both `localAdapter` and
       `remoteAdapter`: assert `getCounts()` resolves to an object that
       includes `perFeed` as a `Record<string, number>` keyed by
@@ -110,7 +110,7 @@ confirm sidebar counts do not change.
       omission rule from `contracts/counts-response.md`). Run with
       `npm test`.
 
-- [ ] T004 [P] [US1] Add Preact render unit test in
+- [X] T004 [P] [US1] Add Preact render unit test in
       `test/sidebar-feed-counts.ts` (new file, follow the established
       `test/sidebar-item.ts` pattern using
       `@substrate-system/tapzero` + Preact mount with stubbed
@@ -129,13 +129,13 @@ confirm sidebar counts do not change.
 
 ### Implementation for User Story 1
 
-- [ ] T005 [P] [US1] Update the in-memory initial value of
+- [X] T005 [P] [US1] Update the in-memory initial value of
       `state.counts` in `src/client/state.ts` (the signal is currently
       created at `state.ts:248-250`) to include `perFeed: {}`. This is
       a one-line default change so `state.counts.value.perFeed` is
       never `undefined` before the first `loadCounts` round-trip.
 
-- [ ] T006 [P] [US1] Server producer: in
+- [X] T006 [P] [US1] Server producer: in
       `src/server/durable-objects/index.ts`, extend the
       `app.get('/items/count')` handler (around line 966-967) to run
       one additional prepared aggregate
@@ -148,7 +148,7 @@ confirm sidebar counts do not change.
       (`{}` when no rows match) so older-server / newer-client mismatch
       cannot return `undefined`.
 
-- [ ] T007 [P] [US1] Local-first producer: in
+- [X] T007 [P] [US1] Local-first producer: in
       `src/client/db/local-adapter.ts`, extend `getCounts()` (around
       line 231-239) to run the same aggregate against the OPFS-backed
       SQLite via the existing `queryDb` helper, transform rows into
@@ -156,7 +156,7 @@ confirm sidebar counts do not change.
       existing `unread`/`starred`/`total`. ALWAYS include the key
       (`{}` when no rows match) for the same reason as T006.
 
-- [ ] T008 [US1] Remote adapter consumer: in
+- [X] T008 [US1] Remote adapter consumer: in
       `src/client/db/remote-adapter.ts`, confirm `getCounts()` passes
       through the new `perFeed` field from the HTTP response unchanged
       (the adapter just deserializes JSON; if its return type or any
@@ -164,7 +164,7 @@ confirm sidebar counts do not change.
       include `perFeed`). Verify against the test added in T003.
       Depends on T002 (type), T006 (server producer).
 
-- [ ] T009 [US1] Sidebar render: in
+- [X] T009 [US1] Sidebar render: in
       `src/client/components/sidebar.ts`, modify the feeds-list
       section to render a leading numeric badge for each row, per the
       DOM contract in `contracts/sidebar-feed-counts.md`:
@@ -180,7 +180,7 @@ confirm sidebar counts do not change.
       TypeScript ≤80 cols and follow the no-space-after-colon /
       ternary-break style from CLAUDE.md. Depends on T002, T005.
 
-- [ ] T010 [P] [US1] Sidebar count styling: in
+- [X] T010 [P] [US1] Sidebar count styling: in
       `src/client/components/sidebar.css` (or, if no per-component CSS
       file exists for the sidebar, the existing sidebar styles file),
       add a nested `.feed-unread-count` selector under the existing
@@ -204,14 +204,14 @@ Verification rule, plan §Testing).
 
 **Purpose:** Final verification gates before merge.
 
-- [ ] T011 Run the manual browser quickstart in
+- [X] T011 Run the manual browser quickstart in
       `specs/005-feed-unread-counts/quickstart.md` Tests 1–11 against
       a local `npm start` instance. This is the constitution's Local
       Verification gate ("UI changes MUST be exercised in a browser
       before being claimed complete"). Confirm Test 11 (local-first
       vs. fallback) passes both modes.
 
-- [ ] T012 Run `npm test && npm run lint` from the repo root and
+- [X] T012 Run `npm test && npm run lint` from the repo root and
       confirm both pass. Fix any new failures introduced by Phase 3.
 
 ---

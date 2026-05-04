@@ -103,10 +103,18 @@ function createMockAdapter ():DbAdapter & {
         },
 
         async getCounts (): Promise<CountsResponse> {
+            const perFeed:Record<string, number> = {}
+            for (const item of items) {
+                if (item.is_read === 0) {
+                    const key = String(item.feed_id)
+                    perFeed[key] = (perFeed[key] ?? 0) + 1
+                }
+            }
             return {
                 unread: items.filter(i => i.is_read === 0).length,
                 starred: items.filter(i => i.is_starred === 1).length,
-                total: items.length
+                total: items.length,
+                perFeed
             }
         },
 
@@ -438,4 +446,109 @@ test('adapter - getCounts with empty database', async t => {
     t.equal(counts.total, 0, 'total should be 0')
     t.equal(counts.unread, 0, 'unread should be 0')
     t.equal(counts.starred, 0, 'starred should be 0')
+    t.deepEqual(
+        counts.perFeed,
+        {},
+        'perFeed should be {} on an empty database'
+    )
+})
+
+// ============ perFeed Tests ============
+
+test('adapter - getCounts perFeed is keyed by stringified feed_id', async t => {
+    const adapter = createMockAdapter()
+    const f1 = await adapter.addFeed('https://site1.com/feed')
+    const f2 = await adapter.addFeed('https://site2.com/feed')
+
+    addMockItem(adapter, f1.id, { is_read: 0 })
+    addMockItem(adapter, f1.id, { is_read: 0 })
+    addMockItem(adapter, f2.id, { is_read: 0 })
+
+    const counts = await adapter.getCounts()
+
+    t.ok(
+        counts.perFeed && typeof counts.perFeed === 'object',
+        'perFeed is an object'
+    )
+    t.equal(
+        counts.perFeed[String(f1.id)],
+        2,
+        'perFeed[String(f1.id)] is 2'
+    )
+    t.equal(
+        counts.perFeed[String(f2.id)],
+        1,
+        'perFeed[String(f2.id)] is 1'
+    )
+    t.equal(
+        typeof counts.perFeed[String(f1.id)],
+        'number',
+        'perFeed values are numbers'
+    )
+})
+
+test('adapter - getCounts perFeed drops as items are marked read', async t => {
+    const adapter = createMockAdapter()
+    const f1 = await adapter.addFeed('https://site1.com/feed')
+    const f2 = await adapter.addFeed('https://site2.com/feed')
+
+    const i1 = addMockItem(adapter, f1.id, { is_read: 0 })
+    addMockItem(adapter, f1.id, { is_read: 0 })
+    addMockItem(adapter, f2.id, { is_read: 0 })
+
+    const before = await adapter.getCounts()
+    t.equal(before.perFeed[String(f1.id)], 2, 'f1 starts with 2 unread')
+
+    await adapter.updateItem(i1.id, { is_read: true })
+
+    const after = await adapter.getCounts()
+    t.equal(after.perFeed[String(f1.id)], 1, 'f1 drops to 1 after mark-read')
+    t.equal(after.perFeed[String(f2.id)], 1, 'f2 unchanged')
+})
+
+test('adapter - getCounts perFeed sum equals unread', async t => {
+    const adapter = createMockAdapter()
+    const f1 = await adapter.addFeed('https://site1.com/feed')
+    const f2 = await adapter.addFeed('https://site2.com/feed')
+    const f3 = await adapter.addFeed('https://site3.com/feed')
+
+    addMockItem(adapter, f1.id, { is_read: 0 })
+    addMockItem(adapter, f1.id, { is_read: 0 })
+    addMockItem(adapter, f1.id, { is_read: 1 })
+    addMockItem(adapter, f2.id, { is_read: 0 })
+    addMockItem(adapter, f3.id, { is_read: 1 })
+
+    const counts = await adapter.getCounts()
+
+    const sum = Object.values(counts.perFeed).reduce(
+        (a, b) => a + b,
+        0
+    )
+    t.equal(
+        sum,
+        counts.unread,
+        'Object.values(perFeed).reduce sum === unread'
+    )
+})
+
+test('adapter - getCounts omits feeds with zero unread', async t => {
+    const adapter = createMockAdapter()
+    const f1 = await adapter.addFeed('https://site1.com/feed')
+    const f2 = await adapter.addFeed('https://site2.com/feed')
+
+    addMockItem(adapter, f1.id, { is_read: 0 })
+    addMockItem(adapter, f2.id, { is_read: 1 })
+
+    const counts = await adapter.getCounts()
+
+    t.equal(counts.perFeed[String(f1.id)], 1, 'f1 present in perFeed')
+    t.equal(
+        counts.perFeed[String(f2.id)],
+        undefined,
+        'f2 absent from perFeed when zero unread'
+    )
+    t.ok(
+        !(String(f2.id) in counts.perFeed),
+        'feeds with zero unread are absent (not present as 0)'
+    )
 })
