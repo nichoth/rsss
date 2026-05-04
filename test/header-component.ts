@@ -252,13 +252,13 @@ test('Header feed status renders one dot for all sync states', t => {
         {
             status: 'updates',
             color: 'blue',
-            text: '3',
+            text: '3 updates',
             title: null
         },
         {
             status: 'syncing',
             color: 'yellow',
-            text: '',
+            text: 'refreshing',
             title: null
         },
         {
@@ -270,7 +270,7 @@ test('Header feed status renders one dot for all sync states', t => {
         {
             status: 'synced',
             color: 'green',
-            text: '',
+            text: 'up to date',
             title: null
         }
     ]
@@ -389,7 +389,7 @@ test('Header feed status exposes only the latest retry error', async t => {
         )
         t.equal(
             status.getAttribute('aria-label'),
-            'Feed sync status: syncing',
+            'Feed sync status: refreshing',
             'retry syncing state replaces the old error label'
         )
 

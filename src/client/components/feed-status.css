@@ -13,3 +13,9 @@
         color: var(--color-primary-hover);
     }
 }
+
+@media (680px <= width < 1000px) {
+    .feed-status .feed-status-legend {
+        display: none;
+    }
+}

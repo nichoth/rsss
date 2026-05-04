@@ -74,7 +74,7 @@ matches the visible text by suffix. (See `quickstart.md`.)
 > **NOTE**: Write the test FIRST, ensure it FAILS before implementing
 > the label function, then make it pass.
 
-- [ ] T001 [US1] Add unit test for the per-state label function in
+- [X] T001 [US1] Add unit test for the per-state label function in
   `test/feed-status.ts`: covers
   (a) `synced` -> `{ label: "up to date", ariaLabel:
       "Feed sync status: up to date" }`,
@@ -90,7 +90,7 @@ matches the visible text by suffix. (See `quickstart.md`.)
 
 ### Implementation for User Story 1
 
-- [ ] T002 [US1] Extract a pure helper
+- [X] T002 [US1] Extract a pure helper
   `legendFor(status, count): { label, ariaLabel }` inside
   `src/client/components/feed-status.ts` per the data-model output
   table. Exporting (named export) is required so `test/feed-status.ts`
@@ -102,7 +102,7 @@ matches the visible text by suffix. (See `quickstart.md`.)
   byte-identical to today (FR-007). Keep TS lines <= 80 cols and
   no-space-after-colon style per CLAUDE.md.
 
-- [ ] T003 [US1] Wire `legendFor` into `FeedStatus` in
+- [X] T003 [US1] Wire `legendFor` into `FeedStatus` in
   `src/client/components/feed-status.ts`: replace the existing
   inline `label`/visible-content derivation with one call to
   `legendFor(status, count)`. Render `result.label` as a text node
@@ -112,7 +112,7 @@ matches the visible text by suffix. (See `quickstart.md`.)
   any `useEffect`, listener, or new signal — reading the existing
   signals in render satisfies FR-005 / I-5. Do NOT add logging.
 
-- [ ] T004 [US1] Update spacing + narrow-viewport rule in
+- [X] T004 [US1] Update spacing + narrow-viewport rule in
   `src/client/components/feed-status.css`: keep the existing
   `gap: 0.25rem` between dot and text. Add a single `@media`
   rule that hides ONLY the new text node (e.g. via a child class
@@ -123,7 +123,7 @@ matches the visible text by suffix. (See `quickstart.md`.)
   `_variables.css` tokens; do NOT add new colors; do NOT touch
   unrelated CSS; font-size stays `>= 1rem` (CLAUDE.md CSS rules).
 
-- [ ] T005 [US1] Run `npm test && npm run lint` from the repo root
+- [X] T005 [US1] Run `npm test && npm run lint` from the repo root
   and confirm both are green. Fix any lint or test failures
   surfaced.
 
