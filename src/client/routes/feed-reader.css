@@ -57,8 +57,15 @@
     }
 
     & .feed-cache-controls {
+        --details-summary-padding: 0;
+        --details-summary-font-weight: 400;
+        --details-summary-font-size: 1rem;
+        --details-summary-content-color: var(--color-text);
+        --details-summary-transition-speed: 0.2s;
+
         font-size: 1rem;
         margin-bottom: 0.5rem;
+        border-bottom: none;
 
         & summary {
             cursor: pointer;

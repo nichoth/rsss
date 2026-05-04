@@ -35,8 +35,8 @@ element available app-wide (JS registration + stylesheet) so any
 route can use it. The package is already in `package.json` at
 `^0.0.2`; this phase only wires it in.
 
-- [ ] T001 Add side-effect import `import '@substrate-system/details-summary'` in `src/client/index.ts` next to the existing `import './style.css'` line so the custom element is registered exactly once per app load.
-- [ ] T002 [P] Add `@import url("@substrate-system/details-summary/css");` to `src/client/style.css` next to the other `@substrate-system/*` CSS imports (after `hamburger-two/css`, before the route-level imports).
+- [X] T001 Add side-effect import `import '@substrate-system/details-summary'` in `src/client/index.ts` next to the existing `import './style.css'` line so the custom element is registered exactly once per app load.
+- [X] T002 [P] Add `@import url("@substrate-system/details-summary/css");` to `src/client/style.css` next to the other `@substrate-system/*` CSS imports (after `hamburger-two/css`, before the route-level imports).
 
 **Checkpoint**: The `<details-summary>` element upgrades and its
 default stylesheet loads on every route, but no route uses it yet.
@@ -56,7 +56,7 @@ markup, otherwise the new disclosure will render with the
 component's default 1rem padding / 600 weight / bottom border and
 collide with the items-header controls.
 
-- [ ] T003 In `src/client/routes/feed-reader.css`, inside the existing `& .feed-cache-controls { ... }` block (around line 59), add the component CSS variable overrides documented in research R3: `--details-summary-padding: 0;`, `--details-summary-font-weight: 400;`, `--details-summary-font-size: 1rem;`, `--details-summary-content-color: var(--color-text);`, `--details-summary-transition-speed: 0.2s;`, plus `border-bottom: none;` to opt out of the component's outer border. Use existing tokens from `_variables.css` only — do NOT modify `_variables.css` (data-model I-9).
+- [X] T003 In `src/client/routes/feed-reader.css`, inside the existing `& .feed-cache-controls { ... }` block (around line 59), add the component CSS variable overrides documented in research R3: `--details-summary-padding: 0;`, `--details-summary-font-weight: 400;`, `--details-summary-font-size: 1rem;`, `--details-summary-content-color: var(--color-text);`, `--details-summary-transition-speed: 0.2s;`, plus `border-bottom: none;` to opt out of the component's outer border. Use existing tokens from `_variables.css` only — do NOT modify `_variables.css` (data-model I-9).
 
 **Checkpoint**: Theming hooks are in place; the route still renders
 the old `<details>` markup. No user-visible change yet.
@@ -84,13 +84,13 @@ remounts the disclosure in the closed state.
 > Write the test FIRST, confirm it FAILS against the current `<details>`
 > markup, then proceed to implementation.
 
-- [ ] T004 [US1] Create `test/feed-reader-cache-disclosure.ts` covering the markup contract from `data-model.md` — assert that the feed-reader route renders a `<details-summary class="feed-cache-controls">` element wrapping exactly one `<details>` whose direct children are exactly one `<summary>` (text starts with `Cache:`) and one `<div class="details-content">`. Follow the style of existing client tests (e.g. `test/settings-route.ts`) for harness setup. Run a second render with a different `selectedFeed.id` and assert that the new `<details>` element has no `open` attribute (data-model I-4, "no carry-over"). Register the new file in `test/index.ts` next to the other client tests.
+- [X] T004 [US1] Create `test/feed-reader-cache-disclosure.ts` covering the markup contract from `data-model.md` — assert that the feed-reader route renders a `<details-summary class="feed-cache-controls">` element wrapping exactly one `<details>` whose direct children are exactly one `<summary>` (text starts with `Cache:`) and one `<div class="details-content">`. Follow the style of existing client tests (e.g. `test/settings-route.ts`) for harness setup. Run a second render with a different `selectedFeed.id` and assert that the new `<details>` element has no `open` attribute (data-model I-4, "no carry-over"). Register the new file in `test/index.ts` next to the other client tests.
 
 ### Implementation for User Story 1
 
-- [ ] T005 [US1] In `src/client/routes/feed-reader.ts` (around lines 247–333), replace the bare `<details class="feed-cache-controls">…</details>` subtree with `<details-summary class="feed-cache-controls">` wrapping a `<details>` whose direct children are `<summary>` and `<div class="details-content">`. Move all non-summary content (the `.feed-cache-form` block AND the `.btn-clear-cache` button) inside `.details-content` (data-model I-1, I-2; research R2). Keep the existing summary text exactly as-is: `Cache:&nbsp;${modeLabel}` plus the conditional `' (default)'` suffix (data-model I-3).
-- [ ] T006 [US1] Pass `key=${selectedFeed.id}` to the `<details-summary>` element so Preact remounts it on feed switch (research R5; data-model I-4). Use the htm-with-preact attribute spelling already used elsewhere in the file.
-- [ ] T007 [US1] Add a `prefersReducedMotion` local state in `FeedReader` (`useState(false)` plus a `useEffect` that subscribes to `window.matchMedia('(prefers-reduced-motion: reduce)')` and updates on the `change` event with cleanup on unmount). Conditionally apply `duration="0"` to `<details-summary>` when reduced motion is active; omit the attribute otherwise so the component default (300 ms) applies (research R4; data-model I-5). Do NOT promote this to `state.ts` (data-model I-7).
+- [X] T005 [US1] In `src/client/routes/feed-reader.ts` (around lines 247–333), replace the bare `<details class="feed-cache-controls">…</details>` subtree with `<details-summary class="feed-cache-controls">` wrapping a `<details>` whose direct children are `<summary>` and `<div class="details-content">`. Move all non-summary content (the `.feed-cache-form` block AND the `.btn-clear-cache` button) inside `.details-content` (data-model I-1, I-2; research R2). Keep the existing summary text exactly as-is: `Cache:&nbsp;${modeLabel}` plus the conditional `' (default)'` suffix (data-model I-3).
+- [X] T006 [US1] Pass `key=${selectedFeed.id}` to the `<details-summary>` element so Preact remounts it on feed switch (research R5; data-model I-4). Use the htm-with-preact attribute spelling already used elsewhere in the file.
+- [X] T007 [US1] Add a `prefersReducedMotion` local state in `FeedReader` (`useState(false)` plus a `useEffect` that subscribes to `window.matchMedia('(prefers-reduced-motion: reduce)')` and updates on the `change` event with cleanup on unmount). Conditionally apply `duration="0"` to `<details-summary>` when reduced motion is active; omit the attribute otherwise so the component default (300 ms) applies (research R4; data-model I-5). Do NOT promote this to `state.ts` (data-model I-7).
 
 **Checkpoint**: User Story 1 is fully functional. The summary has
 the affordance, mouse/touch/keyboard activate it, animation plays
@@ -121,12 +121,12 @@ removed.
 
 ### Tests for User Story 2 ⚠️
 
-- [ ] T008 [US2] Extend `test/feed-reader-cache-disclosure.ts` (created in T004) with assertions that the `<div class="details-content">` contains exactly one `<select>` whose `name` starts with `feed-cache-mode-`, one `<input type="number">` whose `name` starts with `feed-max-size-`, one `<input type="number">` whose `name` starts with `feed-max-age-`, and one `<button class="btn-clear-cache">` (data-model I-2, I-6). Add an assertion that when the effective mode for the test fixture comes from the user default, the rendered `<summary>` text ends with `(default)`; when an override is set, it does not (FR-004, data-model I-3).
+- [X] T008 [US2] Extend `test/feed-reader-cache-disclosure.ts` (created in T004) with assertions that the `<div class="details-content">` contains exactly one `<select>` whose `name` starts with `feed-cache-mode-`, one `<input type="number">` whose `name` starts with `feed-max-size-`, one `<input type="number">` whose `name` starts with `feed-max-age-`, and one `<button class="btn-clear-cache">` (data-model I-2, I-6). Add an assertion that when the effective mode for the test fixture comes from the user default, the rendered `<summary>` text ends with `(default)`; when an override is set, it does not (FR-004, data-model I-3).
 
 ### Implementation for User Story 2
 
-- [ ] T009 [US2] In `src/client/routes/feed-reader.ts`, verify after the markup move from T005 that the existing handler bindings on the inner `<select>` and `<input>` elements (`handleFeedCacheModeChange`, `handleFeedMaxSizeChange`, `handleFeedMaxAgeChange`) and the `.btn-clear-cache` button (`handleClearFeedCache`) are unchanged in signature and call site (data-model I-6). No new handlers, no signature changes, no new signal writes. Do NOT modify `src/client/db/feed-cache-policy.ts` (no schema/persistence change per plan).
-- [ ] T010 [US2] Confirm the Settings route's per-feed cache controls are NOT touched (data-model I-8): leave `src/client/routes/settings.ts` and `test/settings-route.ts` unchanged. If any selector in those files happens to rely on `details > .feed-cache-form` rather than on the feed-reader-route DOM specifically, leave it alone — Settings still uses the bare `<details>` widget.
+- [X] T009 [US2] In `src/client/routes/feed-reader.ts`, verify after the markup move from T005 that the existing handler bindings on the inner `<select>` and `<input>` elements (`handleFeedCacheModeChange`, `handleFeedMaxSizeChange`, `handleFeedMaxAgeChange`) and the `.btn-clear-cache` button (`handleClearFeedCache`) are unchanged in signature and call site (data-model I-6). No new handlers, no signature changes, no new signal writes. Do NOT modify `src/client/db/feed-cache-policy.ts` (no schema/persistence change per plan).
+- [X] T010 [US2] Confirm the Settings route's per-feed cache controls are NOT touched (data-model I-8): leave `src/client/routes/settings.ts` and `test/settings-route.ts` unchanged. If any selector in those files happens to rely on `details > .feed-cache-form` rather than on the feed-reader-route DOM specifically, leave it alone — Settings still uses the bare `<details>` widget.
 
 **Checkpoint**: All four cache actions persist the same way as
 before, summary label tracks the effective mode, `(default)`
@@ -140,9 +140,9 @@ untouched. T008 passes alongside T004.
 **Purpose**: Verification gates required by the constitution and
 the spec's success criteria.
 
-- [ ] T011 [P] Run `npm test` and `npm run lint` from repo root and confirm both are green (the new `test/feed-reader-cache-disclosure.ts` plus existing `test/settings-route.ts` and the rest must all pass; lint must not flag the new TS lines).
+- [X] T011 [P] Run `npm test` and `npm run lint` from repo root and confirm both are green (the new `test/feed-reader-cache-disclosure.ts` plus existing `test/settings-route.ts` and the rest must all pass; lint must not flag the new TS lines).
 - [ ] T012 [P] Walk through `specs/007-cache-settings-disclosure/quickstart.md` end-to-end in a real browser per the constitution's "Local verification" gate. Tick every "Done conditions" checkbox: affordance visible, mouse/touch/keyboard toggle, smooth animation off / no motion on with reduced-motion emulation, summary label updates on mode change with correct `(default)` suffix behaviour, all four inner controls persist, no carry-over on feed switch, no overlap at ~700 px viewport, accessibility tree exposes name + expanded state.
-- [ ] T013 [P] Search the diff for any unintended CSS changes outside `.feed-cache-controls` (data-model I-9). Confirm `_variables.css` and the global `details-summary` selector were not modified, and that no font-size below `1rem` was introduced (data-model I-10, project rules).
+- [X] T013 [P] Search the diff for any unintended CSS changes outside `.feed-cache-controls` (data-model I-9). Confirm `_variables.css` and the global `details-summary` selector were not modified, and that no font-size below `1rem` was introduced (data-model I-10, project rules).
 
 ---
 

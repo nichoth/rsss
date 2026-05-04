@@ -35,6 +35,7 @@ import './sidebar-item.js'
 import './sidebar-feed-counts.js'
 import './dot.js'
 import './settings-route.js'
+import './feed-reader-cache-disclosure.js'
 import './sqlite-worker.js'
 import './local-first-opfs-persistence.js'
 
