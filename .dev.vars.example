@@ -1,4 +1,4 @@
 NODE_ENV="development"
-APP_ORIGIN="http://127.0.0.1:8888"
+APP_ORIGIN="http://127.0.0.1:2222"
 SESSION_SECRET="your-session-secret-at-least-32-chars"
 AUTUMN_SECRET_KEY="abc123"

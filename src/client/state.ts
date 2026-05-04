@@ -7,7 +7,7 @@ import {
     effect
 } from '@preact/signals'
 import Route from 'route-event'
-import ky from 'ky'
+import ky, { HTTPError } from 'ky'
 import Debug from '@substrate-system/debug'
 import {
     getAdapter,
@@ -1253,6 +1253,17 @@ State.refreshFeeds = async function (
         })
     } catch (err) {
         clearRefreshFeedsSafetyTimeout()
+        if (err instanceof HTTPError && err.response.status === 401) {
+            batch(() => {
+                state.user.value = null
+                state.authError.value = SYNC_AUTH_EXPIRED
+                state.feedSyncStatus.value = 'error'
+                state.feedSyncError.value = SYNC_AUTH_EXPIRED
+                state.feedsLoading.value = false
+            })
+            state._setRoute('/login')
+            return
+        }
         batch(() => {
             state.feedSyncStatus.value = 'error'
             state.feedSyncError.value = err instanceof Error ?
