@@ -12,6 +12,59 @@ const DOT_COLORS = {
     synced: 'green'
 } as const
 
+export type FeedSyncStatus =
+    | 'inactive'
+    | 'updates'
+    | 'syncing'
+    | 'error'
+    | 'synced'
+
+export interface FeedStatusLegend {
+    label:string;
+    ariaLabel:string;
+}
+
+const ARIA_PREFIX = 'Feed sync status: '
+
+export function legendFor (
+    status:FeedSyncStatus,
+    count:number
+):FeedStatusLegend {
+    if (status === 'synced') {
+        return {
+            label: 'up to date',
+            ariaLabel: `${ARIA_PREFIX}up to date`
+        }
+    }
+
+    if (status === 'updates') {
+        const text = count === 1 ? '1 update' : `${count} updates`
+        return {
+            label: text,
+            ariaLabel: `${ARIA_PREFIX}${text}`
+        }
+    }
+
+    if (status === 'syncing') {
+        return {
+            label: 'refreshing',
+            ariaLabel: `${ARIA_PREFIX}refreshing`
+        }
+    }
+
+    if (status === 'error') {
+        return {
+            label: 'sync failed',
+            ariaLabel: ''
+        }
+    }
+
+    return {
+        label: '',
+        ariaLabel: `${ARIA_PREFIX}${status}`
+    }
+}
+
 export const FeedStatus:FunctionComponent<{
     state:AppState
 }> = function ({ state }) {
@@ -22,9 +75,6 @@ export const FeedStatus:FunctionComponent<{
         .reduce((sum, value) => sum + value, 0)
     const error = state.feedSyncError.value ?? 'Feed sync failed'
     const color = DOT_COLORS[status]
-    const label = status === 'updates' && count > 0 ?
-        `Feed sync status: ${count} updates` :
-        `Feed sync status: ${status}`
 
     if (status === 'error') {
         return html`
@@ -42,16 +92,20 @@ export const FeedStatus:FunctionComponent<{
         `
     }
 
+    const legend = legendFor(status, count)
+
     return html`
         <span
             key=${status}
             class="feed-status"
             role="status"
             aria-live="polite"
-            aria-label=${label}
+            aria-label=${legend.ariaLabel}
         >
+            ${legend.label ?
+                html`<span class="feed-status-legend">${legend.label}</span>` :
+                ''}
             <${Dot} color=${color} />
-            ${status === 'updates' && count > 0 ? count : ''}
         </span>
     `
 }
