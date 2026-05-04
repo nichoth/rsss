@@ -3,6 +3,7 @@
 @import url("@substrate-system/check-box/css");
 @import url("@substrate-system/tool-tip/css");
 @import url("@substrate-system/hamburger-two/css");
+@import url("@substrate-system/details-summary/css");
 @import url("./routes/feed-reader.css");
 @import url("./_variables.css");
 

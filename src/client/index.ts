@@ -5,6 +5,7 @@ import { State, type AppState } from './state.js'
 import Router from './routes/index.js'
 import { NotFound } from './not-found.js'
 import { Header } from './components/header.js'
+import '@substrate-system/details-summary'
 import './style.css'
 // import Debug from '@substrate-system/debug'
 // const debug = Debug('rsss:view:index')
