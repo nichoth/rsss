@@ -6,12 +6,15 @@ See [rsss.space](https://rsss.space/).
 
 ## Example Feeds
 
-* https://brittanyellich.com/index.xml
-* https://www.404media.co/rss/
-* https://interconnected.org/home/feed
-* https://piccalil.li/feed.xml
-* https://piccalil.li/articles.xml
-* https://piccalil.li/the-index/feed.xml
+* [brittanyellich.com](https://brittanyellich.com/index.xml)
+* [404media.co](https://www.404media.co/rss/)
+* [interconnected.org](https://interconnected.org/home/feed)
+* [piccalil.li](https://piccalil.li/feed.xml)
+* [piccalil.li articles](https://piccalil.li/articles.xml)
+* [piccalil.li the index](https://piccalil.li/the-index/feed.xml)
+* [Wired Top Stories](https://www.wired.com/feed/rss)
+* [Wired Gear](https://www.wired.com/feed/category/gear/latest/rss)
+* [Wired Culture](https://www.wired.com/feed/category/culture/latest/rss)
 
 <details><summary><h2>Contents</h2></summary>
 
