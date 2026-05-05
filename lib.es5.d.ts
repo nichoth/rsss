@@ -1,6 +1,8 @@
 /** See https://stackoverflow.com/a/51390763/1470607  */
 type Falsy = false | 0 | '' | null | undefined;
 
+declare module '@substrate-system/radio-input/css'
+
 /**
  * see https://www.karltarvas.com/typescript-array-filter-boolean.html
  */
@@ -14,6 +16,5 @@ interface Array<T> {
    * predicate function. If thisArg is omitted, undefined is used as the
    * this value.
    */
-  filter<S extends T>(predicate: BooleanConstructor, thisArg?: any)
-    : Exclude<S, Falsy>[];
+  filter<S extends T>(predicate:BooleanConstructor, thisArg?:any):Exclude<S, Falsy>[];
 }

@@ -11,6 +11,21 @@
         padding: 0;
         margin: 0;
     }
+
+    & .cache-setting {
+        & radio-input {
+            margin-left: 0.5rem;
+
+            & label {
+                font-size: 1rem;
+            }
+
+            & input {
+                font-size: 1.2rem;
+                margin-left: -0.4rem;
+            }
+        }
+    }
 }
 
 .settings-header {

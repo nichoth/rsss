@@ -45,7 +45,7 @@
 .feeds-list .feed-item {
     & .feed-unread-count {
         flex-shrink: 0;
-        min-width: 2rem;
+        min-width: 3rem;
         text-align: center;
     }
 }

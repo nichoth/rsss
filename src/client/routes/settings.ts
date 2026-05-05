@@ -5,6 +5,7 @@ import { useComputed, batch } from '@preact/signals'
 import { CheckBox } from '@substrate-system/check-box'
 import { type AppState, State } from '../state.js'
 import { billingStatus } from '../billing-status.js'
+import { RadioInput } from '@substrate-system/radio-input'
 import {
     syncSubscriptions,
     pendingSyncSubscriptions,
@@ -51,9 +52,10 @@ import {
     totalStorageBytes,
     loadStorageUsage
 } from '../db/storage-usage.js'
+import { NBSP } from '../constants.js'
 import { formatBytes } from '../util.js'
 import './settings.css'
-import { NBSP } from '../constants.js'
+import '@substrate-system/radio-input/css'
 
 export const SettingsRoute:FunctionComponent<{
     state:AppState
@@ -419,7 +421,7 @@ export const SettingsRoute:FunctionComponent<{
             <h2>Subscription</h2>
             ${isEntitled ? html`
                 <p>
-                    You're on the
+                    You're on the${NBSP}
                     <strong>${planLabel}</strong> plan. Your feeds and
                     read state are stored on each device and sync
                     automatically.
@@ -567,26 +569,20 @@ export const SettingsRoute:FunctionComponent<{
             <div class="cache-setting">
                 <fieldset class="cache-mode-group">
                     <legend>Cache mode</legend>
-                    <label class="cache-radio-label">
-                        <input
-                            type="radio"
-                            name="default-cache-mode"
-                            value="text"
-                            checked=${defaultCacheMode.value === 'text'}
-                            onChange=${handleCacheModeChange}
-                        />
-                        Text only
-                    </label>
-                    <label class="cache-radio-label">
-                        <input
-                            type="radio"
-                            name="default-cache-mode"
-                            value="text_images"
-                            checked=${defaultCacheMode.value === 'text_images'}
-                            onChange=${handleCacheModeChange}
-                        />
-                        Text and images
-                    </label>
+                    <${RadioInput.TAG}
+                        name="default-cache-mode"
+                        value="text"
+                        checked=${defaultCacheMode.value === 'text'}
+                        onChange=${handleCacheModeChange}
+                        label="Text Only"
+                    ><//>
+                    <${RadioInput.TAG}
+                        name="default-cache-mode"
+                        value="text_images"
+                        checked=${defaultCacheMode.value === 'text_images'}
+                        label="Text and Images"
+                        onChange=${handleCacheModeChange}
+                    ><//>
                 </fieldset>
             </div>
             <div class="cache-setting">
