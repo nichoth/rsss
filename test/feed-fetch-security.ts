@@ -314,6 +314,40 @@ test('fetchFeedText still caps at three redirects with feed wording',
     }
 )
 
+test('fetchFeedText follows 301 to trailing-slash canonical', async t => {
+    const fetched:string[] = []
+
+    const result = await fetchFeedText('https://example.com/rss', {
+        fetchFn: async (url) => {
+            const text = url.toString()
+            fetched.push(text)
+            if (text === 'https://example.com/rss') {
+                return new Response(null, {
+                    status: 301,
+                    headers: { location: '/rss/' }
+                })
+            }
+            return new Response('<rss></rss>', {
+                status: 200,
+                headers: { 'content-type': 'application/rss+xml' }
+            })
+        },
+        resolveHostname: async () => ['93.184.216.34']
+    })
+
+    t.equal(result.text, '<rss></rss>', 'returns response body')
+    t.equal(
+        result.url,
+        'https://example.com/rss/',
+        'returns final resolved URL'
+    )
+    t.deepEqual(
+        fetched,
+        ['https://example.com/rss', 'https://example.com/rss/'],
+        'follows the redirect exactly once without stripping the slash'
+    )
+})
+
 test('fetchOgImage returns null for blocked hosts', async t => {
     const image = await fetchOgImage('http://127.0.0.1/post', {
         fetchFn: async () => {

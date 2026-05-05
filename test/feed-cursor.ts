@@ -268,7 +268,7 @@ interface FetchFeedDoType {
             imageUrl:string|null
         }>
     }
-    doFetchFeedText:(url:string) => Promise<string>
+    doFetchFeedText:(url:string) => Promise<{ text:string; url:string }>
     updateNewItemThumbnails:(items:unknown[]) => Promise<void>
     rowsWritten:(result:unknown) => number
     fetchFeed:(feed:FeedRow) => Promise<void>
@@ -326,8 +326,8 @@ function createFetchFeedHarness (opts:{
             postInsertUnsyncedIds
     }
 
-    userDo.doFetchFeedText = async () => {
-        return '<rss/>'
+    userDo.doFetchFeedText = async (url:string) => {
+        return { text: '<rss/>', url }
     }
 
     userDo.parseFeed = () => ({

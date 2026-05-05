@@ -1361,7 +1361,9 @@ export class UserDO extends DurableObject<Env> {
         }
     }
 
-    protected async doFetchFeedText (url:string):Promise<string> {
+    protected async doFetchFeedText (
+        url:string
+    ):Promise<{ text:string; url:string }> {
         return fetchFeedText(url)
     }
 
@@ -1378,12 +1380,12 @@ export class UserDO extends DurableObject<Env> {
             feed.url
         )
         try {
-            const text = await this.doFetchFeedText(feed.url)
+            const fetched = await this.doFetchFeedText(feed.url)
             console.log(
                 '[DO] Feed response length:',
-                text.length
+                fetched.text.length
             )
-            const parsedFeed = this.parseFeed(text)
+            const parsedFeed = this.parseFeed(fetched.text)
             console.log(
                 '[DO] Parsed items:',
                 parsedFeed.items.length,
@@ -1407,6 +1409,28 @@ export class UserDO extends DurableObject<Env> {
                     parsedFeed.link,
                     feed.id
                 )
+            }
+
+            // Persist the canonical URL when the server redirected us. Skip
+            // when another row already owns the resolved URL (UNIQUE
+            // constraint would fail) — the redirect still works correctly,
+            // we just don't optimize that row.
+            if (fetched.url !== feed.url) {
+                const collision = this.sql.exec(
+                    'SELECT id FROM feeds WHERE url = ? AND id != ?',
+                    fetched.url,
+                    feed.id
+                ).toArray()
+                if (collision.length === 0) {
+                    this.sql.exec(
+                        `UPDATE feeds SET
+                            url = ?,
+                            updated_at = datetime('now')
+                        WHERE id = ?`,
+                        fetched.url,
+                        feed.id
+                    )
+                }
             }
 
             // Snapshot unsynced set before inserting to detect

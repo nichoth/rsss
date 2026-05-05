@@ -1458,3 +1458,235 @@ test('fetchFeed loudly reports feed-XML redirect overflow', async t => {
         'feed row last_error captures the redirect overflow'
     )
 })
+
+interface UrlUpdateProbe {
+    url:unknown
+    id:unknown
+}
+
+interface CollisionProbe {
+    canonical:unknown
+    excludeId:unknown
+}
+
+function createUrlPersistHarness (opts:{
+    collisionRows:Array<{ id:number }>
+}):{
+    userDo:{
+        fetchFeed:(feed:{
+            id:number
+            url:string
+            title:string|null
+            description:string|null
+            site_url:string|null
+            last_fetched:string|null
+            last_error:string|null
+            last_status:number|null
+            created_at:string
+            updated_at:string
+        }) => Promise<void>
+    }
+    state:{
+        urlUpdate:UrlUpdateProbe|null
+        collisionProbe:CollisionProbe|null
+    }
+} {
+    const state:{
+        urlUpdate:UrlUpdateProbe|null
+        collisionProbe:CollisionProbe|null
+    } = {
+        urlUpdate: null,
+        collisionProbe: null
+    }
+
+    const userDo = Object.create(UserDO.prototype) as {
+        sql:{
+            exec:(query:string, ...params:unknown[]) => {
+                toArray:() => unknown[]
+                one?:() => unknown
+                rowsWritten?:number
+            }
+        }
+        fetchFeed:(feed:{
+            id:number
+            url:string
+            title:string|null
+            description:string|null
+            site_url:string|null
+            last_fetched:string|null
+            last_error:string|null
+            last_status:number|null
+            created_at:string
+            updated_at:string
+        }) => Promise<void>
+    }
+
+    userDo.sql = {
+        exec (query:string, ...params:unknown[]) {
+            if (query.includes('UPDATE feeds SET') &&
+                query.includes('last_error = NULL')) {
+                return { toArray: () => [] }
+            }
+
+            if (query.includes('SELECT id FROM feeds WHERE url = ?') &&
+                query.includes('AND id != ?')) {
+                state.collisionProbe = {
+                    canonical: params[0],
+                    excludeId: params[1]
+                }
+                return { toArray: () => opts.collisionRows }
+            }
+
+            if (query.includes('UPDATE feeds SET') &&
+                query.includes('url = ?') &&
+                query.includes('updated_at')) {
+                state.urlUpdate = {
+                    url: params[0],
+                    id: params[1]
+                }
+                return { toArray: () => [] }
+            }
+
+            if (query.includes('INSERT OR IGNORE INTO items')) {
+                return { rowsWritten: 0, toArray: () => [] }
+            }
+
+            if (query.includes('SELECT feeds.id FROM feeds')) {
+                return { toArray: () => [] }
+            }
+
+            return { toArray: () => [] }
+        }
+    }
+
+    return { userDo, state }
+}
+
+test('fetchFeed persists resolved URL after a trailing-slash redirect',
+    async t => {
+        const { userDo, state } = createUrlPersistHarness({
+            collisionRows: []
+        })
+        const originalFetch = globalThis.fetch
+        const fetched:string[] = []
+
+        globalThis.fetch = async (url) => {
+            const text = String(url)
+
+            if (text.startsWith('https://cloudflare-dns.com/')) {
+                return new Response(JSON.stringify({
+                    Answer: [{ data: '93.184.216.34' }]
+                }))
+            }
+
+            fetched.push(text)
+
+            if (text === 'https://example.com/rss') {
+                return new Response(null, {
+                    status: 301,
+                    headers: { location: '/rss/' }
+                })
+            }
+
+            return new Response(rssFeed(itemXml(1)))
+        }
+
+        try {
+            await userDo.fetchFeed({
+                id: 7,
+                url: 'https://example.com/rss',
+                title: null,
+                description: null,
+                site_url: null,
+                last_fetched: null,
+                last_error: null,
+                last_status: null,
+                created_at: '2026-04-27 00:00:00',
+                updated_at: '2026-04-27 00:00:00'
+            })
+        } finally {
+            globalThis.fetch = originalFetch
+        }
+
+        t.deepEqual(
+            fetched,
+            ['https://example.com/rss', 'https://example.com/rss/'],
+            'redirect is followed without re-stripping the slash'
+        )
+        t.deepEqual(
+            state.collisionProbe,
+            {
+                canonical: 'https://example.com/rss/',
+                excludeId: 7
+            },
+            'collision check uses resolved URL and excludes the row itself'
+        )
+        t.deepEqual(
+            state.urlUpdate,
+            {
+                url: 'https://example.com/rss/',
+                id: 7
+            },
+            'feed.url is rewritten to the canonical, slashed URL'
+        )
+    }
+)
+
+test('fetchFeed leaves URL unchanged when canonical is already taken',
+    async t => {
+        const { userDo, state } = createUrlPersistHarness({
+            collisionRows: [{ id: 99 }]
+        })
+        const originalFetch = globalThis.fetch
+
+        globalThis.fetch = async (url) => {
+            const text = String(url)
+
+            if (text.startsWith('https://cloudflare-dns.com/')) {
+                return new Response(JSON.stringify({
+                    Answer: [{ data: '93.184.216.34' }]
+                }))
+            }
+
+            if (text === 'https://example.com/rss') {
+                return new Response(null, {
+                    status: 301,
+                    headers: { location: '/rss/' }
+                })
+            }
+
+            return new Response(rssFeed(itemXml(1)))
+        }
+
+        try {
+            await userDo.fetchFeed({
+                id: 7,
+                url: 'https://example.com/rss',
+                title: null,
+                description: null,
+                site_url: null,
+                last_fetched: null,
+                last_error: null,
+                last_status: null,
+                created_at: '2026-04-27 00:00:00',
+                updated_at: '2026-04-27 00:00:00'
+            })
+        } finally {
+            globalThis.fetch = originalFetch
+        }
+
+        t.equal(
+            state.urlUpdate,
+            null,
+            'no UPDATE feeds SET url is issued when collision exists'
+        )
+        t.deepEqual(
+            state.collisionProbe,
+            {
+                canonical: 'https://example.com/rss/',
+                excludeId: 7
+            },
+            'collision check still runs to detect the conflict'
+        )
+    }
+)

@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { type FunctionComponent } from 'preact'
 import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
+import { DetailsSummary } from '@substrate-system/details-summary'
 import '@substrate-system/check-box'
 import '@substrate-system/tool-tip'
 import {
@@ -19,13 +20,14 @@ import {
 import {
     getBootstrappedDb,
     getLocalDb,
-    clearFeedCache
+    clearFeedCache,
+    Feed
 } from '../db/index.js'
 import { loadStorageUsage } from '../db/storage-usage.js'
 import { ItemRow } from '../components/item-row.js'
 import { Sidebar } from '../components/sidebar.js'
 import Debug from '@substrate-system/debug'
-import { NBSP } from '../constants.js'
+import { AMP, NBSP } from '../constants.js'
 const debug = Debug('rsss:view')
 
 /**
@@ -246,7 +248,7 @@ export const FeedReader:FunctionComponent<{
                                 const eff = resolveEffectivePolicy(policy)
                                 const modeLabel = (eff.cacheMode === 'text' ?
                                     'Text only' :
-                                    'Text + images')
+                                    `Text ${AMP} images`)
                                 const sizeVal = policy?.max_size_bytes != null ?
                                     String(Math.round(
                                         policy.max_size_bytes / 1_000_000
@@ -258,7 +260,7 @@ export const FeedReader:FunctionComponent<{
                                     )) :
                                     ''
                                 return html`
-                                    <details-summary
+                                    <${DetailsSummary.TAG}
                                         class="feed-cache-controls"
                                         key=${selectedFeed.id}
                                         duration=${
@@ -311,7 +313,7 @@ export const FeedReader:FunctionComponent<{
                                                                     'text_images'
                                                                 }
                                                             >
-                                                                Text + images
+                                                                Text ${AMP} images
                                                             </option>
                                                         </select>
                                                     </label>
@@ -354,7 +356,7 @@ export const FeedReader:FunctionComponent<{
                                                 </button>
                                             </div>
                                         </details>
-                                    </details-summary>
+                                    <//>
                                 `
                             })()}
                         `}
@@ -439,4 +441,11 @@ export const FeedReader:FunctionComponent<{
             </div>
         </div>
     `
+}
+
+function CacheSettings ({ state, selectedFeed }:{
+    state:AppState;
+    selectedFeed:Feed|null;
+}) {
+
 }

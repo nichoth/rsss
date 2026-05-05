@@ -32,7 +32,26 @@ export interface FetchOgImageOptions {
     onError?:(err:unknown) => void
 }
 
+// Public — used at user-entry / dedup time. Strips trailing slash so
+// `…/feed` and `…/feed/` collapse to the same canonical row.
 export async function validateFeedUrl (feedUrl:string):Promise<string> {
+    const url = parseAndAssertAllowed(feedUrl)
+
+    if (url.pathname.length > 1 && url.pathname.endsWith('/')) {
+        url.pathname = url.pathname.replace(/\/+$/, '')
+    }
+
+    return url.toString()
+}
+
+// Security check only. Used inside the redirect loop so we honor whatever
+// the server says is canonical — re-applying slash-stripping there causes
+// an infinite redirect loop on hosts whose canonical path ends in `/`.
+async function assertFeedUrlAllowed (feedUrl:string):Promise<string> {
+    return parseAndAssertAllowed(feedUrl).toString()
+}
+
+function parseAndAssertAllowed (feedUrl:string):URL {
     let url:URL
 
     try {
@@ -49,24 +68,30 @@ export async function validateFeedUrl (feedUrl:string):Promise<string> {
         throw new FeedFetchError('Feed URL host is not allowed')
     }
 
-    if (url.pathname.length > 1 && url.pathname.endsWith('/')) {
-        url.pathname = url.pathname.replace(/\/+$/, '')
-    }
+    return url
+}
 
-    return url.toString()
+export interface FetchFeedTextResult {
+    text:string
+    url:string
 }
 
 export async function fetchFeedText (
     feedUrl:string,
     options:FetchFeedTextOptions = {}
-):Promise<string> {
+):Promise<FetchFeedTextResult> {
     const result = await fetchValidatedResponse(feedUrl, {
         ...options,
         maxRedirects: MAX_FEED_REDIRECTS,
         redirectErrorMessage: 'Feed redirected too many times'
     })
 
-    return readBoundedText(result.response, options.maxBytes || MAX_FEED_BYTES)
+    const text = await readBoundedText(
+        result.response,
+        options.maxBytes || MAX_FEED_BYTES
+    )
+
+    return { text, url: result.url }
 }
 
 export async function fetchOgImage (
@@ -107,7 +132,7 @@ export async function fetchValidatedResponse (
         redirectErrorMessage?:string
     }
 ):Promise<{ response:Response; url:string }> {
-    let url = await validateFeedUrl(inputUrl)
+    let url = await assertFeedUrlAllowed(inputUrl)
     const fetchFn = options.fetchFn || fetch
     const resolveHostname = options.resolveHostname ||
         (options.fetchFn ? undefined : resolveHostnameWithDoh)
@@ -143,7 +168,9 @@ export async function fetchValidatedResponse (
                 )
             }
 
-            url = await validateFeedUrl(new URL(location, url).toString())
+            url = await assertFeedUrlAllowed(
+                new URL(location, url).toString()
+            )
             continue
         }
 
