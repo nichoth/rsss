@@ -311,6 +311,13 @@ test('fetchFeed records feed too large when parsed rows are truncated',
                     return { toArray: () => [] }
                 }
 
+                if (
+                    query.includes('COUNT(items.id)') &&
+                    query.includes('GROUP BY feeds.id')
+                ) {
+                    return { toArray: () => [] }
+                }
+
                 throw new Error(`Unexpected SQL: ${query}`)
             }
         }
@@ -416,6 +423,13 @@ test('fetchFeed stores og image for newly inserted items', async t => {
             }
 
             if (query.includes('SELECT feeds.id FROM feeds')) {
+                return { toArray: () => [] }
+            }
+
+            if (
+                query.includes('COUNT(items.id)') &&
+                query.includes('GROUP BY feeds.id')
+            ) {
                 return { toArray: () => [] }
             }
 
@@ -541,6 +555,13 @@ test('fetchFeed caps concurrent og image requests at four', async t => {
             }
 
             if (query.includes('SELECT feeds.id FROM feeds')) {
+                return { toArray: () => [] }
+            }
+
+            if (
+                query.includes('COUNT(items.id)') &&
+                query.includes('GROUP BY feeds.id')
+            ) {
                 return { toArray: () => [] }
             }
 
@@ -684,6 +705,13 @@ test('fetchFeed silently handles og failures, uses parser image', async t => {
                 return { toArray: () => [] }
             }
 
+            if (
+                query.includes('COUNT(items.id)') &&
+                query.includes('GROUP BY feeds.id')
+            ) {
+                return { toArray: () => [] }
+            }
+
             throw new Error(`Unexpected SQL: ${query}`)
         }
     }
@@ -809,6 +837,13 @@ test('fetchFeed records non-duplicate item insert failures', async t => {
                 return { toArray: () => [] }
             }
 
+            if (
+                query.includes('COUNT(items.id)') &&
+                query.includes('GROUP BY feeds.id')
+            ) {
+                return { toArray: () => [] }
+            }
+
             throw new Error(`Unexpected SQL: ${query}`)
         }
     }
@@ -911,6 +946,13 @@ test('fetchFeed stays quiet when article URL exceeds redirect budget',
                 }
 
                 if (query.includes('SELECT feeds.id FROM feeds')) {
+                    return { toArray: () => [] }
+                }
+
+                if (
+                    query.includes('COUNT(items.id)') &&
+                    query.includes('GROUP BY feeds.id')
+                ) {
                     return { toArray: () => [] }
                 }
 
@@ -1036,6 +1078,13 @@ test('fetchFeed resolves og image after multi-hop article redirects',
                 }
 
                 if (query.includes('SELECT feeds.id FROM feeds')) {
+                    return { toArray: () => [] }
+                }
+
+                if (
+                    query.includes('COUNT(items.id)') &&
+                    query.includes('GROUP BY feeds.id')
+                ) {
                     return { toArray: () => [] }
                 }
 
@@ -1173,6 +1222,13 @@ test('fetchFeed falls back to feed image when article redirects loop',
                     return { toArray: () => [] }
                 }
 
+                if (
+                    query.includes('COUNT(items.id)') &&
+                    query.includes('GROUP BY feeds.id')
+                ) {
+                    return { toArray: () => [] }
+                }
+
                 throw new Error(`Unexpected SQL: ${query}`)
             }
         }
@@ -1294,6 +1350,13 @@ test('fetchFeed leaves thumbnail null when article loops and feed has none',
                     return { toArray: () => [] }
                 }
 
+                if (
+                    query.includes('COUNT(items.id)') &&
+                    query.includes('GROUP BY feeds.id')
+                ) {
+                    return { toArray: () => [] }
+                }
+
                 throw new Error(`Unexpected SQL: ${query}`)
             }
         }
@@ -1399,6 +1462,13 @@ test('fetchFeed loudly reports feed-XML redirect overflow', async t => {
             }
 
             if (query.includes('SELECT feeds.id FROM feeds')) {
+                return { toArray: () => [] }
+            }
+
+            if (
+                query.includes('COUNT(items.id)') &&
+                query.includes('GROUP BY feeds.id')
+            ) {
                 return { toArray: () => [] }
             }
 
@@ -1552,6 +1622,13 @@ function createUrlPersistHarness (opts:{
             }
 
             if (query.includes('SELECT feeds.id FROM feeds')) {
+                return { toArray: () => [] }
+            }
+
+            if (
+                query.includes('COUNT(items.id)') &&
+                query.includes('GROUP BY feeds.id')
+            ) {
                 return { toArray: () => [] }
             }
 

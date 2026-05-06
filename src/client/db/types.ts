@@ -56,7 +56,16 @@ export interface FeedsResponse {
     feeds:Feed[]
     feedUpdateStatus?:'synced'|'updates'
     feedsWithUpdates?:string[]
-    feedUpdateCounts?:Record<string, number>
+}
+
+/**
+ * Response shape for `GET /api/feed-status`. Drives the header
+ * "n updates / up to date" indicator. See
+ * `specs/008-fix-up-to-date-dot/contracts/feed-status-endpoint.md`.
+ */
+export interface FeedStatusResponse {
+    feedUpdateCounts:Record<string, number>
+    totalPending:number
 }
 
 /**

@@ -30,7 +30,7 @@ under `test/` (Node-side stubs of CF Workers + DOM, run via `tape`).
 **Purpose**: No new dependencies, tooling, or project structure are
 required for this feature; setup is intentionally minimal.
 
-- [ ] T001 Confirm working tree is clean and on branch
+- [X] T001 Confirm working tree is clean and on branch
   `008-fix-up-to-date-dot`; run `npm install` then `npm test && npm
   run lint` once to capture a green baseline before changes.
 
@@ -45,21 +45,21 @@ can be worked on.
 **CRITICAL**: No user story work can begin until this phase is
 complete.
 
-- [ ] T002 [P] Add `FeedStatusResponse` interface
+- [X] T002 [P] Add `FeedStatusResponse` interface
   (`{ feedUpdateCounts:Record<string, number>; totalPending:number }`)
   to `src/client/db/types.ts` per
   `specs/008-fix-up-to-date-dot/contracts/feed-status-endpoint.md`.
-- [ ] T003 [P] Extend `test/do-handlers.ts` with `GET /feed-status`
+- [X] T003 [P] Extend `test/do-handlers.ts` with `GET /feed-status`
   cases: empty feeds (`{}`, 0), mixed pending (multiple feeds with
   varied counts), fully synced (all zeros). Tests must FAIL until
   T004 lands.
-- [ ] T004 Implement `GET /feed-status` route in
+- [X] T004 Implement `GET /feed-status` route in
   `src/server/durable-objects/index.ts` that calls the existing
   `getFeedUpdateCounts()` and returns
   `{ feedUpdateCounts, totalPending }`. Mount under the same
   `dataRouter` group covered by `requireAuth`; do NOT add
   `requireEntitlement` (free users must reach it per FR-004).
-- [ ] T005 Add `State.loadFeedStatus(state)` shell in
+- [X] T005 Add `State.loadFeedStatus(state)` shell in
   `src/client/state.ts` that issues `GET /api/feed-status` via the
   shared `ky` client, parses `FeedStatusResponse`, and sets
   `state.feedUpdateCounts` + `state.feedSyncStatus`
@@ -87,40 +87,40 @@ indicator in the red error state — never green.
 
 ### Tests for User Story 1 (write FIRST; ensure they FAIL)
 
-- [ ] T006 [P] [US1] Add `test/feed-status-loader.ts` covering
+- [X] T006 [P] [US1] Add `test/feed-status-loader.ts` covering
   `State.loadFeedStatus()`: success populates
   `feedUpdateCounts` + `feedSyncStatus` from the response;
   HTTP 5xx path sets `feedSyncStatus = 'error'` and `feedSyncError`;
   HTTP 401 clears the user and routes to `/login` (matches existing
   `PullSyncAuthError` handling).
-- [ ] T007 [P] [US1] Extend `test/feed-status.ts` to assert the
+- [X] T007 [P] [US1] Extend `test/feed-status.ts` to assert the
   `<FeedStatus>` component renders the red "sync failed" pill when
   `feedSyncStatus = 'error'` (this state is the page-load failure
   path, FR-012 / SC-006).
-- [ ] T008 [P] [US1] Extend `test/dot.ts` with the error-color path
+- [X] T008 [P] [US1] Extend `test/dot.ts` with the error-color path
   (red dot for `feedSyncStatus = 'error'`), plus assertions that blue
   dot shows when `totalPending > 0` and green dot shows when
   `totalPending === 0`.
 
 ### Implementation for User Story 1
 
-- [ ] T009 [US1] Wire `State.loadFeedStatus(state)` into the
+- [X] T009 [US1] Wire `State.loadFeedStatus(state)` into the
   post-auth boot path in `src/client/state.ts` (the function that
   today calls `State.loadFeeds(state)` after auth resolves). Call it
   alongside `loadFeeds`, not nested, so indicator state and feed list
   are decoupled.
-- [ ] T010 [US1] Remove indicator state writes from `State.loadFeeds`
+- [X] T010 [US1] Remove indicator state writes from `State.loadFeeds`
   in `src/client/state.ts`: stop assigning
   `state.feedUpdateCounts` and `state.feedSyncStatus` from the feeds
   response. The function now only loads the feeds list.
-- [ ] T011 [P] [US1] In `src/client/db/remote-adapter.ts`, drop
+- [X] T011 [P] [US1] In `src/client/db/remote-adapter.ts`, drop
   `feedUpdateCounts` from the `getFeeds()` parsed shape and from the
   returned `FeedsResponse`. Keep the wire response tolerant (accept
   but ignore the legacy field for one deploy window).
-- [ ] T012 [P] [US1] In `src/client/db/types.ts`, remove
+- [X] T012 [P] [US1] In `src/client/db/types.ts`, remove
   `feedUpdateCounts` from `FeedsResponse` so `localAdapter` and
   `remoteAdapter` agree on the trimmed shape.
-- [ ] T013 [US1] Trigger `State.loadFeedStatus(state)` on the
+- [X] T013 [US1] Trigger `State.loadFeedStatus(state)` on the
   browser `online` event handler in `src/client/state.ts` (mirrors
   the existing `runSync` rerun); ensures recovery from transient
   offline at boot.
@@ -147,12 +147,12 @@ reconciles after reconnect.
 
 ### Tests for User Story 2 (write FIRST; ensure they FAIL)
 
-- [ ] T014 [P] [US2] Extend `test/do-handlers.ts` (or add a focused
+- [X] T014 [P] [US2] Extend `test/do-handlers.ts` (or add a focused
   case alongside) to assert the new `feed-updates-available` SSE
   payload shape: `{ feedUpdateCounts: { [feedId]: number } }`,
   emitted on every `fetchFeed` call where `newItems.length > 0`
   (i.e. without the `wasAlreadyUnsynced` short-circuit).
-- [ ] T015 [P] [US2] Extend `test/feed-status-loader.ts`:
+- [X] T015 [P] [US2] Extend `test/feed-status-loader.ts`:
   - On `feed-updates-available` event with a counts payload, the
     client overwrites `feedUpdateCounts` (does not increment); a
     payload entry of `0` removes that feed from the map.
@@ -163,14 +163,14 @@ reconciles after reconnect.
 
 ### Implementation for User Story 2
 
-- [ ] T016 [US2] In `src/server/durable-objects/index.ts` `fetchFeed`
+- [X] T016 [US2] In `src/server/durable-objects/index.ts` `fetchFeed`
   (around the existing `wasAlreadyUnsynced` block), replace the
   broadcast with one that runs `getFeedUpdateCounts()` (filtered to
   the touched feed(s)) and emits
   `broadcast('feed-updates-available', { feedUpdateCounts })`. Remove
   the `&& !wasAlreadyUnsynced` short-circuit so additional items on
   an already-unsynced feed still broadcast (Acceptance 2.2).
-- [ ] T017 [US2] In `src/client/state.ts` `feed-updates-available`
+- [X] T017 [US2] In `src/client/state.ts` `feed-updates-available`
   handler, switch from the `updateCountsFromFeedIds` increment path
   to a merge-and-prune of the canonical counts from the payload
   (overwrite; entries with value `0` are deleted). Recompute
@@ -178,12 +178,12 @@ reconciles after reconnect.
   `'synced'` if 0). Keep a one-deploy-window fallback that calls
   `State.loadFeedStatus(state)` if the legacy `feedIds` shape is
   received.
-- [ ] T018 [US2] In `src/client/state.ts` EventSource setup, add an
+- [X] T018 [US2] In `src/client/state.ts` EventSource setup, add an
   `open` handler that, on every successful `open` after the first,
   calls `State.loadFeedStatus(state)` to reconcile (FR-007). The
   first `open` does not need to refetch because the boot path already
   loaded status (US1).
-- [ ] T019 [US2] In the `feed-updates-available` handler, ignore
+- [X] T019 [US2] In the `feed-updates-available` handler, ignore
   payload entries whose `feedId` is not present in
   `state.feeds.value` (edge case in spec; defensive against late
   events for unsubscribed feeds).
@@ -208,27 +208,27 @@ remaining count after refresh completes.
 
 ### Tests for User Story 3 (write FIRST; ensure they FAIL)
 
-- [ ] T020 [P] [US3] Extend `test/feed-status-loader.ts`: after a
+- [X] T020 [P] [US3] Extend `test/feed-status-loader.ts`: after a
   `refresh-complete` SSE event the client calls
   `State.loadFeedStatus(state)` (defensive reconcile beyond the
   immediate `feedUpdateCounts = {}` clear); and on a refresh that
   partially fails, `feedSyncStatus` ends in `'error'` and is not
   silently overwritten by a subsequent `loadFeedStatus()` success
   unless the underlying state is genuinely caught up.
-- [ ] T021 [P] [US3] Extend `test/feed-status.ts` to assert the
+- [X] T021 [P] [US3] Extend `test/feed-status.ts` to assert the
   green `'up to date'` rendering when `feedSyncStatus === 'synced'`
   and `totalPending === 0` after a refresh sequence.
 
 ### Implementation for User Story 3
 
-- [ ] T022 [US3] In `src/client/state.ts` `refresh-complete`
+- [X] T022 [US3] In `src/client/state.ts` `refresh-complete`
   handler, after the existing `feedUpdateCounts = {}` /
   `feedSyncStatus = 'synced'` assignment, call
   `State.loadFeedStatus(state)` to defensively reconcile in case
   items arrived during the refresh window (Acceptance 3.2). Keep the
   existing optimistic clear so the dot reacts immediately; the
   reconcile is a follow-up.
-- [ ] T023 [US3] Confirm the `refreshFeeds()` failure path in
+- [X] T023 [US3] Confirm the `refreshFeeds()` failure path in
   `src/client/state.ts` still sets `feedSyncStatus = 'error'` and
   that the new `loadFeedStatus` reconcile in T022 does NOT run on
   the failure branch (Acceptance 3.3 / FR-009).
@@ -243,17 +243,17 @@ green when items remain. SC-003 verifiable.
 **Purpose**: Final integration sweep across stories and verification
 against the quickstart.
 
-- [ ] T024 [P] Update `src/client/state.ts` JSDoc / comments for
+- [X] T024 [P] Update `src/client/state.ts` JSDoc / comments for
   `loadFeedStatus`, the `feed-updates-available` handler, and the
   EventSource `open` reconciler so the next reader sees the
   "indicator is server-vs-client divergence; this is the single
   source" invariant.
-- [ ] T025 Remove the legacy `feedIds`-shape fallback in the
+- [X] T025 Remove the legacy `feedIds`-shape fallback in the
   `feed-updates-available` handler in `src/client/state.ts` once a
   deploy window has passed (gate with a follow-up commit; flagged
   here so it is not forgotten). Until then, leave the fallback in
   place.
-- [ ] T026 [P] Run `npm test && npm run lint`; fix any failures and
+- [X] T026 [P] Run `npm test && npm run lint`; fix any failures and
   update affected tests. Capture the green output to confirm
   baseline restored after all changes.
 - [ ] T027 Walk through `specs/008-fix-up-to-date-dot/quickstart.md`

@@ -41,14 +41,27 @@ function feedRow (id:number, url:string, title:string|null):FeedRow {
     }
 }
 
-function createSql () {
-    const feeds:FeedRow[] = [
+interface PendingCountRow {
+    id:number|string
+    pending_count:number|string|null
+}
+
+function createSql (options:{
+    feeds?:FeedRow[]
+    pendingCountRows?:PendingCountRow[]
+} = {}) {
+    const feeds:FeedRow[] = options.feeds ?? [
         feedRow(1, 'https://bravo.example/feed.xml', 'Bravo'),
         feedRow(2, 'https://alpha.example/feed.xml', 'Alpha')
     ]
+    let pendingCountRows:PendingCountRow[]|null =
+        options.pendingCountRows ?? null
 
     return {
         feeds,
+        setPendingCountRows (rows:PendingCountRow[]) {
+            pendingCountRows = rows
+        },
         exec (query:string, ...params:unknown[]) {
             if (query.includes('SELECT * FROM feeds ORDER BY title ASC')) {
                 return result([...feeds].sort((a, b) => {
@@ -82,6 +95,16 @@ function createSql () {
                 return result([])
             }
 
+            if (query.includes('pending_count')) {
+                if (pendingCountRows !== null) {
+                    return result(pendingCountRows)
+                }
+                return result(feeds.map(feed => ({
+                    id: feed.id,
+                    pending_count: 0
+                })))
+            }
+
             if (query.includes('last_pulled_at')) {
                 return result([])
             }
@@ -91,8 +114,11 @@ function createSql () {
     }
 }
 
-function createDoHarness () {
-    const sql = createSql()
+function createDoHarness (options:{
+    feeds?:FeedRow[]
+    pendingCountRows?:PendingCountRow[]
+} = {}) {
+    const sql = createSql(options)
     const refreshed:number[] = []
     const waitUntilPromises:Promise<unknown>[] = []
     const storage = new Map<string, unknown>()
@@ -275,6 +301,77 @@ test(
         t.equal(sql.feeds.length, 2, 'no feed rows are changed')
     }
 )
+
+test(
+    'GET /feed-status returns empty counts when no feeds are pending',
+    async t => {
+        const { app } = createDoHarness({
+            feeds: [],
+            pendingCountRows: []
+        })
+
+        const response = await app.request('/feed-status')
+        const body = await response.json() as {
+            feedUpdateCounts:Record<string, number>
+            totalPending:number
+        }
+
+        t.equal(response.status, 200, 'returns 200')
+        t.deepEqual(
+            body.feedUpdateCounts,
+            {},
+            'feedUpdateCounts is an empty object'
+        )
+        t.equal(body.totalPending, 0, 'totalPending is 0')
+    }
+)
+
+test('GET /feed-status returns mixed pending counts', async t => {
+    const { app } = createDoHarness({
+        pendingCountRows: [
+            { id: 1, pending_count: 3 },
+            { id: 2, pending_count: 0 },
+            { id: 5, pending_count: 7 }
+        ]
+    })
+
+    const response = await app.request('/feed-status')
+    const body = await response.json() as {
+        feedUpdateCounts:Record<string, number>
+        totalPending:number
+    }
+
+    t.equal(response.status, 200, 'returns 200')
+    t.deepEqual(
+        body.feedUpdateCounts,
+        { 1: 3, 2: 0, 5: 7 },
+        'feedUpdateCounts contains stringified ids and integer counts'
+    )
+    t.equal(body.totalPending, 10, 'totalPending sums values across feeds')
+})
+
+test('GET /feed-status returns zeros when fully synced', async t => {
+    const { app } = createDoHarness({
+        pendingCountRows: [
+            { id: 1, pending_count: 0 },
+            { id: 2, pending_count: 0 }
+        ]
+    })
+
+    const response = await app.request('/feed-status')
+    const body = await response.json() as {
+        feedUpdateCounts:Record<string, number>
+        totalPending:number
+    }
+
+    t.equal(response.status, 200, 'returns 200')
+    t.deepEqual(
+        body.feedUpdateCounts,
+        { 1: 0, 2: 0 },
+        'each subscribed feed reported as 0 pending'
+    )
+    t.equal(body.totalPending, 0, 'totalPending sums to 0')
+})
 
 test('UserDO delete feed clamps future client timestamps', async t => {
     const { app, sql } = createDoHarness()

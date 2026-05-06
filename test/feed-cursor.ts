@@ -251,6 +251,7 @@ interface FetchFeedDoType {
     sql:{ exec:(q:string, ...p:unknown[]) => QueryResult }
     broadcasts:BroadcastCall[]
     getFeedsWithUpdates:() => string[]
+    getFeedUpdateCounts:() => Record<string, number>
     broadcast:(event:string, data:unknown) => void
     parseFeed:(text:string) => {
         title:string|null
@@ -278,12 +279,14 @@ function createFetchFeedHarness (opts:{
     initialUnsyncedIds?:string[]
     postInsertUnsyncedIds?:string[]
     newItemCount?:number
+    postInsertCounts?:Record<string, number>
 } = {}) {
     const broadcasts:BroadcastCall[] = []
     const {
         initialUnsyncedIds = [],
         postInsertUnsyncedIds = ['1'],
-        newItemCount = 1
+        newItemCount = 1,
+        postInsertCounts = { 1: 1 }
     } = opts
 
     let getFeedsCallCount = 0
@@ -326,6 +329,8 @@ function createFetchFeedHarness (opts:{
             postInsertUnsyncedIds
     }
 
+    userDo.getFeedUpdateCounts = () => postInsertCounts
+
     userDo.doFetchFeedText = async (url:string) => {
         return { text: '<rss/>', url }
     }
@@ -363,11 +368,13 @@ function createFetchFeedHarness (opts:{
     }
 }
 
-test('fetchFeed emits feed-updates-available when new items arrive for new feed',
+test(
+    'fetchFeed emits feed-updates-available with feedUpdateCounts for new feed',
     async t => {
         const { userDo, broadcasts, feed } = createFetchFeedHarness({
             initialUnsyncedIds: [],
-            newItemCount: 1
+            newItemCount: 1,
+            postInsertCounts: { 1: 1 }
         })
 
         await userDo.fetchFeed(feed)
@@ -380,20 +387,56 @@ test('fetchFeed emits feed-updates-available when new items arrive for new feed'
             1,
             'feed-updates-available emitted once'
         )
+        const data = availableBroadcasts[0].data as {
+            feedUpdateCounts:Record<string, number>
+        }
         t.deepEqual(
-            (availableBroadcasts[0].data as { feedIds:string[] }).feedIds,
-            ['1'],
-            'payload contains the feed ID'
+            data.feedUpdateCounts,
+            { 1: 1 },
+            'payload carries feedUpdateCounts for the touched feed'
         )
     }
 )
 
 test(
-    'fetchFeed does not emit feed-updates-available when feed already unsynced',
+    'fetchFeed re-broadcasts feed-updates-available when feed already unsynced ' +
+        '(count grows)',
     async t => {
         const { userDo, broadcasts, feed } = createFetchFeedHarness({
             initialUnsyncedIds: ['1'],
-            newItemCount: 1
+            newItemCount: 1,
+            postInsertCounts: { 1: 3 }
+        })
+
+        await userDo.fetchFeed(feed)
+
+        const availableBroadcasts = broadcasts.filter(
+            b => b.event === 'feed-updates-available'
+        )
+        t.equal(
+            availableBroadcasts.length,
+            1,
+            'feed-updates-available re-emitted even when feed was already ' +
+                'unsynced (Acceptance 2.2)'
+        )
+        const data = availableBroadcasts[0].data as {
+            feedUpdateCounts:Record<string, number>
+        }
+        t.deepEqual(
+            data.feedUpdateCounts,
+            { 1: 3 },
+            'payload carries the canonical (grown) pending count'
+        )
+    }
+)
+
+test(
+    'fetchFeed does not emit feed-updates-available when no new items arrive',
+    async t => {
+        const { userDo, broadcasts, feed } = createFetchFeedHarness({
+            initialUnsyncedIds: [],
+            newItemCount: 0,
+            postInsertCounts: {}
         })
 
         await userDo.fetchFeed(feed)
@@ -404,7 +447,7 @@ test(
         t.equal(
             availableBroadcasts.length,
             0,
-            'feed-updates-available not re-emitted for already-unsynced feed'
+            'feed-updates-available skipped when newItems.length === 0'
         )
     }
 )

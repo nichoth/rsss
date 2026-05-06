@@ -591,6 +591,19 @@ export class UserDO extends DurableObject<Env> {
             })
         })
 
+        // Server-vs-client divergence indicator. Single round-trip
+        // source for the header "n updates / up to date" pill (see
+        // specs/008-fix-up-to-date-dot/contracts/feed-status-endpoint.md).
+        // Mounted under the same `/api` proxy as `/feeds`, so it
+        // inherits `requireAuth` from `dataRouter` without
+        // `requireEntitlement` — free users must reach this endpoint.
+        app.get('/feed-status', (c) => {
+            const feedUpdateCounts = this.getFeedUpdateCounts()
+            const totalPending = Object.values(feedUpdateCounts)
+                .reduce((sum, count) => sum + count, 0)
+            return c.json({ feedUpdateCounts, totalPending })
+        })
+
         // List all feeds
         app.get('/feeds', (c) => {
             const feeds = this.sql.exec(
@@ -1433,11 +1446,6 @@ export class UserDO extends DurableObject<Env> {
                 }
             }
 
-            // Snapshot unsynced set before inserting to detect
-            // newly-unsynced feeds (avoids re-broadcasting spam).
-            const wasAlreadyUnsynced = this.getFeedsWithUpdates()
-                .includes(String(feed.id))
-
             // Insert new items
             const newItems:NewFeedItem[] = []
             for (const item of parsedFeed.items) {
@@ -1502,9 +1510,18 @@ export class UserDO extends DurableObject<Env> {
 
             await this.updateNewItemThumbnails(newItems)
 
-            if (newItems.length > 0 && !wasAlreadyUnsynced) {
+            if (newItems.length > 0) {
+                // Send canonical pending count for the touched feed so
+                // the client is a passive renderer of state. Re-broadcast
+                // even when the feed was already in the unsynced set
+                // (Acceptance 2.2): the displayed count must keep up
+                // with the server.
+                const allCounts = this.getFeedUpdateCounts()
+                const feedIdStr = String(feed.id)
                 this.broadcast('feed-updates-available', {
-                    feedIds: [String(feed.id)]
+                    feedUpdateCounts: {
+                        [feedIdStr]: allCounts[feedIdStr] ?? 0
+                    }
                 })
             }
 
