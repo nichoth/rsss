@@ -278,7 +278,7 @@ function itemByRouteResponse ():Response {
     }))
 }
 
-test('loadFeeds hydrates synced status from empty update counts',
+test('loadFeeds does not write indicator state (owned by loadFeedStatus)',
     async t => {
         const originalFetch = globalThis.fetch
 
@@ -286,115 +286,38 @@ test('loadFeeds hydrates synced status from empty update counts',
         _resetAdapterCache()
 
         try {
+            // The server may still return legacy `feedUpdateCounts`
+            // for one deploy window; loadFeeds must ignore it.
             globalThis.fetch = async () => new Response(JSON.stringify({
                 feeds: mockFeeds,
-                feedUpdateCounts: {}
+                feedUpdateCounts: { 1: 2 }
             }))
 
             const state = feedState()
+            const originalStatus = state.feedSyncStatus.value
+            const originalCounts = state.feedUpdateCounts.value
 
             await State.loadFeeds(state)
 
             t.equal(
                 state.feedSyncStatus.value,
-                'synced',
-                'empty feed update counts hydrate synced status'
+                originalStatus,
+                'loadFeeds does NOT touch feedSyncStatus'
             )
             t.deepEqual(
                 state.feedUpdateCounts.value,
-                {},
-                'stores the empty count map'
+                originalCounts,
+                'loadFeeds does NOT touch feedUpdateCounts'
+            )
+            t.equal(
+                state.feeds.value.length,
+                mockFeeds.length,
+                'loadFeeds still loads the feeds list'
             )
             t.equal(
                 state.feedsLoading.value,
                 false,
                 'clears loading after bootstrap hydration'
-            )
-        } finally {
-            globalThis.fetch = originalFetch
-            _resetAdapterCache()
-        }
-    })
-
-test('loadFeeds hydrates update status from non-empty update counts',
-    async t => {
-        const originalFetch = globalThis.fetch
-
-        syncSubscriptions.value = false
-        _resetAdapterCache()
-
-        try {
-            globalThis.fetch = async () => new Response(JSON.stringify({
-                feeds: mockFeeds,
-                feedUpdateCounts: {
-                    1: 2,
-                    2: 1
-                }
-            }))
-
-            const state = feedState()
-
-            await State.loadFeeds(state)
-
-            t.equal(
-                state.feedSyncStatus.value,
-                'updates',
-                'non-empty feed update counts hydrate updates status'
-            )
-            t.deepEqual(
-                state.feedUpdateCounts.value,
-                {
-                    1: 2,
-                    2: 1
-                },
-                'stores the response count map'
-            )
-        } finally {
-            globalThis.fetch = originalFetch
-            _resetAdapterCache()
-        }
-    })
-
-test('loadFeeds flips synced status back to updates on later counts',
-    async t => {
-        const originalFetch = globalThis.fetch
-        let feedLoads = 0
-
-        syncSubscriptions.value = false
-        _resetAdapterCache()
-
-        try {
-            globalThis.fetch = async () => {
-                feedLoads += 1
-                return new Response(JSON.stringify({
-                    feeds: mockFeeds,
-                    feedUpdateCounts: feedLoads === 1 ?
-                        {} :
-                        { 1: 4 }
-                }))
-            }
-
-            const state = feedState()
-
-            await State.loadFeeds(state)
-
-            t.equal(
-                state.feedSyncStatus.value,
-                'synced',
-                'empty reload counts render the sticky green state'
-            )
-
-            await State.loadFeeds(state)
-
-            t.equal(
-                state.feedSyncStatus.value,
-                'updates',
-                'later non-empty reload counts move the dot to updates'
-            )
-            t.deepEqual(
-                state.feedUpdateCounts.value,
-                { 1: 4 },
-                'stores the latest pending count map'
             )
         } finally {
             globalThis.fetch = originalFetch

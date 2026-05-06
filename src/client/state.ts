@@ -20,6 +20,7 @@ import { setCurrentlyOpenItemId } from './open-item-registry.js'
 import type {
     CountsResponse,
     Feed,
+    FeedStatusResponse,
     Item,
     ItemsResponse
 } from './db/types.js'
@@ -186,17 +187,6 @@ export type AppState = {
     selectedFeedId:Signal<number|null>,
     isAuthenticated:Signal<boolean>,
     cleanup:() => void
-}
-
-function updateCountsFromFeedIds (
-    current:Record<string, number>,
-    feedIds:string[]
-):Record<string, number> {
-    const next = { ...current }
-    for (const feedId of feedIds) {
-        next[feedId] = next[feedId] ?? 1
-    }
-    return next
 }
 
 function clearFeedUpdateCounts (
@@ -427,6 +417,15 @@ export function State ():AppState {
 
     const handleOnline = () => {
         updateOnlineStatus()
+        // Reconcile the indicator before kicking off the local-first
+        // sync cycle. The pill never reports a stale "up to date" after
+        // a transient outage, even on online-only accounts where the
+        // sync cycle below short-circuits (FR-007).
+        if (state.user.value) {
+            State.loadFeedStatus(state).catch((err) => {
+                debug('online loadFeedStatus error:', err)
+            })
+        }
         if (!isLocalFirstActive.value) return
         const did = state.user.value?.did
         const db = getLocalDb(did)
@@ -505,6 +504,7 @@ State.refreshAfterSync = async function (
 
     await Promise.all([
         State.loadFeeds(state),
+        State.loadFeedStatus(state),
         State.loadItems(state),
         State.loadCounts(state)
     ])
@@ -582,27 +582,73 @@ State.openEventStream = function (state:AppState):void {
     source.addEventListener('refresh-complete', () => {
         debug('SSE refresh-complete')
         clearRefreshFeedsSafetyTimeout()
-        // local-first DB sync, NOT server feed pull
+        // local-first DB sync, NOT server feed pull. Optimistically
+        // clear so the dot reacts instantly; then defensively
+        // reconcile against the server in case items arrived during
+        // the refresh window (Acceptance 3.2).
         batch(() => {
             state.feedsLoading.value = false
             state.feedUpdateCounts.value = {}
             state.feedSyncStatus.value = 'synced'
         })
+        State.loadFeedStatus(state).catch((err) => {
+            debug('refresh-complete reconcile error:', err)
+        })
     })
 
+    // The server sends canonical per-feed pending counts; the
+    // client overwrites (does not increment) so it is a passive
+    // renderer of state. A `0` value means the feed is caught up
+    // and its entry is removed from the map. Entries for feeds the
+    // client does not know about (e.g. unsubscribed in another
+    // tab) are ignored. Legacy `feedIds` payloads from older
+    // server bundles fall back to a status reconcile for one
+    // deploy window (see T025).
     source.addEventListener('feed-updates-available', (ev) => {
         debug('SSE feed-updates-available', ev.data)
         try {
-            const { feedIds } = JSON.parse(ev.data) as {
-                feedIds:string[]
+            const parsed = JSON.parse(ev.data) as {
+                feedUpdateCounts?:Record<string, number>
+                feedIds?:string[]
             }
-            batch(() => {
-                state.feedUpdateCounts.value = updateCountsFromFeedIds(
-                    state.feedUpdateCounts.value,
-                    feedIds
+            if (
+                parsed.feedUpdateCounts &&
+                typeof parsed.feedUpdateCounts === 'object'
+            ) {
+                const known = new Set(
+                    state.feeds.value.map(f => String(f.id))
                 )
-                state.feedSyncStatus.value = 'updates'
-            })
+                const filteredEntries = Object.entries(
+                    parsed.feedUpdateCounts
+                ).filter(([feedId]) => known.has(feedId))
+                if (filteredEntries.length === 0) return
+                batch(() => {
+                    const next = { ...state.feedUpdateCounts.value }
+                    for (const [feedId, count] of filteredEntries) {
+                        if (count === 0) {
+                            delete next[feedId]
+                        } else {
+                            next[feedId] = count
+                        }
+                    }
+                    state.feedUpdateCounts.value = next
+                    const total = Object.values(next).reduce(
+                        (sum, n) => sum + n,
+                        0
+                    )
+                    state.feedSyncStatus.value = total > 0 ?
+                        'updates' :
+                        'synced'
+                })
+                return
+            }
+            // Legacy `feedIds` shape: defer to the authoritative
+            // status endpoint to recover the canonical counts.
+            if (Array.isArray(parsed.feedIds)) {
+                State.loadFeedStatus(state).catch((err) => {
+                    debug('legacy feedIds reconcile error:', err)
+                })
+            }
         } catch (err) {
             debug('feed-updates-available parse error:', err)
         }
@@ -629,8 +675,27 @@ State.openEventStream = function (state:AppState):void {
         }
     })
 
+    // EventSource auto-reconnects after errors; on each successful
+    // reopen *after the first one* we refetch authoritative status
+    // so missed `feed-updates-available` events during the outage
+    // cannot leave the indicator stale (FR-007). The first `open`
+    // is skipped because the post-auth boot already loaded status.
+    let hasOpenedBefore = false
+    let needsReconcile = false
+    source.addEventListener('open', () => {
+        debug('SSE open')
+        if (hasOpenedBefore && needsReconcile) {
+            needsReconcile = false
+            State.loadFeedStatus(state).catch((err) => {
+                debug('reconnect loadFeedStatus error:', err)
+            })
+        }
+        hasOpenedBefore = true
+    })
+
     source.addEventListener('error', (ev) => {
         debug('SSE error (auto-reconnect)', ev)
+        needsReconcile = true
     })
 }
 
@@ -1115,7 +1180,10 @@ State.logout = async function (
 }
 
 /**
- * Load feeds from remote DB
+ * Load feeds from remote DB. Indicator state
+ * (`feedUpdateCounts`/`feedSyncStatus`) is owned by
+ * `loadFeedStatus()`; this function only loads the feeds list so
+ * `localAdapter` and `remoteAdapter` consumers stay in sync.
  */
 State.loadFeeds = async function (
     state:AppState
@@ -1128,24 +1196,66 @@ State.loadFeeds = async function (
         )
         const data = await adapter.getFeeds()
         batch(() => {
-            const feedUpdateCounts = data.feedUpdateCounts ??
-                updateCountsFromFeedIds(
-                    {},
-                    data.feedsWithUpdates ?? []
-                )
-            const pendingUpdates = Object.values(feedUpdateCounts)
-                .reduce((sum, count) => sum + count, 0)
-
             state.feeds.value = data.feeds
-            state.feedUpdateCounts.value = feedUpdateCounts
-            state.feedSyncStatus.value = pendingUpdates > 0 ?
-                'updates' :
-                'synced'
             state.feedsLoading.value = false
         })
     } catch (err) {
         debug('Error loading feeds:', err)
         state.feedsLoading.value = false
+    }
+}
+
+/**
+ * Authoritative server-vs-client divergence call. Drives the
+ * header "n updates / up to date" indicator. Single source of
+ * truth for `feedUpdateCounts` and `feedSyncStatus`; both
+ * `localAdapter` and `remoteAdapter` clients route through
+ * here so the indicator is identical across modes.
+ *
+ * Failure path MUST set `feedSyncStatus = 'error'` (never lets
+ * the pill silently default to green; FR-012 / SC-006). 401 is
+ * treated as a session expiry and reuses the existing
+ * `handleSyncAuthError` flow.
+ */
+State.loadFeedStatus = async function (
+    state:AppState
+):Promise<void> {
+    try {
+        const res = await api.get('feed-status')
+        const data = await res.json<FeedStatusResponse>()
+        const counts = data.feedUpdateCounts ?? {}
+        const total = typeof data.totalPending === 'number' ?
+            data.totalPending :
+            Object.values(counts).reduce(
+                (sum, count) => sum + count,
+                0
+            )
+        batch(() => {
+            state.feedUpdateCounts.value = counts
+            state.feedSyncStatus.value = total > 0 ?
+                'updates' :
+                'synced'
+            state.feedSyncError.value = null
+        })
+    } catch (err) {
+        if (err instanceof HTTPError && err.response.status === 401) {
+            batch(() => {
+                state.user.value = null
+                state.authError.value = SYNC_AUTH_EXPIRED
+                state.feedSyncStatus.value = 'error'
+                state.feedSyncError.value = SYNC_AUTH_EXPIRED
+            })
+            state._setRoute('/login')
+            return
+        }
+        const message = err instanceof Error ?
+            err.message :
+            'Failed to load feed status'
+        batch(() => {
+            state.feedSyncStatus.value = 'error'
+            state.feedSyncError.value = message
+        })
+        debug('loadFeedStatus error:', err)
     }
 }
 

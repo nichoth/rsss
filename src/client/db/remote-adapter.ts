@@ -45,19 +45,21 @@ const api = ky.create({
 export const remoteAdapter:DbAdapter = {
     async getFeeds ():Promise<FeedsResponse> {
         const response = await api.get('feeds')
+        // Indicator state (`feedUpdateCounts`) is owned by
+        // `GET /api/feed-status`; we accept and discard the
+        // legacy `feedUpdateCounts` field for one deploy window
+        // so older server bundles stay compatible.
         const data = await response.json<{
             feeds:Feed[]
             feedUpdateStatus?:string
             feedsWithUpdates?:string[]
-            feedUpdateCounts?:Record<string, number>
         }>()
         return {
             feeds: data.feeds,
             feedUpdateStatus: data.feedUpdateStatus === 'updates' ?
                 'updates' :
                 'synced',
-            feedsWithUpdates: data.feedsWithUpdates ?? [],
-            feedUpdateCounts: data.feedUpdateCounts ?? {}
+            feedsWithUpdates: data.feedsWithUpdates ?? []
         }
     },
 
