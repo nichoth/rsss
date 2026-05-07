@@ -122,6 +122,7 @@ function createDoHarness (options:{
     const refreshed:number[] = []
     const waitUntilPromises:Promise<unknown>[] = []
     const storage = new Map<string, unknown>()
+    const refreshFeedBatchesCalls:number[] = []
     const userDo = Object.create(UserDO.prototype) as {
         sql:ReturnType<typeof createSql>
         ctx:{
@@ -133,6 +134,7 @@ function createDoHarness (options:{
             waitUntil:(promise:Promise<unknown>) => void
         }
         fetchFeed:(feed:FeedRow) => Promise<void>
+        refreshFeedBatches:() => Promise<void>
         createRouter:() => { request:(path:string, init?:RequestInit) =>
             Promise<Response> }
     }
@@ -157,13 +159,18 @@ function createDoHarness (options:{
     userDo.fetchFeed = async (feed) => {
         refreshed.push(feed.id)
     }
+    userDo.refreshFeedBatches = async () => {
+        refreshFeedBatchesCalls.push(Date.now())
+    }
 
     return {
         app: userDo.createRouter(),
         sql,
         refreshed,
         storage,
-        waitUntilPromises
+        waitUntilPromises,
+        refreshFeedBatchesCalls,
+        userDo
     }
 }
 
@@ -372,6 +379,99 @@ test('GET /feed-status returns zeros when fully synced', async t => {
     )
     t.equal(body.totalPending, 0, 'totalPending sums to 0')
 })
+
+test(
+    'GET /feed-status triggers catch-up when returning after long absence',
+    async t => {
+        const {
+            app,
+            storage,
+            refreshFeedBatchesCalls
+        } = createDoHarness()
+        const now = Date.now()
+        // Seed last_active_at to 31 days ago.
+        storage.set('poll:account:last_active_at', {
+            lastActiveAt: now - 31 * 24 * 60 * 60 * 1000
+        })
+
+        const response = await app.request('/feed-status')
+
+        t.equal(response.status, 200, 'returns 200')
+        t.equal(
+            refreshFeedBatchesCalls.length,
+            1,
+            'exactly one refreshFeedBatches call is queued via waitUntil'
+        )
+        const updated = storage.get('poll:account:last_active_at') as {
+            lastActiveAt:number
+        }
+        t.ok(
+            updated.lastActiveAt >= now,
+            'last_active_at is advanced to current time'
+        )
+    }
+)
+
+test(
+    'GET /feed-status does NOT trigger catch-up at steady state',
+    async t => {
+        const {
+            app,
+            storage,
+            refreshFeedBatchesCalls
+        } = createDoHarness()
+        const now = Date.now()
+        // Seed both markers as recent.
+        storage.set('poll:account:last_active_at', {
+            lastActiveAt: now - 30_000
+        })
+        storage.set('poll:account:last_any_success_at', {
+            lastAnySuccessAt: now - 30_000
+        })
+
+        const response = await app.request('/feed-status')
+
+        t.equal(response.status, 200, 'returns 200')
+        t.equal(
+            refreshFeedBatchesCalls.length,
+            0,
+            'steady-state hits do NOT trigger catch-up'
+        )
+    }
+)
+
+test(
+    'GET /feed-status advances last_active_at subject to 60s coalescing',
+    async t => {
+        const { app, storage } = createDoHarness({
+            pendingCountRows: []
+        })
+        const now = Date.now()
+        // First request — no prior marker. Triggers catch-up but
+        // also writes the marker.
+        await app.request('/feed-status')
+        const first = storage.get('poll:account:last_active_at') as {
+            lastActiveAt:number
+        }
+        t.ok(
+            first && first.lastActiveAt >= now,
+            'first call seeds last_active_at'
+        )
+
+        // Second request — within 60s coalescing window. Should be
+        // skipped (storage value unchanged).
+        const seededAt = first.lastActiveAt
+        await app.request('/feed-status')
+        const second = storage.get('poll:account:last_active_at') as {
+            lastActiveAt:number
+        }
+        t.equal(
+            second.lastActiveAt,
+            seededAt,
+            'within-60s call does NOT advance the marker'
+        )
+    }
+)
 
 test('UserDO delete feed clamps future client timestamps', async t => {
     const { app, sql } = createDoHarness()

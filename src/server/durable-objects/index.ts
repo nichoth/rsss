@@ -87,6 +87,10 @@ const FEED_REFRESH_CONCURRENCY = 8
 const OG_IMAGE_FETCH_CONCURRENCY = 4
 const OG_IMAGE_FETCH_BUDGET_MS = 10_000
 const FEED_REFRESH_INTERVAL_MS = 10 * 60 * 1000
+const FEED_BACKOFF_MULTIPLIER = 2
+const FEED_BACKOFF_CEILING_MS = 24 * 60 * 60 * 1000
+const ACCOUNT_INACTIVITY_THRESHOLD_MS = 30 * 24 * 60 * 60 * 1000
+const ACTIVITY_MARKER_COALESCE_MS = 60 * 1000
 const MANUAL_REFRESH_LIMIT_MS = 60 * 1000
 const MANUAL_REFRESH_STORAGE_PREFIX = 'manual_refresh:'
 const ALARM_REFRESH_CURSOR_KEY = 'alarm_refresh_cursor'
@@ -157,6 +161,28 @@ interface FetchFullThrottleState {
 
 interface FetchFullThrottleLimit {
     retryAfterSeconds:number
+}
+
+const POLL_FEED_KEY_PREFIX = 'poll:feed:'
+const POLL_ACCOUNT_LAST_ACTIVE_AT_KEY = 'poll:account:last_active_at'
+const POLL_ACCOUNT_LAST_ANY_SUCCESS_AT_KEY =
+    'poll:account:last_any_success_at'
+
+interface PollerFeedState {
+    etag?:string
+    lastModified?:string
+    consecutiveFailures:number
+    lastAttemptAt?:number
+    lastSuccessfulAt?:number
+    nextDueAt:number
+}
+
+interface AccountActivityMarker {
+    lastActiveAt:number
+}
+
+function pollFeedKey (feedId:number):string {
+    return `${POLL_FEED_KEY_PREFIX}${feedId}`
 }
 
 function fetchFullThrottleKey (itemId:number):string {
@@ -597,10 +623,11 @@ export class UserDO extends DurableObject<Env> {
         // Mounted under the same `/api` proxy as `/feeds`, so it
         // inherits `requireAuth` from `dataRouter` without
         // `requireEntitlement` — free users must reach this endpoint.
-        app.get('/feed-status', (c) => {
+        app.get('/feed-status', async (c) => {
             const feedUpdateCounts = this.getFeedUpdateCounts()
             const totalPending = Object.values(feedUpdateCounts)
                 .reduce((sum, count) => sum + count, 0)
+            await this.maybeKickCatchUp(Date.now())
             return c.json({ feedUpdateCounts, totalPending })
         })
 
@@ -800,6 +827,7 @@ export class UserDO extends DurableObject<Env> {
             }
 
             this.sql.exec('DELETE FROM feeds WHERE id = ?', id)
+            await this.deletePollerFeedState(id)
             return c.json({ success: true })
         })
 
@@ -1375,9 +1403,16 @@ export class UserDO extends DurableObject<Env> {
     }
 
     protected async doFetchFeedText (
+        url:string,
+        validators?:{ etag?:string; lastModified?:string }
+    ):Promise<{
+        text:string
         url:string
-    ):Promise<{ text:string; url:string }> {
-        return fetchFeedText(url)
+        notModified:boolean
+        etag?:string
+        lastModified?:string
+    }> {
+        return fetchFeedText(url, validators ? { validators } : {})
     }
 
     protected async doFetchFullArticle (link:string) {
@@ -1392,8 +1427,38 @@ export class UserDO extends DurableObject<Env> {
             '[DO] fetchFeed:',
             feed.url
         )
+        const priorState = await this.readPollerFeedState(feed.id)
+        const startedAt = Date.now()
         try {
-            const fetched = await this.doFetchFeedText(feed.url)
+            const fetched = await this.doFetchFeedText(
+                feed.url,
+                priorState ?
+                    {
+                        etag: priorState.etag,
+                        lastModified: priorState.lastModified
+                    } :
+                    undefined
+            )
+
+            if (fetched.notModified) {
+                // 304: feed has not changed. Do NOT parse, do NOT
+                // insert, do NOT broadcast feed-updates-available
+                // (FR-005, FR-010). Refresh per-account success
+                // bookkeeping and reset the per-feed backoff. The
+                // `finally` block below still emits feed-updated so
+                // dashboards see a heartbeat.
+                await this.writePollerFeedState(feed.id, {
+                    etag: priorState?.etag,
+                    lastModified: priorState?.lastModified,
+                    consecutiveFailures: 0,
+                    lastAttemptAt: startedAt,
+                    lastSuccessfulAt: startedAt,
+                    nextDueAt: startedAt + FEED_REFRESH_INTERVAL_MS
+                })
+                await this.writeLastAnySuccess(startedAt)
+                return
+            }
+
             console.log(
                 '[DO] Feed response length:',
                 fetched.text.length
@@ -1536,6 +1601,17 @@ export class UserDO extends DurableObject<Env> {
                     feed.id
                 )
             }
+
+            const successAt = Date.now()
+            await this.writePollerFeedState(feed.id, {
+                etag: fetched.etag,
+                lastModified: fetched.lastModified,
+                consecutiveFailures: 0,
+                lastAttemptAt: startedAt,
+                lastSuccessfulAt: successAt,
+                nextDueAt: successAt + FEED_REFRESH_INTERVAL_MS
+            })
+            await this.writeLastAnySuccess(successAt)
         } catch (err) {
             console.error(`Error fetching feed ${feed.url}:`, err)
             this.sql.exec(
@@ -1547,6 +1623,27 @@ export class UserDO extends DurableObject<Env> {
                 err instanceof FeedFetchError ? err.status : 500,
                 feed.id
             )
+            try {
+                const failures = (priorState?.consecutiveFailures ?? 0) + 1
+                const backoffMs = Math.min(
+                    FEED_REFRESH_INTERVAL_MS *
+                        Math.pow(FEED_BACKOFF_MULTIPLIER, failures),
+                    FEED_BACKOFF_CEILING_MS
+                )
+                await this.writePollerFeedState(feed.id, {
+                    etag: priorState?.etag,
+                    lastModified: priorState?.lastModified,
+                    consecutiveFailures: failures,
+                    lastAttemptAt: startedAt,
+                    lastSuccessfulAt: priorState?.lastSuccessfulAt,
+                    nextDueAt: startedAt + backoffMs
+                })
+            } catch (writeErr) {
+                console.error(
+                    '[DO] writePollerFeedState (failure path) failed',
+                    writeErr
+                )
+            }
         } finally {
             this.broadcast('feed-updated', { feedId: feed.id })
         }
@@ -2115,6 +2212,96 @@ export class UserDO extends DurableObject<Env> {
         return null
     }
 
+    private async readPollerFeedState (
+        feedId:number
+    ):Promise<PollerFeedState|undefined> {
+        return this.ctx.storage.get<PollerFeedState>(pollFeedKey(feedId))
+    }
+
+    private async writePollerFeedState (
+        feedId:number,
+        state:PollerFeedState
+    ):Promise<void> {
+        const sanitized:PollerFeedState = {
+            consecutiveFailures: state.consecutiveFailures,
+            nextDueAt: state.nextDueAt
+        }
+        if (state.etag !== undefined) sanitized.etag = state.etag
+        if (state.lastModified !== undefined) {
+            sanitized.lastModified = state.lastModified
+        }
+        if (state.lastAttemptAt !== undefined) {
+            sanitized.lastAttemptAt = state.lastAttemptAt
+        }
+        if (state.lastSuccessfulAt !== undefined) {
+            sanitized.lastSuccessfulAt = state.lastSuccessfulAt
+        }
+        await this.ctx.storage.put(pollFeedKey(feedId), sanitized)
+    }
+
+    private async deletePollerFeedState (feedId:number):Promise<void> {
+        await this.ctx.storage.delete(pollFeedKey(feedId))
+    }
+
+    private async readAccountActivity (
+    ):Promise<AccountActivityMarker|undefined> {
+        return this.ctx.storage.get<AccountActivityMarker>(
+            POLL_ACCOUNT_LAST_ACTIVE_AT_KEY
+        )
+    }
+
+    private async writeAccountActivity (now:number):Promise<void> {
+        const existing = await this.readAccountActivity()
+        if (
+            existing &&
+            typeof existing.lastActiveAt === 'number' &&
+            Number.isFinite(existing.lastActiveAt) &&
+            now - existing.lastActiveAt < ACTIVITY_MARKER_COALESCE_MS
+        ) {
+            return
+        }
+        await this.ctx.storage.put<AccountActivityMarker>(
+            POLL_ACCOUNT_LAST_ACTIVE_AT_KEY,
+            { lastActiveAt: now }
+        )
+    }
+
+    private async readLastAnySuccess ():Promise<number|undefined> {
+        const stored = await this.ctx.storage.get<{ lastAnySuccessAt:number }>(
+            POLL_ACCOUNT_LAST_ANY_SUCCESS_AT_KEY
+        )
+        const value = stored?.lastAnySuccessAt
+        if (typeof value === 'number' && Number.isFinite(value)) {
+            return value
+        }
+        return undefined
+    }
+
+    private async writeLastAnySuccess (now:number):Promise<void> {
+        const prev = await this.readLastAnySuccess()
+        const next = typeof prev === 'number' ? Math.max(prev, now) : now
+        await this.ctx.storage.put(
+            POLL_ACCOUNT_LAST_ANY_SUCCESS_AT_KEY,
+            { lastAnySuccessAt: next }
+        )
+    }
+
+    private async maybeKickCatchUp (now:number):Promise<void> {
+        const prev = await this.readAccountActivity()
+        const prevLastActiveAt = prev?.lastActiveAt
+        const lastAnySuccessAt = await this.readLastAnySuccess()
+        const trigger = (
+            prevLastActiveAt === undefined ||
+            now - prevLastActiveAt > ACCOUNT_INACTIVITY_THRESHOLD_MS ||
+            lastAnySuccessAt === undefined ||
+            lastAnySuccessAt < now - FEED_REFRESH_INTERVAL_MS
+        )
+        await this.writeAccountActivity(now)
+        if (trigger) {
+            this.ctx.waitUntil(this.refreshFeedBatches())
+        }
+    }
+
     /**
      * Alarm handler for periodic feed refresh
      */
@@ -2128,6 +2315,22 @@ export class UserDO extends DurableObject<Env> {
         }
 
         await this.scheduleNextFeedRefresh()
+
+        // Inactivity gate (FR-008, SC-005): accounts that have not
+        // been active beyond the threshold incur zero polling cost
+        // until the next sign-in/page-load advances last_active_at.
+        // The next alarm has already been re-armed above, so we keep
+        // ticking on cadence and resume work as soon as the account
+        // becomes active again.
+        const activity = await this.readAccountActivity()
+        if (
+            activity &&
+            Date.now() - activity.lastActiveAt >
+                ACCOUNT_INACTIVITY_THRESHOLD_MS
+        ) {
+            return
+        }
+
         await this.refreshFeedBatches()
     }
 
@@ -2185,17 +2388,30 @@ export class UserDO extends DurableObject<Env> {
 
     private async refreshFeedBatches ():Promise<void> {
         let cursor = await this.getAlarmRefreshCursor()
+        const sweepNow = Date.now()
+        const manualClaims = this.manualRefreshClaims
 
         while (true) {
-            const feeds = this.selectFeedRefreshBatch(cursor)
-            if (feeds.length === 0) {
+            const batch = this.selectFeedRefreshBatch(cursor)
+            if (batch.length === 0) {
                 await this.ctx.storage.delete(ALARM_REFRESH_CURSOR_KEY)
                 return
             }
 
-            await this.refreshFeeds(feeds)
+            const due:Feed[] = []
+            for (const feed of batch) {
+                if (manualClaims?.has(feed.id)) continue
+                const state = await this.readPollerFeedState(feed.id)
+                if (state === undefined || state.nextDueAt <= sweepNow) {
+                    due.push(feed)
+                }
+            }
 
-            const lastFeed = feeds[feeds.length - 1]
+            if (due.length > 0) {
+                await this.refreshFeeds(due)
+            }
+
+            const lastFeed = batch[batch.length - 1]
             if (!lastFeed) return
 
             cursor = lastFeed.id

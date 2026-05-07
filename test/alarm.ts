@@ -299,6 +299,181 @@ test('fetchFeed stores last_error and last_status on failure', async t => {
     )
 })
 
+test(
+    'sweep filters out feeds whose nextDueAt is in the future',
+    async t => {
+        const feeds = [createFeed(1), createFeed(2), createFeed(3)]
+        const fetched:number[] = []
+        const stored = new Map<string, unknown>()
+        const future = Date.now() + 10 * 60 * 1000
+        // Feed 2 has a future nextDueAt; feed 1 is overdue;
+        // feed 3 has no record (treated as due).
+        stored.set('poll:feed:1', {
+            consecutiveFailures: 0,
+            nextDueAt: 0
+        })
+        stored.set('poll:feed:2', {
+            consecutiveFailures: 0,
+            nextDueAt: future
+        })
+
+        const userDo = createAlarmDo(
+            feeds,
+            async (feed) => {
+                fetched.push(feed.id)
+            },
+            async () => {},
+            {
+                async get<T> (key:string) {
+                    return stored.get(key) as T|undefined
+                },
+                async put (key:string, value:unknown) {
+                    stored.set(key, value)
+                },
+                async delete (key:string) {
+                    stored.delete(key)
+                }
+            }
+        )
+
+        await userDo.alarm()
+
+        t.deepEqual(
+            fetched.sort(),
+            [1, 3],
+            'only overdue feeds (1, 3) are polled; feed 2 is skipped'
+        )
+    }
+)
+
+test(
+    'sweep skips feeds claimed by an in-flight manual refresh',
+    async t => {
+        const feeds = [createFeed(1), createFeed(2)]
+        const fetched:number[] = []
+        const stored = new Map<string, unknown>()
+        const userDo = createAlarmDo(
+            feeds,
+            async (feed) => {
+                fetched.push(feed.id)
+            },
+            async () => {},
+            {
+                async get<T> (key:string) {
+                    return stored.get(key) as T|undefined
+                },
+                async put (key:string, value:unknown) {
+                    stored.set(key, value)
+                },
+                async delete (key:string) {
+                    stored.delete(key)
+                }
+            }
+        )
+        // Seed an active manual refresh claim for feed 1.
+        ;(userDo as unknown as {
+            manualRefreshClaims:Map<number, number>
+        }).manualRefreshClaims = new Map([[1, Date.now()]])
+
+        await userDo.alarm()
+
+        t.deepEqual(
+            fetched,
+            [2],
+            'feed 1 is skipped this sweep; manual refresh wins'
+        )
+    }
+)
+
+test(
+    'alarm short-circuits when account is inactive past threshold',
+    async t => {
+        const feeds = [createFeed(1), createFeed(2), createFeed(3)]
+        const fetched:number[] = []
+        const stored = new Map<string, unknown>()
+        const alarmTimes:number[] = []
+        // Seed last_active_at to 31 days ago.
+        const thirtyOneDaysAgo = Date.now() - 31 * 24 * 60 * 60 * 1000
+        stored.set('poll:account:last_active_at', {
+            lastActiveAt: thirtyOneDaysAgo
+        })
+
+        const userDo = createAlarmDo(
+            feeds,
+            async (feed) => {
+                fetched.push(feed.id)
+            },
+            async (time) => {
+                alarmTimes.push(time)
+            },
+            {
+                async get<T> (key:string) {
+                    return stored.get(key) as T|undefined
+                },
+                async put (key:string, value:unknown) {
+                    stored.set(key, value)
+                },
+                async delete (key:string) {
+                    stored.delete(key)
+                }
+            }
+        )
+
+        await userDo.alarm()
+
+        t.equal(
+            fetched.length,
+            0,
+            'inactive account: zero feed fetches during alarm tick (SC-005)'
+        )
+        t.equal(
+            alarmTimes.length,
+            1,
+            'alarm re-arms normally for the next cadence'
+        )
+    }
+)
+
+test(
+    'alarm resumes polling once last_active_at advances to now',
+    async t => {
+        const feeds = [createFeed(1), createFeed(2)]
+        const fetched:number[] = []
+        const stored = new Map<string, unknown>()
+        // Active recently — alarm should poll normally.
+        stored.set('poll:account:last_active_at', {
+            lastActiveAt: Date.now() - 5_000
+        })
+
+        const userDo = createAlarmDo(
+            feeds,
+            async (feed) => {
+                fetched.push(feed.id)
+            },
+            async () => {},
+            {
+                async get<T> (key:string) {
+                    return stored.get(key) as T|undefined
+                },
+                async put (key:string, value:unknown) {
+                    stored.set(key, value)
+                },
+                async delete (key:string) {
+                    stored.delete(key)
+                }
+            }
+        )
+
+        await userDo.alarm()
+
+        t.deepEqual(
+            fetched.sort(),
+            [1, 2],
+            'recently-active account: alarm polls feeds normally'
+        )
+    }
+)
+
 test('alarm tests done', () => {
     if (window) {
         // @ts-expect-error tests

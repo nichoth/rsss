@@ -250,6 +250,13 @@ interface BroadcastCall {
 interface FetchFeedDoType {
     sql:{ exec:(q:string, ...p:unknown[]) => QueryResult }
     broadcasts:BroadcastCall[]
+    ctx:{
+        storage:{
+            get:<T>(key:string) => Promise<T|undefined>
+            put:(key:string, value:unknown) => Promise<void>
+            delete:(key:string) => Promise<void>
+        }
+    }
     getFeedsWithUpdates:() => string[]
     getFeedUpdateCounts:() => Record<string, number>
     broadcast:(event:string, data:unknown) => void
@@ -269,7 +276,16 @@ interface FetchFeedDoType {
             imageUrl:string|null
         }>
     }
-    doFetchFeedText:(url:string) => Promise<{ text:string; url:string }>
+    doFetchFeedText:(
+        url:string,
+        validators?:{ etag?:string; lastModified?:string }
+    ) => Promise<{
+        text:string
+        url:string
+        notModified:boolean
+        etag?:string
+        lastModified?:string
+    }>
     updateNewItemThumbnails:(items:unknown[]) => Promise<void>
     rowsWritten:(result:unknown) => number
     fetchFeed:(feed:FeedRow) => Promise<void>
@@ -280,20 +296,43 @@ function createFetchFeedHarness (opts:{
     postInsertUnsyncedIds?:string[]
     newItemCount?:number
     postInsertCounts?:Record<string, number>
+    fetchResult?:{
+        notModified?:boolean
+        etag?:string
+        lastModified?:string
+        throw?:Error
+    }
 } = {}) {
     const broadcasts:BroadcastCall[] = []
     const {
         initialUnsyncedIds = [],
         postInsertUnsyncedIds = ['1'],
         newItemCount = 1,
-        postInsertCounts = { 1: 1 }
+        postInsertCounts = { 1: 1 },
+        fetchResult
     } = opts
+    const validatorsSeen:Array<{ etag?:string; lastModified?:string }> = []
 
     let getFeedsCallCount = 0
     let _insertCallCount = 0
 
     const userDo = Object.create(UserDO.prototype) as FetchFeedDoType
     userDo.broadcasts = broadcasts
+
+    const harnessStorage = new Map<string, unknown>()
+    userDo.ctx = {
+        storage: {
+            async get<T> (key:string) {
+                return harnessStorage.get(key) as T|undefined
+            },
+            async put (key:string, value:unknown) {
+                harnessStorage.set(key, value)
+            },
+            async delete (key:string) {
+                harnessStorage.delete(key)
+            }
+        }
+    }
 
     userDo.sql = {
         exec (query:string) {
@@ -331,8 +370,28 @@ function createFetchFeedHarness (opts:{
 
     userDo.getFeedUpdateCounts = () => postInsertCounts
 
-    userDo.doFetchFeedText = async (url:string) => {
-        return { text: '<rss/>', url }
+    userDo.doFetchFeedText = async (url, validators) => {
+        validatorsSeen.push({
+            etag: validators?.etag,
+            lastModified: validators?.lastModified
+        })
+        if (fetchResult?.throw) throw fetchResult.throw
+        if (fetchResult?.notModified) {
+            return {
+                text: '',
+                url,
+                notModified: true,
+                etag: undefined,
+                lastModified: undefined
+            }
+        }
+        return {
+            text: '<rss/>',
+            url,
+            notModified: false,
+            etag: fetchResult?.etag,
+            lastModified: fetchResult?.lastModified
+        }
     }
 
     userDo.parseFeed = () => ({
@@ -364,7 +423,9 @@ function createFetchFeedHarness (opts:{
     return {
         userDo,
         broadcasts,
-        feed: feedRow(1, 'https://a.example/feed', null)
+        feed: feedRow(1, 'https://a.example/feed', null),
+        storage: harnessStorage,
+        validatorsSeen
     }
 }
 
@@ -448,6 +509,178 @@ test(
             availableBroadcasts.length,
             0,
             'feed-updates-available skipped when newItems.length === 0'
+        )
+    }
+)
+
+// ---- Per-feed poller state machine tests (FR-005, FR-007, FR-010) ----
+
+test(
+    'fetchFeed 304 path inserts no items, emits no SSE updates, ' +
+        'resets failures, advances nextDueAt by base cadence',
+    async t => {
+        const {
+            userDo,
+            broadcasts,
+            feed,
+            storage,
+            validatorsSeen
+        } = createFetchFeedHarness({
+            fetchResult: { notModified: true }
+        })
+        // Seed an existing PollerFeedState with prior validators
+        // and a non-zero failure count.
+        storage.set('poll:feed:1', {
+            etag: '"abc"',
+            lastModified: 'Wed, 01 Jan 2025 00:00:00 GMT',
+            consecutiveFailures: 3,
+            lastAttemptAt: Date.now() - 3_600_000,
+            nextDueAt: Date.now() - 60_000
+        })
+
+        const beforeAt = Date.now()
+        await userDo.fetchFeed(feed)
+        const afterAt = Date.now()
+
+        t.deepEqual(
+            validatorsSeen[0],
+            { etag: '"abc"', lastModified: 'Wed, 01 Jan 2025 00:00:00 GMT' },
+            'prior validators are sent to fetchFeedText'
+        )
+        const updateBroadcasts = broadcasts.filter(
+            b => b.event === 'feed-updates-available'
+        )
+        t.equal(
+            updateBroadcasts.length,
+            0,
+            '304 emits NO feed-updates-available (FR-005, FR-010)'
+        )
+        const newState = storage.get('poll:feed:1') as {
+            etag?:string
+            lastModified?:string
+            consecutiveFailures:number
+            nextDueAt:number
+        }
+        t.equal(
+            newState.consecutiveFailures,
+            0,
+            'consecutiveFailures reset on 304 (304 is success)'
+        )
+        const expectedMin = beforeAt + 10 * 60 * 1000
+        const expectedMax = afterAt + 10 * 60 * 1000
+        t.ok(
+            newState.nextDueAt >= expectedMin &&
+                newState.nextDueAt <= expectedMax,
+            'nextDueAt advances by base cadence (10 minutes)'
+        )
+        t.equal(
+            newState.etag,
+            '"abc"',
+            'prior etag is preserved (304 carries no new validator)'
+        )
+        const lastAnySuccess = storage.get(
+            'poll:account:last_any_success_at'
+        ) as { lastAnySuccessAt:number }|undefined
+        t.ok(
+            lastAnySuccess &&
+                lastAnySuccess.lastAnySuccessAt >= beforeAt,
+            'last_any_success_at advances on a 304 (it is a success)'
+        )
+    }
+)
+
+test(
+    'fetchFeed failure path increments failures and ' +
+        'stretches nextDueAt exponentially, capped at ceiling',
+    async t => {
+        const oneDayMs = 24 * 60 * 60 * 1000
+        const cadenceMs = 10 * 60 * 1000
+
+        // Failure 1: cadence × 2^1 = 20 min
+        // Failure 2: cadence × 2^2 = 40 min
+        // ...
+        // Failure 8: cadence × 2^8 = 2560 min ≈ 42.7 h → capped at 24h
+        const cases = [1, 2, 3, 8]
+        for (const failNumber of cases) {
+            const consoleError = console.error
+            console.error = () => {}
+            try {
+                const error = new Error('boom')
+                const { userDo, feed, storage } = createFetchFeedHarness({
+                    fetchResult: { throw: error }
+                })
+                if (failNumber > 1) {
+                    storage.set('poll:feed:1', {
+                        consecutiveFailures: failNumber - 1,
+                        nextDueAt: 0
+                    })
+                }
+
+                const beforeAt = Date.now()
+                await userDo.fetchFeed(feed)
+                const newState = storage.get('poll:feed:1') as {
+                    consecutiveFailures:number
+                    nextDueAt:number
+                }
+                const expectedBackoff = Math.min(
+                    cadenceMs * Math.pow(2, failNumber),
+                    oneDayMs
+                )
+                t.equal(
+                    newState.consecutiveFailures,
+                    failNumber,
+                    `consecutiveFailures = ${failNumber} after ${failNumber} failures`
+                )
+                const minExpected = beforeAt + expectedBackoff - 1_000
+                const maxExpected = beforeAt + expectedBackoff + 5_000
+                t.ok(
+                    newState.nextDueAt >= minExpected &&
+                        newState.nextDueAt <= maxExpected,
+                    `nextDueAt at fail ${failNumber} is ` +
+                        `now + ${expectedBackoff}ms`
+                )
+            } finally {
+                console.error = consoleError
+            }
+        }
+    }
+)
+
+test(
+    'fetchFeed success after failure run resets failures + ' +
+        'nextDueAt to now + base cadence',
+    async t => {
+        const cadenceMs = 10 * 60 * 1000
+        const { userDo, feed, storage } = createFetchFeedHarness({
+            fetchResult: { etag: '"v2"' }
+        })
+        storage.set('poll:feed:1', {
+            consecutiveFailures: 5,
+            nextDueAt: 0
+        })
+
+        const beforeAt = Date.now()
+        await userDo.fetchFeed(feed)
+        const newState = storage.get('poll:feed:1') as {
+            etag?:string
+            consecutiveFailures:number
+            nextDueAt:number
+        }
+
+        t.equal(
+            newState.consecutiveFailures,
+            0,
+            'consecutiveFailures resets to 0 after a success'
+        )
+        t.ok(
+            newState.nextDueAt >= beforeAt + cadenceMs - 1_000 &&
+                newState.nextDueAt <= beforeAt + cadenceMs + 5_000,
+            'nextDueAt set to now + base cadence after a success'
+        )
+        t.equal(
+            newState.etag,
+            '"v2"',
+            'fresh etag from response is stored'
         )
     }
 )
