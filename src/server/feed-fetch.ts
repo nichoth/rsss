@@ -17,11 +17,17 @@ export class FeedFetchError extends Error {
     }
 }
 
+export interface FetchFeedValidators {
+    etag?:string
+    lastModified?:string
+}
+
 export interface FetchFeedTextOptions {
     fetchFn?:typeof fetch
     maxBytes?:number
     resolveHostname?:ResolveHostname
     signal?:AbortSignal
+    validators?:FetchFeedValidators
 }
 
 export interface FetchOgImageOptions {
@@ -74,6 +80,9 @@ function parseAndAssertAllowed (feedUrl:string):URL {
 export interface FetchFeedTextResult {
     text:string
     url:string
+    notModified:boolean
+    etag?:string
+    lastModified?:string
 }
 
 export async function fetchFeedText (
@@ -86,12 +95,32 @@ export async function fetchFeedText (
         redirectErrorMessage: 'Feed redirected too many times'
     })
 
+    if (result.notModified) {
+        return {
+            text: '',
+            url: result.url,
+            notModified: true,
+            etag: undefined,
+            lastModified: undefined
+        }
+    }
+
     const text = await readBoundedText(
         result.response,
         options.maxBytes || MAX_FEED_BYTES
     )
 
-    return { text, url: result.url }
+    const etag = result.response.headers.get('etag') || undefined
+    const lastModified = result.response.headers.get('last-modified') ||
+        undefined
+
+    return {
+        text,
+        url: result.url,
+        notModified: false,
+        etag,
+        lastModified
+    }
 }
 
 export async function fetchOgImage (
@@ -131,7 +160,7 @@ export async function fetchValidatedResponse (
         maxRedirects?:number
         redirectErrorMessage?:string
     }
-):Promise<{ response:Response; url:string }> {
+):Promise<{ response:Response; url:string; notModified:boolean }> {
     let url = await assertFeedUrlAllowed(inputUrl)
     const fetchFn = options.fetchFn || fetch
     const resolveHostname = options.resolveHostname ||
@@ -143,14 +172,26 @@ export async function fetchValidatedResponse (
     for (let redirectCount = 0; ; redirectCount++) {
         await validateResolvedHostname(url, resolveHostname)
 
+        const headers:Record<string, string> = {
+            'User-Agent': 'RSSS/1.0 RSS Reader'
+        }
+        if (options.validators?.etag) {
+            headers['If-None-Match'] = options.validators.etag
+        }
+        if (options.validators?.lastModified) {
+            headers['If-Modified-Since'] = options.validators.lastModified
+        }
+
         const response = await fetchFn(url, {
-            headers: {
-                'User-Agent': 'RSSS/1.0 RSS Reader'
-            },
+            headers,
             redirect: 'manual',
             signal: options.signal ||
                 AbortSignal.timeout(FEED_FETCH_TIMEOUT_MS)
         })
+
+        if (response.status === 304) {
+            return { response, url, notModified: true }
+        }
 
         if (isRedirect(response)) {
             if (redirectCount >= maxRedirects) {
@@ -181,7 +222,7 @@ export async function fetchValidatedResponse (
             )
         }
 
-        return { response, url }
+        return { response, url, notModified: false }
     }
 }
 

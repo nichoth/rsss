@@ -381,3 +381,139 @@ test('fetchOgImage drops http image results', async t => {
 
     t.equal(image, null)
 })
+
+test(
+    'fetchFeedText: 200 with ETag is captured in result',
+    async t => {
+        const result = await fetchFeedText('https://example.com/feed', {
+            fetchFn: async () => new Response('<rss/>', {
+                status: 200,
+                headers: {
+                    etag: '"abc"',
+                    'last-modified':
+                        'Wed, 01 Jan 2025 00:00:00 GMT',
+                    'content-type': 'application/rss+xml'
+                }
+            }),
+            resolveHostname: async () => ['93.184.216.34']
+        })
+
+        t.equal(result.notModified, false, 'notModified is false on 200')
+        t.equal(result.etag, '"abc"', 'etag captured from response')
+        t.equal(
+            result.lastModified,
+            'Wed, 01 Jan 2025 00:00:00 GMT',
+            'last-modified captured from response'
+        )
+    }
+)
+
+test(
+    'fetchFeedText: 304 short-circuits without throwing',
+    async t => {
+        const requestHeaders:Record<string, string|undefined> = {}
+        const result = await fetchFeedText('https://example.com/feed', {
+            fetchFn: async (_url, init) => {
+                const headers = new Headers(init?.headers)
+                requestHeaders['If-None-Match'] =
+                    headers.get('if-none-match') || undefined
+                requestHeaders['If-Modified-Since'] =
+                    headers.get('if-modified-since') || undefined
+                return new Response(null, { status: 304 })
+            },
+            validators: {
+                etag: '"abc"',
+                lastModified: 'Wed, 01 Jan 2025 00:00:00 GMT'
+            },
+            resolveHostname: async () => ['93.184.216.34']
+        })
+
+        t.equal(
+            requestHeaders['If-None-Match'],
+            '"abc"',
+            'If-None-Match was sent on the request'
+        )
+        t.equal(
+            requestHeaders['If-Modified-Since'],
+            'Wed, 01 Jan 2025 00:00:00 GMT',
+            'If-Modified-Since was sent on the request'
+        )
+        t.equal(result.notModified, true, 'notModified is true')
+        t.equal(result.text, '', 'text is empty on 304')
+        t.equal(
+            result.etag,
+            undefined,
+            'etag is undefined on 304 (caller retains prior validator)'
+        )
+        t.equal(
+            result.lastModified,
+            undefined,
+            'lastModified is undefined on 304'
+        )
+    }
+)
+
+test(
+    'fetchFeedText: 200 without validators returns undefined ' +
+        'so callers can clear stale state',
+    async t => {
+        const result = await fetchFeedText('https://example.com/feed', {
+            fetchFn: async () => new Response('<rss/>', {
+                status: 200,
+                headers: { 'content-type': 'application/rss+xml' }
+            }),
+            resolveHostname: async () => ['93.184.216.34']
+        })
+
+        t.equal(result.notModified, false)
+        t.equal(result.etag, undefined, 'etag is undefined when absent')
+        t.equal(
+            result.lastModified,
+            undefined,
+            'lastModified is undefined when absent'
+        )
+    }
+)
+
+test(
+    'fetchFeedText: conditional headers re-sent across redirect hops',
+    async t => {
+        const requestHeadersByUrl:Array<Record<string, string|null>> = []
+        const result = await fetchFeedText('https://example.com/rss', {
+            fetchFn: async (url, init) => {
+                const headers = new Headers(init?.headers)
+                requestHeadersByUrl.push({
+                    url: url.toString(),
+                    ifNoneMatch: headers.get('if-none-match'),
+                    ifModifiedSince: headers.get('if-modified-since')
+                })
+                if (url.toString() === 'https://example.com/rss') {
+                    return new Response(null, {
+                        status: 301,
+                        headers: { location: '/rss/' }
+                    })
+                }
+                return new Response(null, { status: 304 })
+            },
+            validators: { etag: '"v1"' },
+            resolveHostname: async () => ['93.184.216.34']
+        })
+
+        t.equal(
+            requestHeadersByUrl.length,
+            2,
+            'two outbound requests (initial + redirect target)'
+        )
+        t.equal(
+            requestHeadersByUrl[0].ifNoneMatch,
+            '"v1"',
+            'If-None-Match sent on initial request'
+        )
+        t.equal(
+            requestHeadersByUrl[1].ifNoneMatch,
+            '"v1"',
+            'If-None-Match re-sent on redirect hop'
+        )
+        t.equal(result.notModified, true, '304 returned after redirect')
+    }
+)

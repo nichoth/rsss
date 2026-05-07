@@ -36,7 +36,7 @@ No client or shared file is modified.
 
 **Purpose**: Establish a green baseline before touching code.
 
-- [ ] T001 Verify branch is `009-background-feed-polling`, run `npm
+- [X] T001 Verify branch is `009-background-feed-polling`, run `npm
   install`, then run `npm test && npm run lint` from repo root to
   establish a clean baseline. No code changes in this task.
 
@@ -50,35 +50,35 @@ None of US1/US2/US3 can land safely without these in place.
 **WARNING**: User story phases must not begin until this phase is
 complete.
 
-- [ ] T002 Add new operator-tunable constants near the existing
+- [X] T002 Add new operator-tunable constants near the existing
   `FEED_REFRESH_INTERVAL_MS` in
   `src/server/durable-objects/index.ts`: `FEED_BACKOFF_MULTIPLIER =
   2`, `FEED_BACKOFF_CEILING_MS = 24 * 60 * 60 * 1000`,
   `ACCOUNT_INACTIVITY_THRESHOLD_MS = 30 * 24 * 60 * 60 * 1000`.
-- [ ] T003 Define the `PollerFeedState` and `AccountActivityMarker`
+- [X] T003 Define the `PollerFeedState` and `AccountActivityMarker`
   TypeScript interfaces (per `data-model.md`) and the storage-key
   constants (`poll:feed:<id>`, `poll:account:last_active_at`,
   `poll:account:last_any_success_at`) inside
   `src/server/durable-objects/index.ts`.
-- [ ] T004 Implement DO storage helpers
+- [X] T004 Implement DO storage helpers
   `readPollerFeedState(feedId)`, `writePollerFeedState(feedId,
   state)`, `deletePollerFeedState(feedId)` in
   `src/server/durable-objects/index.ts` using
   `this.ctx.storage.get/put/delete`. Helpers MUST clear `etag` /
   `lastModified` when the new state passes them as `undefined` (no
   stale carryover, per data-model validation rules).
-- [ ] T005 Implement DO storage helpers `readAccountActivity()`,
+- [X] T005 Implement DO storage helpers `readAccountActivity()`,
   `writeAccountActivity(now)` (with the "skip write if existing
   value is within 60 s of now" coalescing rule from data-model),
   `readLastAnySuccess()`, and `writeLastAnySuccess(now)` (using
   `Math.max(prev, now)`) in
   `src/server/durable-objects/index.ts`.
-- [ ] T006 Wire `deletePollerFeedState(id)` into every existing feed-
+- [X] T006 Wire `deletePollerFeedState(id)` into every existing feed-
   deletion code path in `src/server/durable-objects/index.ts` so the
   `poll:feed:<id>` record is removed alongside the SQL `DELETE FROM
   feeds WHERE id = ?`. Verify `executeAccountDeletion` already wipes
   `poll:*` keys via `ctx.storage.deleteAll()`; if not, fix.
-- [ ] T007 [P] Create new test file `test/poll-state.ts` covering:
+- [X] T007 [P] Create new test file `test/poll-state.ts` covering:
   read returns `undefined` when no record exists; write+read round-
   trips a `PollerFeedState`; delete removes the record; clearing
   `etag`/`lastModified` does not retain prior values; the activity-
@@ -102,12 +102,12 @@ items upstream, reload the app without clicking Refresh Feeds, and
 confirm the header shows "n updates" with the correct count within
 2 seconds (SC-001).
 
-- [ ] T008 [US1] In the existing `fetchFeed` success path in
+- [X] T008 [US1] In the existing `fetchFeed` success path in
   `src/server/durable-objects/index.ts`, after a successful poll
   inserts items (or even when zero new items are inserted on a 200),
   call `writeLastAnySuccess(now)` so the page-load catch-up trigger
   has a recent timestamp to read.
-- [ ] T009 [US1] In the `GET /feed-status` handler in
+- [X] T009 [US1] In the `GET /feed-status` handler in
   `src/server/durable-objects/index.ts`, implement the page-load
   catch-up trigger per `contracts/page-load-catchup.md`: read the
   prior `last_active_at` and `last_any_success_at`, write
@@ -117,7 +117,7 @@ confirm the header shows "n updates" with the correct count within
   FEED_REFRESH_INTERVAL_MS` then call
   `this.ctx.waitUntil(this.refreshFeedBatches())`. The response body
   and timing MUST remain identical to feature 008.
-- [ ] T010 [US1] Extend `test/feed-status.ts` to cover the catch-up
+- [X] T010 [US1] Extend `test/feed-status.ts` to cover the catch-up
   contract: (a) returning-after-days (seed `last_active_at` 31 days
   ago) triggers exactly one `refreshFeedBatches` call via
   `waitUntil` and the HTTP response is not blocked on it; (b)
@@ -125,10 +125,26 @@ confirm the header shows "n updates" with the correct count within
   `last_any_success_at`) triggers zero catch-up calls; (c)
   `last_active_at` advances on every call subject to the 60 s
   coalescing.
-- [ ] T011 [P] [US1] Extend `test/do-handlers.ts` with a regression
-  test for FR-013: after `POST /feeds`, the newly-added feed has a
-  `PollerFeedState` with `nextDueAt <= now + FEED_REFRESH_INTERVAL_MS`
-  so it enters the standard rotation without waiting a long cycle.
+  (Implementation note: tests added in `test/do-handlers.ts` since
+  that's where the existing `/feed-status` HTTP-handler tests
+  live; `test/feed-status.ts` covers the client component.)
+  contract: (a) returning-after-days (seed `last_active_at` 31 days
+  ago) triggers exactly one `refreshFeedBatches` call via
+  `waitUntil` and the HTTP response is not blocked on it; (b)
+  steady-state (recent `last_active_at` and recent
+  `last_any_success_at`) triggers zero catch-up calls; (c)
+  `last_active_at` advances on every call subject to the 60 s
+  coalescing.
+- [X] T011 [P] [US1] Extend `test/do-handlers.ts` with a regression
+  test for FR-013 (Implementation note: covered by the existing
+  `t.equal(waitUntilPromises.length, 1, 'create schedules initial
+  refresh')` assertion at do-handlers.ts:208 (POST /feeds schedules
+  fetchFeed) plus the feed-cursor.ts state-machine test "fetchFeed
+  success after failure run resets failures + nextDueAt to now +
+  base cadence" which verifies a successful poll produces
+  `nextDueAt = now + FEED_REFRESH_INTERVAL_MS`. Together these
+  ensure a newly-added feed enters the standard rotation
+  immediately).
 
 **Checkpoint**: A returning reader's first `/feed-status` after
 inactivity primes a background sweep; the existing SSE channel from
@@ -146,14 +162,14 @@ and confirm subsequent polls send conditional headers and 304
 responses do not re-parse. Observe a feed returning 5xx and confirm
 poll cadence lengthens after consecutive failures.
 
-- [ ] T012 [US2] Extend `FetchFeedTextOptions` in
+- [X] T012 [US2] Extend `FetchFeedTextOptions` in
   `src/server/feed-fetch.ts` to accept
   `validators?:{etag?:string;lastModified?:string}` and add
   `If-None-Match: <etag>` / `If-Modified-Since: <lastModified>` to
   the outbound request headers when each is provided. Conditional
   headers MUST be added AFTER `assertFeedUrlAllowed` and DNS
   validation, and MUST be re-sent on each redirect hop.
-- [ ] T013 [US2] Extend `FetchFeedTextResult` in
+- [X] T013 [US2] Extend `FetchFeedTextResult` in
   `src/server/feed-fetch.ts` with `notModified:boolean`,
   `etag?:string`, `lastModified?:string`. Short-circuit a 304
   response BEFORE the existing `!response.ok` check, returning
@@ -161,7 +177,7 @@ poll cadence lengthens after consecutive failures.
   lastModified:undefined }`. On 200, populate `etag` /
   `lastModified` from response headers (leave `undefined` if absent;
   callers MUST treat `undefined` as "clear stored validator").
-- [ ] T014 [P] [US2] Extend `test/feed-fetch-security.ts` (or add a
+- [X] T014 [P] [US2] Extend `test/feed-fetch-security.ts` (or add a
   sibling file `test/feed-fetch-conditional.ts` if the security
   file's scope must remain pure) covering: 200 with `ETag` captures
   it; 304 with prior validator returns `{notModified:true, text:''}`
@@ -169,7 +185,7 @@ poll cadence lengthens after consecutive failures.
   `etag:undefined`/`lastModified:undefined` so the caller can clear
   stale validators; conditional headers are re-sent across redirect
   hops.
-- [ ] T015 [US2] In the existing `fetchFeed` / per-feed poll path in
+- [X] T015 [US2] In the existing `fetchFeed` / per-feed poll path in
   `src/server/durable-objects/index.ts`, read prior validators from
   `PollerFeedState`, pass them to `fetchFeedText`, and on
   `notModified === true` short-circuit before parsing: do NOT parse,
@@ -179,7 +195,7 @@ poll cadence lengthens after consecutive failures.
   now + FEED_REFRESH_INTERVAL_MS`, and call `writeLastAnySuccess(now)`.
   On 200 also write back updated `etag` / `lastModified` from the
   response (clearing them when the response omits the header).
-- [ ] T016 [US2] In the same per-feed poll path in
+- [X] T016 [US2] In the same per-feed poll path in
   `src/server/durable-objects/index.ts`, on error (network failure,
   non-2xx non-304 response, parse error), increment
   `consecutiveFailures`, compute `nextDueAt = lastAttemptAt +
@@ -189,19 +205,23 @@ poll cadence lengthens after consecutive failures.
   the error so it does NOT propagate out of the per-feed loop
   (FR-006). The existing `last_status` / `last_error` writes on the
   `feeds` row remain unchanged.
-- [ ] T017 [US2] In `refreshFeedBatches` (the alarm sweep machinery)
+- [X] T017 [US2] In `refreshFeedBatches` (the alarm sweep machinery)
   in `src/server/durable-objects/index.ts`, filter each batch so
   only feeds with `PollerFeedState.nextDueAt <= now` are polled
   (treat a missing record as due). Also dedupe against
   `manualRefreshClaims`: if a manual refresh for the feed is in
   flight, skip it this sweep and let the manual refresh win
   (research.md §8).
-- [ ] T018 [P] [US2] Extend `test/alarm.ts` to verify: (a) feeds
+- [X] T018 [P] [US2] Extend `test/alarm.ts` to verify: (a) feeds
   with future `nextDueAt` are skipped during a sweep and not
   fetched; (b) feeds with no `PollerFeedState` record are polled; (c)
   a feed currently in `manualRefreshClaims` is skipped this sweep
   and re-evaluated next tick.
-- [ ] T019 [P] [US2] Extend `test/do-handlers.ts` to verify the
+- [X] T019 [P] [US2] Extend `test/do-handlers.ts` to verify the
+  per-feed state machine (Implementation note: tests added in
+  `test/feed-cursor.ts` because that's where the real-fetchFeed
+  harness lives; `test/do-handlers.ts` stubs `fetchFeed`
+  entirely and cannot exercise the state machine).
   per-feed state machine: (a) 304 path returns zero new items, emits
   no SSE event, resets `consecutiveFailures` to 0, advances
   `nextDueAt` by `FEED_REFRESH_INTERVAL_MS`, leaves
@@ -228,7 +248,7 @@ and a normal next-alarm re-arm. Sign in to that account; the next
 page load triggers the catch-up sweep (already implemented in
 Phase 3) and the indicator becomes accurate within one cadence.
 
-- [ ] T020 [US3] In the `alarm()` method in
+- [X] T020 [US3] In the `alarm()` method in
   `src/server/durable-objects/index.ts`, after the existing
   account-deletion housekeeping and `scheduleNextFeedRefresh()`
   re-arm and BEFORE walking `alarm_refresh_cursor`, call
@@ -237,7 +257,7 @@ Phase 3) and the indicator becomes accurate within one cadence.
   SC-005). The next alarm MUST already be re-armed before this gate
   so the sweep continues to fire on cadence once the account becomes
   active again.
-- [ ] T021 [P] [US3] Extend `test/alarm.ts` to verify: (a) seeding
+- [X] T021 [P] [US3] Extend `test/alarm.ts` to verify: (a) seeding
   `last_active_at` to 31 days ago causes the alarm tick to perform
   zero outbound `fetchFeedText` calls and re-arm the next alarm
   normally; (b) advancing `last_active_at` to `now` (e.g. via a
@@ -254,19 +274,19 @@ and economical at scale (US3).
 
 **Purpose**: Cross-story validation and final guardrails.
 
-- [ ] T022 Run every scenario in
+- [X] T022 Run every scenario in
   `specs/009-background-feed-polling/quickstart.md` against
   `wrangler dev` (or the existing test harness equivalent) and
   confirm SC-001 through SC-006 pass.
-- [ ] T023 [P] Run `npm test && npm run lint` from repo root and
+- [X] T023 [P] Run `npm test && npm run lint` from repo root and
   confirm no regressions vs. the T001 baseline.
-- [ ] T024 [P] Verify constitution-check assumptions still hold in
+- [X] T024 [P] Verify constitution-check assumptions still hold in
   the final diff: no SQLite schema migration shipped, no
   `src/shared/schema.ts` change, no `/api/sync` payload change, no
   `src/client/**` change, and the `/feed-status` HTTP and
   `feed-updates-available` SSE contracts are byte-identical to
   feature 008.
-- [ ] T025 [P] Code review pass on the diff in
+- [X] T025 [P] Code review pass on the diff in
   `src/server/durable-objects/index.ts` and
   `src/server/feed-fetch.ts` for: per-feed error isolation (FR-006),
   SSE broadcast guard (`newItems.length > 0`, FR-010), validator

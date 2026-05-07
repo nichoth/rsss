@@ -1,6 +1,7 @@
 import { test } from '@substrate-system/tapzero'
-
-// Import test modules
+// Test fixtures must run BEFORE other test modules import UserDO so
+// the prototype patches are in place before any test body runs.
+import './_test-fixtures.js'
 import './sync.js'
 import './sync-cycle.js'
 import './db-adapter.js'
@@ -15,6 +16,7 @@ import './state-route.js'
 import './state-auth-storage.js'
 import './api-router.js'
 import './alarm.js'
+import './poll-state.js'
 import './server-headers.js'
 import './autumn-billing.js'
 import './email.js'
