@@ -1,6 +1,6 @@
 # rsss Development Guidelines
 
-Auto-generated from all feature plans. Last updated: 2026-05-07
+Auto-generated from all feature plans. Last updated: 2026-05-08
 
 ## Active Technologies
 - Per-user Durable Object SQLite (server-authoritative); local (002-full-article-fetch)
@@ -34,9 +34,9 @@ npm test && npm run lint
 TypeScript (Cloudflare Workers runtime, ES2022 lib): Follow standard conventions
 
 ## Recent Changes
+- 011-fix-refresh-noop: Added [if applicable, e.g., PostgreSQL, CoreData, files or N/A]
 - 010-fix-refresh-feedback: Added TypeScript (browser, ES2022 lib via Vite for + Preact + `@preact/signals` (client state
 - 010-fix-refresh-feedback: Added [if applicable, e.g., PostgreSQL, CoreData, files or N/A]
-- 009-background-feed-polling: Added TypeScript (Cloudflare Workers runtime, ES2022 + Hono (server router),
 
 
 <!-- MANUAL ADDITIONS START -->
