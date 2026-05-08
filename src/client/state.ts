@@ -169,6 +169,12 @@ export type AppState = {
     authError:Signal<string|null>,
     feeds:Signal<Feed[]>,
     feedsLoading:Signal<boolean>,
+    // Manual "Refresh Feeds" lifecycle. Held true from click until the
+    // visible result lands (SSE refresh-complete + refreshAfterSync),
+    // POST failure, 401, or 60s safety timeout. Distinct from
+    // feedsLoading so per-feed loadFeeds calls cannot flicker the
+    // refresh button mid-window.
+    refreshInProgress:Signal<boolean>,
     feedSyncStatus:Signal<
         'inactive'|'updates'|'syncing'|'error'|'synced'
     >,
@@ -216,6 +222,7 @@ export function State ():AppState {
         ),
         feeds: signal<Feed[]>([]),
         feedsLoading: signal<boolean>(false),
+        refreshInProgress: signal<boolean>(false),
         feedSyncStatus: signal<
             'inactive'|'updates'|'syncing'|'error'|'synced'
         >('inactive'),
@@ -582,17 +589,18 @@ State.openEventStream = function (state:AppState):void {
     source.addEventListener('refresh-complete', () => {
         debug('SSE refresh-complete')
         clearRefreshFeedsSafetyTimeout()
-        // local-first DB sync, NOT server feed pull. Optimistically
-        // clear so the dot reacts instantly; then defensively
-        // reconcile against the server in case items arrived during
-        // the refresh window (Acceptance 3.2).
-        batch(() => {
-            state.feedsLoading.value = false
-            state.feedUpdateCounts.value = {}
-            state.feedSyncStatus.value = 'synced'
-        })
-        State.loadFeedStatus(state).catch((err) => {
+        // Await the authoritative reconcile so the items list, pill,
+        // and button transition land inside the same paint when we
+        // batch-clear refreshInProgress below (FR-005, SC-002).
+        // loadFeedStatus inside refreshAfterSync is the single source
+        // of truth for feedSyncStatus and feedUpdateCounts.
+        State.refreshAfterSync(state).catch((err) => {
             debug('refresh-complete reconcile error:', err)
+        }).finally(() => {
+            batch(() => {
+                state.refreshInProgress.value = false
+                state.feedsLoading.value = false
+            })
         })
     })
 
@@ -684,11 +692,29 @@ State.openEventStream = function (state:AppState):void {
     let needsReconcile = false
     source.addEventListener('open', () => {
         debug('SSE open')
-        if (hasOpenedBefore && needsReconcile) {
-            needsReconcile = false
-            State.loadFeedStatus(state).catch((err) => {
-                debug('reconnect loadFeedStatus error:', err)
-            })
+        if (hasOpenedBefore) {
+            // If a manual refresh was in flight when SSE dropped, the
+            // server's `refresh-complete` event may have been lost.
+            // Run the full authoritative reconcile and clear the busy
+            // state so the button cannot get stuck waiting for an
+            // event that will never arrive.
+            if (state.refreshInProgress.value) {
+                clearRefreshFeedsSafetyTimeout()
+                needsReconcile = false
+                State.refreshAfterSync(state).catch((err) => {
+                    debug('reconnect refreshAfterSync error:', err)
+                }).finally(() => {
+                    batch(() => {
+                        state.refreshInProgress.value = false
+                        state.feedsLoading.value = false
+                    })
+                })
+            } else if (needsReconcile) {
+                needsReconcile = false
+                State.loadFeedStatus(state).catch((err) => {
+                    debug('reconnect loadFeedStatus error:', err)
+                })
+            }
         }
         hasOpenedBefore = true
     })
@@ -1341,8 +1367,14 @@ State.deleteFeed = async function (
 State.refreshFeeds = async function (
     state:AppState
 ):Promise<void> {
+    // FR-008: ignore re-entrant clicks while a refresh is in flight.
+    if (state.refreshInProgress.value) return
+
+    // FR-007: snapshot so we can restore the indicator on failure.
+    const priorCounts = state.feedUpdateCounts.value
+
     batch(() => {
-        state.feedsLoading.value = true
+        state.refreshInProgress.value = true
         state.feedSyncStatus.value = 'syncing'
         state.feedSyncError.value = null
     })
@@ -1350,17 +1382,19 @@ State.refreshFeeds = async function (
     clearRefreshFeedsSafetyTimeout()
     refreshFeedsSafetyTimeout = setTimeout(() => {
         refreshFeedsSafetyTimeout = null
-        state.feedsLoading.value = false
+        batch(() => {
+            state.refreshInProgress.value = false
+            state.feedsLoading.value = false
+        })
     }, REFRESH_FEEDS_SAFETY_TIMEOUT_MS)
 
     try {
         await api.post('feeds/refresh')
-        clearRefreshFeedsSafetyTimeout()
-        batch(() => {
-            state.feedUpdateCounts.value = {}
-            state.feedSyncStatus.value = 'synced'
-            state.feedsLoading.value = false
-        })
+        // Do NOT clear refreshInProgress here. The SSE
+        // refresh-complete handler awaits refreshAfterSync and
+        // settles the busy state once the visible result lands
+        // (FR-001/FR-005, contracts/refresh-lifecycle.md "Forbidden
+        // transitions").
     } catch (err) {
         clearRefreshFeedsSafetyTimeout()
         if (err instanceof HTTPError && err.response.status === 401) {
@@ -1370,6 +1404,7 @@ State.refreshFeeds = async function (
                 state.feedSyncStatus.value = 'error'
                 state.feedSyncError.value = SYNC_AUTH_EXPIRED
                 state.feedsLoading.value = false
+                state.refreshInProgress.value = false
             })
             state._setRoute('/login')
             return
@@ -1379,7 +1414,9 @@ State.refreshFeeds = async function (
             state.feedSyncError.value = err instanceof Error ?
                 err.message :
                 'Failed to refresh feeds'
+            state.feedUpdateCounts.value = priorCounts
             state.feedsLoading.value = false
+            state.refreshInProgress.value = false
         })
         throw err
     }

@@ -1,4 +1,4 @@
-import { signal } from '@preact/signals'
+import { signal, batch } from '@preact/signals'
 import { test } from '@substrate-system/tapzero'
 // @ts-expect-error -- no type declarations for .wasm imports
 import wasmUrl from '@sqlite.org/sqlite-wasm/sqlite3.wasm'
@@ -249,12 +249,60 @@ function feedState ():AppState {
         user: signal(null),
         feeds: signal([]),
         feedsLoading: signal(false),
+        refreshInProgress: signal(false),
         feedSyncStatus: signal<
             'inactive'|'updates'|'syncing'|'error'|'synced'
         >('inactive'),
         feedSyncError: signal<string|null>(null),
         feedUpdateCounts: signal<Record<string, number>>({})
     } as unknown) as AppState
+}
+
+type EventListenerFn = (ev:MessageEvent|Event) => void
+
+class StubEventSource {
+    static instances:StubEventSource[] = []
+
+    url:string
+    listeners:Record<string, EventListenerFn[]> = {}
+
+    constructor (url:string) {
+        this.url = url
+        StubEventSource.instances.push(this)
+    }
+
+    addEventListener (event:string, listener:EventListenerFn):void {
+        (this.listeners[event] ??= []).push(listener)
+    }
+
+    removeEventListener (event:string, listener:EventListenerFn):void {
+        const list = this.listeners[event]
+        if (!list) return
+        this.listeners[event] = list.filter(fn => fn !== listener)
+    }
+
+    close ():void {}
+
+    fire (event:string, data?:unknown):void {
+        const ev = data === undefined ?
+            new Event(event) :
+            new MessageEvent(event, { data: JSON.stringify(data) })
+        const list = this.listeners[event] ?? []
+        for (const fn of list) fn(ev)
+    }
+}
+
+function stubEventSource ():() => void {
+    const original = (globalThis as { EventSource?:typeof EventSource })
+        .EventSource
+    StubEventSource.instances = []
+    ;(globalThis as { EventSource:unknown })
+        .EventSource = StubEventSource as unknown as typeof EventSource
+    return () => {
+        ;(globalThis as { EventSource?:typeof EventSource })
+            .EventSource = original
+        StubEventSource.instances = []
+    }
 }
 
 function itemByRouteResponse ():Response {
@@ -491,7 +539,7 @@ test('refreshFeeds marks feed sync as syncing while request is in flight',
             await nextTask()
 
             t.equal(
-                state.feedsLoading.value,
+                state.refreshInProgress.value,
                 true,
                 'refresh button spinner stays active during sync'
             )
@@ -520,71 +568,118 @@ test('refreshFeeds clears update counts and marks feed sync as synced',
     async t => {
         const originalFetch = globalThis.fetch
         const restoreTimeout = stubRefreshSafetyTimer()
+        const restoreEventSource = stubEventSource()
+        const originalRefreshAfterSync = State.refreshAfterSync
 
         try {
             globalThis.fetch = async () => new Response(JSON.stringify({
                 success: true
             }))
+
+            // Stub refreshAfterSync to mimic loadFeedStatus's
+            // post-refresh reconcile (counts cleared, status synced)
+            // without exercising the full reload pipeline here. The
+            // full pipeline is tested in test/refresh-lifecycle.ts.
+            State.refreshAfterSync = async (state:AppState) => {
+                batch(() => {
+                    state.feedUpdateCounts.value = {}
+                    state.feedSyncStatus.value = 'synced'
+                })
+            }
 
             const state = feedState()
             state.feedUpdateCounts.value = { 1: 2, 2: 1 }
             state.feedSyncStatus.value = 'updates'
 
+            State.openEventStream(state)
+            const source = StubEventSource.instances[0]
+
             await State.refreshFeeds(state)
+
+            t.equal(
+                state.refreshInProgress.value,
+                true,
+                'POST resolve does NOT clear refreshInProgress; ' +
+                'completion is bound to SSE refresh-complete (FR-001)'
+            )
+            t.deepEqual(
+                state.feedUpdateCounts.value,
+                { 1: 2, 2: 1 },
+                'POST resolve does NOT zero feedUpdateCounts'
+            )
+
+            source.fire('refresh-complete')
+            await nextTask()
+            await nextTask()
 
             t.deepEqual(
                 state.feedUpdateCounts.value,
                 {},
-                'successful refresh clears pending update counts'
+                'refreshAfterSync after refresh-complete clears counts'
             )
             t.equal(
                 state.feedSyncStatus.value,
                 'synced',
-                'successful refresh marks feed sync as synced'
+                'refreshAfterSync settles status to synced'
             )
             t.equal(
-                state.feedsLoading.value,
+                state.refreshInProgress.value,
                 false,
-                'successful refresh clears the button spinner'
+                'SSE refresh-complete clears the busy state (FR-005)'
             )
         } finally {
+            State.refreshAfterSync = originalRefreshAfterSync
+            State.closeEventStream()
             globalThis.fetch = originalFetch
             restoreTimeout()
+            restoreEventSource()
         }
     })
 
-test('refreshFeeds keeps synced status after idle timer window',
-    async t => {
-        const originalFetch = globalThis.fetch
-        const timerStub = stubQueuedRefreshSafetyTimer()
+test('refreshFeeds safety timer clears the busy state without ' +
+    'overwriting pill state',
+async t => {
+    const originalFetch = globalThis.fetch
+    const timerStub = stubQueuedRefreshSafetyTimer()
 
-        try {
-            globalThis.fetch = async () => new Response(JSON.stringify({
-                success: true
-            }))
+    try {
+        globalThis.fetch = async () => new Response(JSON.stringify({
+            success: true
+        }))
 
-            const state = feedState()
-            state.feedUpdateCounts.value = { 1: 2 }
-            state.feedSyncStatus.value = 'updates'
+        const state = feedState()
+        state.feedUpdateCounts.value = { 1: 2 }
+        state.feedSyncStatus.value = 'updates'
 
-            await State.refreshFeeds(state)
-            timerStub.runSafetyTimers()
+        await State.refreshFeeds(state)
 
-            t.equal(
-                state.feedSyncStatus.value,
-                'synced',
-                'successful sync stays green after the idle window'
-            )
-            t.deepEqual(
-                state.feedUpdateCounts.value,
-                {},
-                'idle window does not restore stale pending counts'
-            )
-        } finally {
-            globalThis.fetch = originalFetch
-            timerStub.restore()
-        }
-    })
+        // POST resolved but completion is now bound to SSE
+        // refresh-complete; refreshInProgress stays true until
+        // either the event arrives or the safety timer fires.
+        t.equal(
+            state.refreshInProgress.value,
+            true,
+            'POST resolve does not clear refreshInProgress'
+        )
+
+        timerStub.runSafetyTimers()
+
+        t.equal(
+            state.refreshInProgress.value,
+            false,
+            'safety timer clears the busy state on stuck refreshes'
+        )
+        t.equal(
+            state.feedSyncStatus.value,
+            'syncing',
+            'safety timer does not touch feedSyncStatus; the next ' +
+            'loadFeedStatus reconcile owns that transition'
+        )
+    } finally {
+        globalThis.fetch = originalFetch
+        timerStub.restore()
+    }
+})
 
 test('refreshFeeds stores latest error message on failure',
     async t => {
@@ -623,10 +718,12 @@ test('refreshFeeds stores latest error message on failure',
         }
     })
 
-test('refreshFeeds retries from error state and recovers to synced',
+test('refreshFeeds retries from error state and recovers via SSE',
     async t => {
         const originalFetch = globalThis.fetch
         const restoreTimeout = stubRefreshSafetyTimer()
+        const restoreEventSource = stubEventSource()
+        const originalRefreshAfterSync = State.refreshAfterSync
         let resolveRefresh:(response:Response) => void = () => {}
 
         try {
@@ -634,9 +731,19 @@ test('refreshFeeds retries from error state and recovers to synced',
                 resolveRefresh = resolve
             })
 
+            State.refreshAfterSync = async (state:AppState) => {
+                batch(() => {
+                    state.feedUpdateCounts.value = {}
+                    state.feedSyncStatus.value = 'synced'
+                })
+            }
+
             const state = feedState()
             state.feedSyncStatus.value = 'error'
             state.feedSyncError.value = 'first outage'
+
+            State.openEventStream(state)
+            const source = StubEventSource.instances[0]
 
             const refresh = State.refreshFeeds(state)
             await nextTask()
@@ -657,19 +764,38 @@ test('refreshFeeds retries from error state and recovers to synced',
             })))
             await refresh
 
+            // POST resolved; completion bound to SSE refresh-complete.
+            t.equal(
+                state.refreshInProgress.value,
+                true,
+                'POST resolve does NOT clear the busy state'
+            )
+
+            source.fire('refresh-complete')
+            await nextTask()
+            await nextTask()
+
             t.equal(
                 state.feedSyncStatus.value,
                 'synced',
-                'successful retry marks feed sync as synced'
+                'SSE refresh-complete + reconcile marks feed sync synced'
             )
             t.equal(
                 state.feedSyncError.value,
                 null,
                 'successful retry does not restore the old error'
             )
+            t.equal(
+                state.refreshInProgress.value,
+                false,
+                'SSE refresh-complete clears the busy state'
+            )
         } finally {
+            State.refreshAfterSync = originalRefreshAfterSync
+            State.closeEventStream()
             globalThis.fetch = originalFetch
             restoreTimeout()
+            restoreEventSource()
         }
     })
 

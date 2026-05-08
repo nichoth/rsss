@@ -8,12 +8,12 @@ export const SidebarFooter:FunctionComponent<{
     state:AppState
 }> = function (props) {
     const { state } = props
-    const { feedsLoading } = state
+    const { refreshInProgress } = state
 
     return html`<div class="sidebar-footer">
         <${Button}
             onClick=${() => State.refreshFeeds(state)}
-            isSpinning=${feedsLoading}
+            isSpinning=${refreshInProgress}
         >
             Refresh Feeds
         <//>

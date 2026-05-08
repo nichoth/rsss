@@ -37,6 +37,7 @@ export const Button:FunctionComponent<ButtonProps> = function (props) {
         ...${_props}
         onClick=${click}
         disabled=${isSpinning.value || _props.disabled}
+        aria-busy=${isSpinning.value}
         class=${classes}
     >
         <span className="btn-content">${props.children}</span>
