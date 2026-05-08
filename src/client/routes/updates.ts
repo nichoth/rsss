@@ -20,7 +20,6 @@ interface FeedPreview {
 
 type PreviewMap = Map<string, Signal<FeedPreview>>
 type RefreshMap = Map<string, {
-    spinning:Signal<boolean>
     error:Signal<string|null>
 }>
 
@@ -61,7 +60,6 @@ const FeedRow:FunctionComponent<{
     }
     if (!refreshMap.has(feedId)) {
         refreshMap.set(feedId, {
-            spinning: signal(false),
             error: signal<string|null>(null)
         })
     }
@@ -96,7 +94,6 @@ const FeedRow:FunctionComponent<{
                 <summary class="feed-summary">
                     <span class="feed-title">${title}</span>
                     <${Button}
-                        isSpinning=${refresh.spinning}
                         onClick=${handleRefresh}
                         class="btn-refresh"
                     >
