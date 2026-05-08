@@ -474,3 +474,189 @@ test(
         )
     }
 )
+
+test(
+    'feed-updates-cleared: removes the listed feedIds from feedUpdateCounts',
+    async t => {
+        const state = buildPartialState()
+        state.feeds.value = [
+            { id: 1, url: 'a' },
+            { id: 2, url: 'b' },
+            { id: 3, url: 'c' }
+        ] as never
+        state.feedUpdateCounts.value = { 1: 2, 2: 5, 3: 1 }
+        state.feedSyncStatus.value = 'updates'
+
+        await withStubbedEventSource(async () => {
+            State.openEventStream(state)
+            const source = StubEventSource.instances[0]
+            source.fire('feed-updates-cleared', {
+                feedIds: ['1', '3']
+            })
+        })
+        State.closeEventStream()
+
+        t.deepEqual(
+            state.feedUpdateCounts.value,
+            { 2: 5 },
+            'only the listed feed entries are removed; others survive'
+        )
+        t.equal(
+            state.feedSyncStatus.value,
+            'updates',
+            'status stays updates while pending counts remain'
+        )
+    }
+)
+
+test(
+    'feed-updates-cleared: flips feedSyncStatus to synced when map empties',
+    async t => {
+        const state = buildPartialState()
+        state.feeds.value = [{ id: 1, url: 'a' }] as never
+        state.feedUpdateCounts.value = { 1: 4 }
+        state.feedSyncStatus.value = 'updates'
+
+        await withStubbedEventSource(async () => {
+            State.openEventStream(state)
+            const source = StubEventSource.instances[0]
+            source.fire('feed-updates-cleared', {
+                feedIds: ['1']
+            })
+        })
+        State.closeEventStream()
+
+        t.equal(
+            Object.keys(state.feedUpdateCounts.value).length,
+            0,
+            'feedUpdateCounts is empty after clearing the only entry'
+        )
+        t.equal(
+            state.feedSyncStatus.value,
+            'synced',
+            'status flips to synced when nothing pending remains'
+        )
+    }
+)
+
+test(
+    'openEventStream: connects to /api/events with credentials and is idempotent',
+    async t => {
+        const state = buildPartialState()
+
+        await withStubbedEventSource(async () => {
+            State.openEventStream(state)
+            State.openEventStream(state)
+
+            t.equal(
+                StubEventSource.instances.length,
+                1,
+                'second openEventStream call is a no-op (no second connection)'
+            )
+            t.equal(
+                StubEventSource.instances[0].url,
+                '/api/events',
+                'EventSource is opened against the SSE endpoint'
+            )
+            t.equal(
+                StubEventSource.lastOptions?.withCredentials,
+                true,
+                'EventSource is opened with credentials so the session ' +
+                    'cookie is sent'
+            )
+        })
+        State.closeEventStream()
+    }
+)
+
+test(
+    'feed-updated: rapid bursts debounce to a single refreshAfterSync',
+    async t => {
+        const state = buildPartialState()
+        const original = State.refreshAfterSync
+        let calls = 0
+        State.refreshAfterSync = async () => {
+            calls += 1
+        }
+
+        try {
+            await withStubbedEventSource(async () => {
+                State.openEventStream(state)
+                const source = StubEventSource.instances[0]
+                source.fire('feed-updated')
+                source.fire('feed-updated')
+                source.fire('feed-updated')
+                source.fire('feed-updated')
+                // SSE_REFRESH_DEBOUNCE_MS is 250ms; wait past the
+                // window so the coalesced timer fires inside the test.
+                await new Promise(resolve => setTimeout(resolve, 320))
+            })
+            State.closeEventStream()
+
+            t.equal(
+                calls,
+                1,
+                'four feed-updated events within the debounce window ' +
+                    'collapse to a single refreshAfterSync call'
+            )
+        } finally {
+            State.refreshAfterSync = original
+        }
+    }
+)
+
+test(
+    'feed-updates-available: legacy feedIds payload reconciles via loadFeedStatus',
+    async t => {
+        const state = buildPartialState()
+        state.feeds.value = [{ id: 1, url: 'a' }] as never
+        let fetchCalls = 0
+
+        await withStubbedEventSource(async () => {
+            await withStubbedFetch(async (input) => {
+                fetchCalls += 1
+                const url = typeof input === 'string' ?
+                    input :
+                    input instanceof URL ?
+                        input.toString() :
+                        input.url
+                t.ok(
+                    url.endsWith('/api/feed-status'),
+                    'legacy fallback hits the canonical status endpoint'
+                )
+                return jsonResponse({
+                    feedUpdateCounts: { 1: 7 },
+                    totalPending: 7
+                })
+            }, async () => {
+                State.openEventStream(state)
+                const source = StubEventSource.instances[0]
+                // Older server bundles emit { feedIds: [...] } without
+                // canonical counts; client should defer to the status
+                // endpoint rather than guessing.
+                source.fire('feed-updates-available', {
+                    feedIds: ['1']
+                })
+                await new Promise(resolve => setTimeout(resolve, 0))
+                await new Promise(resolve => setTimeout(resolve, 0))
+            })
+        })
+        State.closeEventStream()
+
+        t.equal(
+            fetchCalls,
+            1,
+            'legacy feedIds payload triggers exactly one status reconcile'
+        )
+        t.equal(
+            state.feedUpdateCounts.value[1],
+            7,
+            'reconcile populates counts from the authoritative response'
+        )
+        t.equal(
+            state.feedSyncStatus.value,
+            'updates',
+            'status reflects the server-reported pending total'
+        )
+    }
+)
