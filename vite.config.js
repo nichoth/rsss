@@ -25,6 +25,12 @@ export default defineConfig(({ mode }) => {
                 prefreshEnabled: true,
             }),
         ],
+        optimizeDeps: {
+            // sqlite-wasm references its OPFS proxy with `?vfs=opfs`
+            // query strings that Vite's dep optimizer treats as part of
+            // the filename, causing "file does not exist" warnings.
+            exclude: ['@sqlite.org/sqlite-wasm']
+        },
         // https://github.com/vitejs/vite/issues/8644#issuecomment-1159308803
         esbuild: {
             logOverride: { 'this-is-undefined-in-esm': 'silent' }
