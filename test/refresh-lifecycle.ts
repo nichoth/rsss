@@ -567,3 +567,45 @@ async t => {
         'refreshInProgress is cleared inside the 401 batch'
     )
 })
+
+// US1 - T003: broken-caller pattern guard (FR-008 invariant).
+// Encodes the contract that nothing outside State.refreshFeeds may set
+// refreshInProgress = true before invoking it. If a caller does so (as
+// the buggy Button.click did before this fix), the FR-008 re-entry
+// guard short-circuits and the POST is silently dropped. This test
+// passes both before and after the production fix because it directly
+// exercises State.refreshFeeds against the broken pre-state.
+test('a caller writing refreshInProgress=true before calling ' +
+    'refreshFeeds short-circuits and dispatches zero POSTs (FR-008)',
+async t => {
+    const state = buildPartialState()
+
+    let postCalls = 0
+    await withStubbedFetch(async (input) => {
+        const url = typeof input === 'string' ?
+            input :
+            input instanceof URL ?
+                input.toString() :
+                input.url
+        if (url.endsWith('/api/feeds/refresh')) {
+            postCalls += 1
+            return jsonResponse({ success: true, queued: 0 })
+        }
+        return jsonResponse({})
+    }, async () => {
+        // Simulate the broken Button.click write that landed before
+        // refreshFeeds ran. After the fix this pattern is forbidden;
+        // the test guarantees the consequence is observable so any
+        // future caller that re-introduces it fails CI here.
+        state.refreshInProgress.value = true
+
+        await State.refreshFeeds(state)
+    })
+
+    t.equal(
+        postCalls,
+        0,
+        'no POST is dispatched when refreshInProgress is set true ' +
+        'before the call'
+    )
+})

@@ -16,6 +16,7 @@ export interface ButtonProps {
 
 export const Button:FunctionComponent<ButtonProps> = function (props) {
     const { isSpinning: _isSpinning, ..._props } = props
+    const isControlled = Boolean(_isSpinning)
     const isSpinning = _isSpinning || useSignal<boolean>(false)
 
     const classes = ([
@@ -26,9 +27,25 @@ export const Button:FunctionComponent<ButtonProps> = function (props) {
     ]).filter(Boolean).join(' ').trim()
 
     async function click (ev:MouseEvent) {
-        if (props.onClick) {
-            isSpinning.value = true
+        if (!props.onClick) return
+        // The DOM event dispatch discards this async function's
+        // promise, so any rejection from `onClick` becomes an
+        // unhandled rejection. Swallow it here; callers settle
+        // their own application-level error state inside `onClick`.
+        if (isControlled) {
+            try {
+                await props.onClick(ev)
+            } catch {
+                /* parent owns error handling */
+            }
+            return
+        }
+        isSpinning.value = true
+        try {
             await props.onClick(ev)
+        } catch {
+            /* parent owns error handling */
+        } finally {
             isSpinning.value = false
         }
     }
