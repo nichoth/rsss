@@ -12,6 +12,8 @@ Auto-generated from all feature plans. Last updated: 2026-05-07
 - TypeScript (Cloudflare Workers + ES2022 lib for + Hono (server router), `@cloudflare/workers- (008-fix-up-to-date-dot)
 - TypeScript (Cloudflare Workers runtime, ES2022 + Hono (server router), (009-background-feed-polling)
 - Per-user Durable Object SQLite (existing `feeds`, (009-background-feed-polling)
+- TypeScript (browser, ES2022 lib via Vite for + Preact + `@preact/signals` (client state (010-fix-refresh-feedback)
+- N/A. The feature is UI-state lifecycle only — no (010-fix-refresh-feedback)
 
 - TypeScript (Cloudflare Workers runtime, ES2022 lib) + `hono`, `@cloudflare/workers-types`, `fast-xml-parser` (001-fix-og-image-redirects)
 
@@ -32,8 +34,9 @@ npm test && npm run lint
 TypeScript (Cloudflare Workers runtime, ES2022 lib): Follow standard conventions
 
 ## Recent Changes
+- 010-fix-refresh-feedback: Added TypeScript (browser, ES2022 lib via Vite for + Preact + `@preact/signals` (client state
+- 010-fix-refresh-feedback: Added [if applicable, e.g., PostgreSQL, CoreData, files or N/A]
 - 009-background-feed-polling: Added TypeScript (Cloudflare Workers runtime, ES2022 + Hono (server router),
-- 008-fix-up-to-date-dot: Added TypeScript (Cloudflare Workers + ES2022 lib for + Hono (server router), `@cloudflare/workers-
 
 
 <!-- MANUAL ADDITIONS START -->
