@@ -182,6 +182,13 @@ export type AppState = {
     feedUpdateCounts:Signal<Record<string, number>>,
     feedUpdateStatus:ReadonlySignal<'synced'|'updates'>,
     feedsWithUpdates:ReadonlySignal<string[]>,
+    // Display-only view over `feedSyncStatus`. Returns 'syncing' for
+    // the entire `refreshInProgress` window so secondary writers
+    // (loadFeedStatus, SSE listeners, background polling) cannot
+    // flicker the pill out of yellow during a manual refresh.
+    displayedFeedSyncStatus:ReadonlySignal<
+        'inactive'|'updates'|'syncing'|'error'|'synced'
+    >,
     items:Signal<Item[]>,
     itemsLoading:Signal<boolean>,
     itemsTotal:Signal<number>,
@@ -237,6 +244,13 @@ export function State ():AppState {
         )),
         feedsWithUpdates: computed<string[]>(() => (
             Object.keys(state.feedUpdateCounts.value)
+        )),
+        displayedFeedSyncStatus: computed<
+            'inactive'|'updates'|'syncing'|'error'|'synced'
+        >(() => (
+            state.refreshInProgress.value ?
+                'syncing' :
+                state.feedSyncStatus.value
         )),
         items: signal<Item[]>([]),
         itemsLoading: signal(false),
@@ -1375,7 +1389,6 @@ State.refreshFeeds = async function (
 
     batch(() => {
         state.refreshInProgress.value = true
-        state.feedSyncStatus.value = 'syncing'
         state.feedSyncError.value = null
     })
 

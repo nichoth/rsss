@@ -15,7 +15,7 @@
 }
 
 @media (680px <= width < 1000px) {
-    .feed-status .feed-status-legend {
+    .feed-status:not(.syncing) .feed-status-legend {
         display: none;
     }
 }

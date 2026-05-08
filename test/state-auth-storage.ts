@@ -1,4 +1,4 @@
-import { signal, batch } from '@preact/signals'
+import { signal, batch, computed } from '@preact/signals'
 import { test } from '@substrate-system/tapzero'
 // @ts-expect-error -- no type declarations for .wasm imports
 import wasmUrl from '@sqlite.org/sqlite-wasm/sqlite3.wasm'
@@ -245,14 +245,24 @@ function authState ():AppState {
 }
 
 function feedState ():AppState {
+    const refreshInProgress = signal(false)
+    const feedSyncStatus = signal<
+        'inactive'|'updates'|'syncing'|'error'|'synced'
+    >('inactive')
+    const displayedFeedSyncStatus = computed<
+        'inactive'|'updates'|'syncing'|'error'|'synced'
+    >(() => (
+        refreshInProgress.value ?
+            'syncing' :
+            feedSyncStatus.value
+    ))
     return ({
         user: signal(null),
         feeds: signal([]),
         feedsLoading: signal(false),
-        refreshInProgress: signal(false),
-        feedSyncStatus: signal<
-            'inactive'|'updates'|'syncing'|'error'|'synced'
-        >('inactive'),
+        refreshInProgress,
+        feedSyncStatus,
+        displayedFeedSyncStatus,
         feedSyncError: signal<string|null>(null),
         feedUpdateCounts: signal<Record<string, number>>({})
     } as unknown) as AppState
@@ -544,9 +554,10 @@ test('refreshFeeds marks feed sync as syncing while request is in flight',
                 'refresh button spinner stays active during sync'
             )
             t.equal(
-                state.feedSyncStatus.value,
+                state.displayedFeedSyncStatus.value,
                 'syncing',
-                'feed sync status switches to syncing immediately'
+                'displayed pill switches to syncing immediately ' +
+                '(yellow during refresh via computed; FR-002)'
             )
             t.equal(
                 state.feedSyncError.value,
@@ -671,9 +682,18 @@ async t => {
         )
         t.equal(
             state.feedSyncStatus.value,
-            'syncing',
-            'safety timer does not touch feedSyncStatus; the next ' +
-            'loadFeedStatus reconcile owns that transition'
+            'updates',
+            'safety timer does not touch feedSyncStatus; the ' +
+            'underlying value retains the pre-click resting state ' +
+            '(no click-time write since 012; the next ' +
+            'loadFeedStatus reconcile owns the next transition)'
+        )
+        t.equal(
+            state.displayedFeedSyncStatus.value,
+            'updates',
+            'displayed pill exits yellow back to the pre-click ' +
+            'resting state after safety timer fires (FR-006 ' +
+            'degraded path)'
         )
     } finally {
         globalThis.fetch = originalFetch
@@ -749,9 +769,10 @@ test('refreshFeeds retries from error state and recovers via SSE',
             await nextTask()
 
             t.equal(
-                state.feedSyncStatus.value,
+                state.displayedFeedSyncStatus.value,
                 'syncing',
-                'retry switches an error state to syncing immediately'
+                'displayed pill switches an error state to syncing ' +
+                'immediately (yellow during retry via computed)'
             )
             t.equal(
                 state.feedSyncError.value,
@@ -820,9 +841,10 @@ test('refreshFeeds retries from error and replaces a second failure',
             await nextTask()
 
             t.equal(
-                state.feedSyncStatus.value,
+                state.displayedFeedSyncStatus.value,
                 'syncing',
-                'retry enters syncing before the second failure'
+                'displayed pill enters syncing before the second ' +
+                'failure (yellow during retry via computed)'
             )
             t.equal(
                 state.feedSyncError.value,

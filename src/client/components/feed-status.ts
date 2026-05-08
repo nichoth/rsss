@@ -47,8 +47,8 @@ export function legendFor (
 
     if (status === 'syncing') {
         return {
-            label: 'refreshing',
-            ariaLabel: `${ARIA_PREFIX}refreshing`
+            label: 'updating',
+            ariaLabel: `${ARIA_PREFIX}updating`
         }
     }
 
@@ -70,7 +70,7 @@ export const FeedStatus:FunctionComponent<{
 }> = function ({ state }) {
     if (!state.user.value) return null
 
-    const status = state.feedSyncStatus.value
+    const status = state.displayedFeedSyncStatus.value
     const count = Object.values(state.feedUpdateCounts.value)
         .reduce((sum, value) => sum + value, 0)
     const error = state.feedSyncError.value ?? 'Feed sync failed'
@@ -93,11 +93,14 @@ export const FeedStatus:FunctionComponent<{
     }
 
     const legend = legendFor(status, count)
+    const wrapperClass = status === 'syncing' ?
+        'feed-status syncing' :
+        'feed-status'
 
     return html`
         <span
             key=${status}
-            class="feed-status"
+            class=${wrapperClass}
             role="status"
             aria-live="polite"
             aria-label=${legend.ariaLabel}

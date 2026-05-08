@@ -41,7 +41,7 @@ feature land under `src/client/` and `test/`.
 checked out, and the baseline test suite is green before any code
 moves. No new dependencies, no scaffolding.
 
-- [ ] T001 Confirm current branch is `012-updating-status-dot` and
+- [X] T001 Confirm current branch is `012-updating-status-dot` and
   run baseline `npm test && npm run lint` from repo root; record
   any pre-existing failures so they are not attributed to this
   feature.
@@ -61,7 +61,7 @@ because they are the user-visible US1 deliverables.
 completes. T002, T003, and T004 are all small, but T004 depends
 on T002 (it reads the new computed signal).
 
-- [ ] T002 Add `displayedFeedSyncStatus:ReadonlySignal<...>`
+- [X] T002 Add `displayedFeedSyncStatus:ReadonlySignal<...>`
   computed signal in `src/client/state.ts`, alongside the
   existing `feedUpdateStatus` and `feedsWithUpdates` computeds.
   Definition per `data-model.md`:
@@ -70,7 +70,7 @@ on T002 (it reads the new computed signal).
   union as `feedSyncStatus`. Export it from the `State` factory
   the same way the other computeds are exported.
 
-- [ ] T003 Remove the
+- [X] T003 Remove the
   `state.feedSyncStatus.value = 'syncing'` line from the
   click-setup `batch` inside `State.refreshFeeds` in
   `src/client/state.ts` (research.md Decision 5). Keep the
@@ -79,7 +79,7 @@ on T002 (it reads the new computed signal).
   `feedSyncStatus = 'error'` or restore `priorCounts` are NOT
   touched (010/011 contract preserved).
 
-- [ ] T004 Update `<FeedStatus>` in
+- [X] T004 Update `<FeedStatus>` in
   `src/client/components/feed-status.ts` so its dot-color and
   legend-choice branches read
   `state.displayedFeedSyncStatus.value` instead of
@@ -124,7 +124,7 @@ guard (FR-010).
 > `'updating'` label assertions and on the new yellow-during-refresh
 > case; the US1 implementation tasks below restore them to green.
 
-- [ ] T005 [P] [US1] In `test/feed-status.ts`, rename the existing
+- [X] T005 [P] [US1] In `test/feed-status.ts`, rename the existing
   `legendFor('syncing', _)` test that asserts the label `'refreshing'`
   / aria-label `'Feed sync status: refreshing'` to assert
   `'updating'` / `'Feed sync status: updating'`. Add a new test
@@ -134,7 +134,7 @@ guard (FR-010).
   underlying `feedSyncStatus` value (covers FR-002, FR-003 at the
   component level).
 
-- [ ] T006 [P] [US1] In `test/sidebar-footer-refresh.ts`, extend
+- [X] T006 [P] [US1] In `test/sidebar-footer-refresh.ts`, extend
   the click-through DOM tests so each of the three resolution paths
   (success-with-items, success-no-items, failure) also asserts the
   rendered pill text and dot-color class. Update the in-flight
@@ -143,7 +143,7 @@ guard (FR-010).
   (`up to date` or `n updates`) at the same DOM tick as the
   button's busy class clears (covers FR-004, FR-006, SC-003).
 
-- [ ] T007 [US1] In `test/refresh-lifecycle.ts`, change every
+- [X] T007 [US1] In `test/refresh-lifecycle.ts`, change every
   assertion that currently reads
   `state.feedSyncStatus.value === 'syncing'` to convey "pill is
   yellow during refresh" so it instead reads
@@ -160,13 +160,13 @@ guard (FR-010).
 
 ### Implementation for User Story 1
 
-- [ ] T008 [US1] In `src/client/components/feed-status.ts`, change
+- [X] T008 [US1] In `src/client/components/feed-status.ts`, change
   `legendFor('syncing', _)` to return
   `{ label: 'updating', ariaLabel: 'Feed sync status: updating' }`
   (was `'refreshing'`). No other branch of `legendFor` is
   touched. This is the first half of the FR-001 deliverable.
 
-- [ ] T009 [US1] In `src/client/components/feed-status.ts`, give
+- [X] T009 [US1] In `src/client/components/feed-status.ts`, give
   the `.feed-status` wrapper an additional class `syncing` when
   `state.displayedFeedSyncStatus.value === 'syncing'` (and ONLY
   then). Render path:
@@ -175,7 +175,7 @@ guard (FR-010).
   `aria-live="polite"` attributes are unchanged. Sequential after
   T008 because both edit `feed-status.ts`.
 
-- [ ] T010 [P] [US1] In `src/client/components/feed-status.css`,
+- [X] T010 [P] [US1] In `src/client/components/feed-status.css`,
   extend the existing `@media (680px <= width < 1000px)` rule so
   that `.feed-status .feed-status-legend` is hidden ONLY when the
   wrapper does not also carry the `syncing` modifier. Concretely,
@@ -216,7 +216,7 @@ fails, in the same paint the button returns to idle.
 > together, so the computed `displayedFeedSyncStatus` moves
 > yellow → red atomically. Tests are the deliverable.
 
-- [ ] T011 [US2] In `test/refresh-lifecycle.ts`, add a test case
+- [X] T011 [US2] In `test/refresh-lifecycle.ts`, add a test case
   for the failure path: stub `fetch` so `POST /api/feeds/refresh`
   rejects, drive `State.refreshFeeds(state)` to completion, and
   assert the `displayedFeedSyncStatus` transition sequence is
@@ -261,7 +261,7 @@ the post-refresh resting state.
 > of `state.refreshInProgress` outside the manual-refresh
 > lifecycle. Tests are the deliverable.
 
-- [ ] T012 [US3] In `test/feed-status-loader.ts`, extend the
+- [X] T012 [US3] In `test/feed-status-loader.ts`, extend the
   `loadFeedStatus` tests with a case that sets
   `state.refreshInProgress.value = true` before invoking
   `loadFeedStatus`, drives the loader against a stub returning
@@ -275,7 +275,7 @@ the post-refresh resting state.
   assert `displayedFeedSyncStatus.value` now reflects the loader's
   payload.
 
-- [ ] T013 [US3] In `test/refresh-lifecycle.ts`, add a case
+- [X] T013 [US3] In `test/refresh-lifecycle.ts`, add a case
   "background SSE `feed-updates-available` arrives during refresh":
   stand up a state in the middle of a manual refresh
   (`refreshInProgress = true`), dispatch a synthetic SSE
@@ -301,7 +301,7 @@ resolution paths plus the background-poll-during-refresh case,
 wire it into the bundled tapout run, and verify the suite plus
 the quickstart manual scenarios all pass.
 
-- [ ] T014 Create new file `test/updating-pill-lifecycle.ts`
+- [X] T014 Create new file `test/updating-pill-lifecycle.ts`
   (browser-driven, runs through tapout). The test mounts the real
   `<SidebarFooter>` and `<FeedStatus>` together against a stubbed
   `EventSource` and `fetch`, then walks the click-to-resolution
@@ -319,12 +319,12 @@ the quickstart manual scenarios all pass.
   `'synced'`; (e) the zero-feeds-subscribed case flashes yellow
   for at least one paint before settling green.
 
-- [ ] T015 In `test/index.ts`, add
+- [X] T015 In `test/index.ts`, add
   `import './updating-pill-lifecycle.js'` so the new file is
   picked up by the bundled tapout run. Sequential after T014
   because the import target must exist.
 
-- [ ] T016 Run `npm test && npm run lint` from repo root.
+- [X] T016 Run `npm test && npm run lint` from repo root.
   Verify the full suite passes, including the four extended
   files (`test/feed-status.ts`,
   `test/feed-status-loader.ts`,

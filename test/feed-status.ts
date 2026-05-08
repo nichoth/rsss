@@ -1,4 +1,4 @@
-import { signal } from '@preact/signals'
+import { signal, computed } from '@preact/signals'
 import { html } from 'htm/preact/index.js'
 import { render } from 'preact'
 import { test } from '@substrate-system/tapzero'
@@ -11,12 +11,24 @@ function feedStatusState (options:{
     feedSyncStatus?:FeedSyncStatus
     feedUpdateCounts?:Record<string, number>
     feedSyncError?:string|null
+    refreshInProgress?:boolean
 } = {}):AppState {
+    const feedSyncStatus = signal<FeedSyncStatus>(
+        options.feedSyncStatus ?? 'inactive'
+    )
+    const refreshInProgress = signal<boolean>(
+        options.refreshInProgress ?? false
+    )
+    const displayedFeedSyncStatus = computed<FeedSyncStatus>(() => (
+        refreshInProgress.value ?
+            'syncing' :
+            feedSyncStatus.value
+    ))
     return {
         user: signal({ did: 'did:plc:test', handle: 'test.bsky.social' }),
-        feedSyncStatus: signal<FeedSyncStatus>(
-            options.feedSyncStatus ?? 'inactive'
-        ),
+        feedSyncStatus,
+        refreshInProgress,
+        displayedFeedSyncStatus,
         feedUpdateCounts: signal<Record<string, number>>(
             options.feedUpdateCounts ?? {}
         ),
@@ -73,12 +85,12 @@ test('legendFor: updates with count > 1 uses plural', t => {
     )
 })
 
-test('legendFor: syncing returns "refreshing"', t => {
+test('legendFor: syncing returns "updating"', t => {
     const result = legendFor('syncing', 0)
-    t.equal(result.label, 'refreshing', 'visible label for syncing')
+    t.equal(result.label, 'updating', 'visible label for syncing')
     t.equal(
         result.ariaLabel,
-        'Feed sync status: refreshing',
+        'Feed sync status: updating',
         'aria-label for syncing'
     )
 })
@@ -178,6 +190,79 @@ test(
             t.ok(
                 root.textContent?.includes('5 updates'),
                 'pill reads "5 updates" using the summed counts'
+            )
+        } finally {
+            cleanup()
+        }
+    }
+)
+
+test(
+    'FeedStatus renders yellow "updating" pill when refreshInProgress=true ' +
+    'regardless of underlying feedSyncStatus (FR-002 / FR-003)',
+    t => {
+        // Underlying status is 'updates' with a non-zero count; the
+        // displayed pill must still be yellow + 'updating' because
+        // refreshInProgress is true.
+        const { root, cleanup } = renderFeedStatus(feedStatusState({
+            feedSyncStatus: 'updates',
+            feedUpdateCounts: { 1: 4 },
+            refreshInProgress: true
+        }))
+
+        try {
+            const dot = root.querySelector('svg.dot')
+            t.ok(
+                dot?.classList.contains('yellow'),
+                'dot is yellow during manual refresh'
+            )
+            const wrapper = root.querySelector('.feed-status')
+            t.equal(
+                wrapper?.getAttribute('aria-label'),
+                'Feed sync status: updating',
+                'aria-label reads "updating" during manual refresh'
+            )
+            t.ok(
+                root.textContent?.includes('updating'),
+                'pill text reads "updating" during manual refresh'
+            )
+            t.equal(
+                root.textContent?.includes('4 updates'),
+                false,
+                'pill does NOT show the underlying "n updates" text ' +
+                'while refreshInProgress is true'
+            )
+        } finally {
+            cleanup()
+        }
+    }
+)
+
+test(
+    'FeedStatus renders yellow "updating" pill when refreshInProgress=true ' +
+    'over a synced underlying status',
+    t => {
+        const { root, cleanup } = renderFeedStatus(feedStatusState({
+            feedSyncStatus: 'synced',
+            refreshInProgress: true
+        }))
+
+        try {
+            const dot = root.querySelector('svg.dot')
+            t.ok(
+                dot?.classList.contains('yellow'),
+                'dot is yellow during manual refresh over synced'
+            )
+            t.ok(
+                root.textContent?.includes('updating'),
+                'pill text reads "updating" during manual refresh ' +
+                'over synced'
+            )
+            t.equal(
+                root.textContent?.includes('up to date'),
+                false,
+                'pill does NOT show "up to date" while ' +
+                'refreshInProgress is true'
             )
         } finally {
             cleanup()
