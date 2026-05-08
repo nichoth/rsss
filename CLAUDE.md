@@ -14,6 +14,8 @@ Auto-generated from all feature plans. Last updated: 2026-05-08
 - Per-user Durable Object SQLite (existing `feeds`, (009-background-feed-polling)
 - TypeScript (browser, ES2022 lib via Vite for + Preact + `@preact/signals` (client state (010-fix-refresh-feedback)
 - N/A. The feature is UI-state lifecycle only — no (010-fix-refresh-feedback)
+- TypeScript (browser, ES2022 lib via Vite for the + Preact + `@preact/signals` (client state and (012-updating-status-dot)
+- N/A. Client-side render-time state only. No SQLite schema, (012-updating-status-dot)
 
 - TypeScript (Cloudflare Workers runtime, ES2022 lib) + `hono`, `@cloudflare/workers-types`, `fast-xml-parser` (001-fix-og-image-redirects)
 
@@ -34,9 +36,9 @@ npm test && npm run lint
 TypeScript (Cloudflare Workers runtime, ES2022 lib): Follow standard conventions
 
 ## Recent Changes
+- 012-updating-status-dot: Added TypeScript (browser, ES2022 lib via Vite for the + Preact + `@preact/signals` (client state and
 - 011-fix-refresh-noop: Added [if applicable, e.g., PostgreSQL, CoreData, files or N/A]
 - 010-fix-refresh-feedback: Added TypeScript (browser, ES2022 lib via Vite for + Preact + `@preact/signals` (client state
-- 010-fix-refresh-feedback: Added [if applicable, e.g., PostgreSQL, CoreData, files or N/A]
 
 
 <!-- MANUAL ADDITIONS START -->

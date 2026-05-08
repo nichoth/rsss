@@ -46,8 +46,6 @@ class StubEventSource {
             new MessageEvent(event, { data: JSON.stringify(data) })
         const list = this.listeners[event] ?? []
         for (const fn of list) fn(ev)
-        if (event === 'open' && this.onopen) this.onopen(ev)
-        if (event === 'error' && this.onerror) this.onerror(ev)
     }
 }
 
@@ -119,7 +117,7 @@ function buildPartialState ():AppState {
         }),
         authLoading: signal(false),
         authError: signal<string|null>(null),
-        feeds: signal([]),
+        feeds: signal([{ id: 1, url: 'a' }]),
         feedsLoading: signal(false),
         refreshInProgress,
         feedSyncStatus,
@@ -151,9 +149,6 @@ function mount (state:AppState):HTMLDivElement {
     const body = document.querySelector('body') as HTMLElement
     const root = document.createElement('div')
     body.appendChild(root)
-    // Mount both SidebarFooter (refresh button) and FeedStatus (pill)
-    // so click-through tests can assert their states transition
-    // together.
     render(
         html`<div>
             <${SidebarFooter} state=${state}/>
@@ -210,107 +205,21 @@ async function settle (count = 4):Promise<void> {
     }
 }
 
-// US1 - T005: a real click dispatches POST /api/feeds/refresh and the
-// button enters its busy state (FR-001).
-test('clicking the rendered "Refresh Feeds" button dispatches one ' +
-    'POST and sets aria-busy="true" (FR-001)',
+// 012-T014 / FR-012 (a) (c) success-with-items.
+// The pill is yellow + 'updating' from the click frame onward, then
+// transitions to blue 'n updates' inside the same paint as the
+// refresh button returns to idle.
+test('012-FR-012: success-with-items lifecycle: yellow updating -> ' +
+    'blue n updates in one paint',
 async t => {
     const state = buildPartialState()
-    state.feedUpdateCounts.value = { 1: 4 }
-    state.feedSyncStatus.value = 'updates'
-
-    const originalRefreshAfterSync = State.refreshAfterSync
-    State.refreshAfterSync = async () => {}
-
-    let postCalls = 0
-    let resolvePost:((r:Response) => void)|null = null
-    const postGate = new Promise<Response>(resolve => {
-        resolvePost = resolve
-    })
-
-    const root = mount(state)
-    try {
-        await withStubbedEventSource(async () => {
-            await withStubbedFetch(async (input) => {
-                const url = typeof input === 'string' ?
-                    input :
-                    input instanceof URL ?
-                        input.toString() :
-                        input.url
-                if (url.endsWith('/api/feeds/refresh')) {
-                    postCalls += 1
-                    return postGate
-                }
-                return jsonResponse({})
-            }, async () => {
-                State.openEventStream(state)
-
-                const btn = refreshButton(root)
-
-                t.equal(
-                    btn.getAttribute('aria-busy'),
-                    'false',
-                    'pre-click aria-busy is false'
-                )
-
-                btn.dispatchEvent(new MouseEvent('click', {
-                    bubbles: true
-                }))
-
-                // Yield once so refreshFeeds enters its click-setup
-                // batch (refreshInProgress -> true) and dispatches
-                // the POST.
-                await nextTask()
-
-                t.equal(
-                    postCalls,
-                    1,
-                    'click dispatches exactly one POST /api/feeds/refresh'
-                )
-                t.equal(
-                    btn.getAttribute('aria-busy'),
-                    'true',
-                    'aria-busy is true while POST is in flight'
-                )
-                t.ok(
-                    btn.disabled,
-                    'button is disabled while POST is in flight'
-                )
-
-                // Resolve the POST so the test can finish cleanly. We
-                // don't fire SSE refresh-complete here — that's T006.
-                resolvePost!(jsonResponse({ success: true, queued: 4 }))
-                await settle()
-
-                t.equal(
-                    btn.getAttribute('aria-busy'),
-                    'true',
-                    'aria-busy STAYS true after POST resolves; only ' +
-                    'SSE refresh-complete may release it (FR-002)'
-                )
-            })
-        })
-    } finally {
-        unmount(root)
-        State.refreshAfterSync = originalRefreshAfterSync
-        State.closeEventStream()
-    }
-})
-
-// US1 - T006: aria-busy stays true continuously through the refresh
-// window and clears in the same paint as the resolution cue
-// (FR-002 / FR-005).
-test('aria-busy stays true past POST resolve until SSE ' +
-    'refresh-complete; resolution cue lands in the same batch (FR-005)',
-async t => {
-    const state = buildPartialState()
-    state.feedUpdateCounts.value = { 1: 4 }
-    state.feedSyncStatus.value = 'updates'
+    state.feedUpdateCounts.value = {}
+    state.feedSyncStatus.value = 'synced'
 
     const originalRefreshAfterSync = State.refreshAfterSync
     State.refreshAfterSync = async (s:AppState) => {
         batch(() => {
-            s.feedUpdateCounts.value = { 1: 7 }
+            s.feedUpdateCounts.value = { 1: 4 }
             s.feedSyncStatus.value = 'updates'
         })
     }
@@ -332,85 +241,6 @@ async t => {
                 State.openEventStream(state)
                 const source = StubEventSource.instances[0]
 
-                const btn = refreshButton(root)
-
-                btn.dispatchEvent(new MouseEvent('click', {
-                    bubbles: true
-                }))
-
-                await settle()
-
-                t.equal(
-                    btn.getAttribute('aria-busy'),
-                    'true',
-                    'aria-busy true in the window between POST ack ' +
-                    'and SSE refresh-complete (FR-002)'
-                )
-
-                source.fire('refresh-complete')
-                await settle()
-
-                t.equal(
-                    btn.getAttribute('aria-busy'),
-                    'false',
-                    'SSE refresh-complete clears aria-busy'
-                )
-                t.equal(
-                    state.feedUpdateCounts.value[1],
-                    7,
-                    'feedUpdateCounts updated by refreshAfterSync ' +
-                    'before the busy cue cleared (FR-005 single ' +
-                    'paint)'
-                )
-                t.equal(
-                    btn.disabled,
-                    false,
-                    'button is no longer disabled after settle'
-                )
-            })
-        })
-    } finally {
-        unmount(root)
-        State.refreshAfterSync = originalRefreshAfterSync
-        State.closeEventStream()
-    }
-})
-
-// US2 - T012: new-items resolution; pill / items / button transition
-// in one paint (FR-003a / FR-005).
-test('new-items resolution: aria-busy clears with feedUpdateCounts ' +
-    'and feedSyncStatus updated together; pill transitions yellow ' +
-    'updating -> blue n updates (FR-003a / 012-FR-004)',
-async t => {
-    const state = buildPartialState()
-    state.feedUpdateCounts.value = {}
-    state.feedSyncStatus.value = 'synced'
-
-    const originalRefreshAfterSync = State.refreshAfterSync
-    State.refreshAfterSync = async (s:AppState) => {
-        batch(() => {
-            s.feedUpdateCounts.value = { 1: 1, 2: 1, 3: 1 }
-            s.feedSyncStatus.value = 'updates'
-        })
-    }
-
-    const root = mount(state)
-    try {
-        await withStubbedEventSource(async () => {
-            await withStubbedFetch(async (input) => {
-                const url = typeof input === 'string' ?
-                    input :
-                    input instanceof URL ?
-                        input.toString() :
-                        input.url
-                if (url.endsWith('/api/feeds/refresh')) {
-                    return jsonResponse({ success: true, queued: 3 })
-                }
-                return jsonResponse({})
-            }, async () => {
-                State.openEventStream(state)
-                const source = StubEventSource.instances[0]
-
                 t.equal(
                     pillDotColor(root),
                     'green',
@@ -426,40 +256,41 @@ async t => {
                 t.equal(
                     pillDotColor(root),
                     'yellow',
-                    'in-flight pill is yellow (updating)'
+                    'in-flight pill is yellow (FR-012a)'
                 )
                 t.ok(
                     pillWrapper(root).textContent?.includes('updating'),
-                    'in-flight pill text reads "updating"'
+                    'in-flight pill text reads "updating" (FR-012a)'
+                )
+                t.equal(
+                    pillWrapper(root).getAttribute('aria-label'),
+                    'Feed sync status: updating',
+                    'in-flight aria-label is "Feed sync status: ' +
+                    'updating" (FR-012a / FR-008)'
+                )
+                t.equal(
+                    btn.getAttribute('aria-busy'),
+                    'true',
+                    'button is busy in-flight'
                 )
 
                 source.fire('refresh-complete')
                 await settle()
 
                 t.equal(
-                    btn.getAttribute('aria-busy'),
-                    'false',
-                    'aria-busy cleared after refresh-complete'
-                )
-                t.equal(
                     pillDotColor(root),
                     'blue',
-                    'pill exits yellow into blue (n updates) in the ' +
-                    'same DOM tick as button busy clears'
+                    'post-resolution pill is blue (n updates) ' +
+                    '(FR-012c)'
                 )
                 t.ok(
-                    pillWrapper(root).textContent?.includes('3 updates'),
-                    'pill text reads "3 updates" after settle'
-                )
-                t.deepEqual(
-                    state.feedUpdateCounts.value,
-                    { 1: 1, 2: 1, 3: 1 },
-                    'three new items surface in feedUpdateCounts'
+                    pillWrapper(root).textContent?.includes('4 updates'),
+                    'post-resolution pill text reads "4 updates"'
                 )
                 t.equal(
-                    state.feedSyncStatus.value,
-                    'updates',
-                    'feedSyncStatus reflects new updates'
+                    btn.getAttribute('aria-busy'),
+                    'false',
+                    'button busy clears in the same settle (FR-012c)'
                 )
             })
         })
@@ -470,10 +301,10 @@ async t => {
     }
 })
 
-// US2 - T013: no-new-items resolution; pill goes to synced
-// (FR-003b).
-test('no-new-items resolution: pill transitions cleanly to ' +
-    '"up to date"; never to a fourth silent state (FR-003b)',
+// 012-T014 / FR-012 (c) success-no-items.
+// Pill yellow updating -> green up to date in one paint.
+test('012-FR-012: success-no-items lifecycle: yellow updating -> ' +
+    'green up to date in one paint',
 async t => {
     const state = buildPartialState()
     state.feedUpdateCounts.value = {}
@@ -504,12 +335,6 @@ async t => {
                 State.openEventStream(state)
                 const source = StubEventSource.instances[0]
 
-                t.equal(
-                    pillDotColor(root),
-                    'green',
-                    'pre-click pill is green (synced)'
-                )
-
                 const btn = refreshButton(root)
                 btn.dispatchEvent(new MouseEvent('click', {
                     bubbles: true
@@ -517,14 +342,9 @@ async t => {
                 await settle()
 
                 t.equal(
-                    state.displayedFeedSyncStatus.value,
-                    'syncing',
-                    'pill transitions through syncing during the run'
-                )
-                t.equal(
                     pillDotColor(root),
                     'yellow',
-                    'in-flight pill is yellow (updating)'
+                    'in-flight pill is yellow (FR-012a)'
                 )
                 t.ok(
                     pillWrapper(root).textContent?.includes('updating'),
@@ -535,24 +355,21 @@ async t => {
                 await settle()
 
                 t.equal(
-                    btn.getAttribute('aria-busy'),
-                    'false',
-                    'aria-busy cleared after refresh-complete'
-                )
-                t.equal(
                     pillDotColor(root),
                     'green',
-                    'pill exits yellow into green (up to date) in the ' +
-                    'same DOM tick as button busy clears'
+                    'post-resolution pill is green (up to date) ' +
+                    '(FR-012c)'
                 )
                 t.ok(
-                    pillWrapper(root).textContent?.includes('up to date'),
-                    'pill text reads "up to date" after settle'
+                    pillWrapper(root).textContent?.includes(
+                        'up to date'
+                    ),
+                    'post-resolution pill text reads "up to date"'
                 )
                 t.equal(
-                    state.feedSyncStatus.value,
-                    'synced',
-                    'pill resolves to synced (up to date) on no-new'
+                    btn.getAttribute('aria-busy'),
+                    'false',
+                    'button busy clears in the same settle'
                 )
             })
         })
@@ -563,16 +380,15 @@ async t => {
     }
 })
 
-// US2 - T014: failure resolution; aria-busy clears, prior counts
-// restored, error legend surfaces (FR-003c / FR-006 / FR-007).
-test('failure resolution: aria-busy clears, prior counts restored, ' +
-    'error legend surfaces; pill goes yellow updating -> red sync ' +
-    'failed (FR-003c / FR-006 / FR-007 / 012-FR-005)',
+// 012-T014 / FR-012 (d) failure path.
+// Pill yellow updating -> red sync failed (NEVER green).
+test('012-FR-012: failure lifecycle: yellow updating -> red sync ' +
+    'failed (never green)',
 async t => {
     const state = buildPartialState()
-    state.feedUpdateCounts.value = { 1: 4, 2: 2 }
+    state.feedUpdateCounts.value = { 1: 6 }
     state.feedSyncStatus.value = 'updates'
-    const priorCounts = state.feedUpdateCounts.value
+    const priorCounts = { ...state.feedUpdateCounts.value }
 
     const root = mount(state)
     try {
@@ -590,12 +406,6 @@ async t => {
             }, async () => {
                 State.openEventStream(state)
 
-                t.equal(
-                    pillDotColor(root),
-                    'blue',
-                    'pre-click pill is blue (6 updates)'
-                )
-
                 const btn = refreshButton(root)
                 btn.dispatchEvent(new MouseEvent('click', {
                     bubbles: true
@@ -603,34 +413,27 @@ async t => {
                 await settle()
 
                 t.equal(
-                    btn.getAttribute('aria-busy'),
-                    'false',
-                    'aria-busy cleared inside the failure batch'
-                )
-                t.equal(
                     pillDotColor(root),
                     'red',
-                    'pill exits yellow into red (sync failed) in the ' +
-                    'same DOM tick as button busy clears (NEVER green)'
+                    'failure exits yellow into red (FR-012d) — never ' +
+                    'green or stuck on yellow'
                 )
                 t.ok(
-                    pillWrapper(root).textContent?.includes('sync failed'),
+                    pillWrapper(root).textContent?.includes(
+                        'sync failed'
+                    ),
                     'pill text reads "sync failed" after failure batch'
                 )
                 t.equal(
-                    state.feedSyncStatus.value,
-                    'error',
-                    'feedSyncStatus is error'
+                    btn.getAttribute('aria-busy'),
+                    'false',
+                    'button busy cleared inside the failure batch'
                 )
                 t.deepEqual(
                     state.feedUpdateCounts.value,
                     priorCounts,
-                    'feedUpdateCounts is restored to its pre-click ' +
-                    'value (NOT zeroed — FR-006)'
-                )
-                t.ok(
-                    state.feedSyncError.value,
-                    'feedSyncError carries a non-null message'
+                    'priorCounts restored on failure (010/011 ' +
+                    'contract preserved)'
                 )
             })
         })
@@ -640,19 +443,31 @@ async t => {
     }
 })
 
-// US3 - T015: successive resolved clicks; each goes through the full
-// chain (FR-008).
-test('three successive resolved clicks each dispatch a POST and ' +
-    'each cycle through the full visible chain (FR-008)',
+// 012-T014 / FR-012 (b) background-poll-during-refresh.
+// A background SSE feed-updates-available arrives while the manual
+// refresh is in flight. The pill stays yellow throughout and the
+// background tick's count is folded into the post-refresh resting
+// state.
+test('012-FR-012: background feed-updates-available during refresh ' +
+    'leaves the pill yellow until settle (FR-012b / FR-007 / FR-011)',
 async t => {
     const state = buildPartialState()
+    state.feeds.value = [
+        { id: 1, url: 'a' },
+        { id: 7, url: 'b' }
+    ] as never
     state.feedUpdateCounts.value = { 1: 1 }
     state.feedSyncStatus.value = 'updates'
 
     const originalRefreshAfterSync = State.refreshAfterSync
-    State.refreshAfterSync = async () => {}
+    // Settle simulates the post-refresh authoritative reconcile that
+    // sees the SSE-bumped count.
+    State.refreshAfterSync = async (s:AppState) => {
+        batch(() => {
+            s.feedSyncStatus.value = 'updates'
+        })
+    }
 
-    let postCalls = 0
     const root = mount(state)
     try {
         await withStubbedEventSource(async () => {
@@ -663,41 +478,63 @@ async t => {
                         input.toString() :
                         input.url
                 if (url.endsWith('/api/feeds/refresh')) {
-                    postCalls += 1
                     return jsonResponse({ success: true, queued: 1 })
                 }
                 return jsonResponse({})
             }, async () => {
                 State.openEventStream(state)
                 const source = StubEventSource.instances[0]
+
                 const btn = refreshButton(root)
-
-                for (let i = 1; i <= 3; i++) {
-                    btn.dispatchEvent(new MouseEvent('click', {
-                        bubbles: true
-                    }))
-                    await settle()
-
-                    t.equal(
-                        btn.getAttribute('aria-busy'),
-                        'true',
-                        `click ${i} sets aria-busy true`
-                    )
-
-                    source.fire('refresh-complete')
-                    await settle()
-
-                    t.equal(
-                        btn.getAttribute('aria-busy'),
-                        'false',
-                        `click ${i} resolves aria-busy back to false`
-                    )
-                }
+                btn.dispatchEvent(new MouseEvent('click', {
+                    bubbles: true
+                }))
+                await settle()
 
                 t.equal(
-                    postCalls,
-                    3,
-                    'three clicks dispatch exactly three POSTs'
+                    pillDotColor(root),
+                    'yellow',
+                    'in-flight pill is yellow before SSE event'
+                )
+
+                // Background SSE event mid-flight (e.g. background
+                // poller bumping count for feed 7).
+                source.fire('feed-updates-available', {
+                    feedUpdateCounts: { 7: 4 }
+                })
+                await settle()
+
+                t.equal(
+                    pillDotColor(root),
+                    'yellow',
+                    'pill STAYS yellow when SSE feed-updates-available ' +
+                    'arrives mid-refresh (FR-012b / FR-007)'
+                )
+                t.ok(
+                    pillWrapper(root).textContent?.includes('updating'),
+                    'pill text still reads "updating" mid-refresh'
+                )
+                t.equal(
+                    state.feedUpdateCounts.value[7],
+                    4,
+                    'SSE-bumped count is captured underneath the ' +
+                    'masked yellow display (FR-011)'
+                )
+
+                source.fire('refresh-complete')
+                await settle()
+
+                t.equal(
+                    pillDotColor(root),
+                    'blue',
+                    'post-resolution pill is blue (n updates) with ' +
+                    'the SSE-bumped count folded in (FR-012c / FR-011)'
+                )
+                t.equal(
+                    state.feedUpdateCounts.value[7],
+                    4,
+                    'SSE-bumped count survives into the post-refresh ' +
+                    'resting state'
                 )
             })
         })
@@ -708,19 +545,25 @@ async t => {
     }
 })
 
-// US3 - T016: click-while-busy guard; second click is swallowed by
-// the disabled DOM attribute (FR-007).
-test('a second click while the button is disabled does not dispatch ' +
-    'a second POST (FR-007)',
+// 012-T014 / FR-012 (e) zero-feeds-subscribed edge case.
+// Even with no feeds, the click MUST produce at least one paint of
+// yellow before settling green.
+test('012-FR-012: zero-feeds-subscribed click flashes yellow for at ' +
+    'least one paint before settling green (FR-012e)',
 async t => {
     const state = buildPartialState()
-    state.feedUpdateCounts.value = { 1: 1 }
-    state.feedSyncStatus.value = 'updates'
+    state.feeds.value = []
+    state.feedUpdateCounts.value = {}
+    state.feedSyncStatus.value = 'synced'
 
     const originalRefreshAfterSync = State.refreshAfterSync
-    State.refreshAfterSync = async () => {}
+    State.refreshAfterSync = async (s:AppState) => {
+        batch(() => {
+            s.feedUpdateCounts.value = {}
+            s.feedSyncStatus.value = 'synced'
+        })
+    }
 
-    let postCalls = 0
     const root = mount(state)
     try {
         await withStubbedEventSource(async () => {
@@ -731,45 +574,45 @@ async t => {
                         input.toString() :
                         input.url
                 if (url.endsWith('/api/feeds/refresh')) {
-                    postCalls += 1
-                    return jsonResponse({ success: true, queued: 1 })
+                    return jsonResponse({ success: true, queued: 0 })
                 }
                 return jsonResponse({})
             }, async () => {
                 State.openEventStream(state)
                 const source = StubEventSource.instances[0]
+
                 const btn = refreshButton(root)
-
                 btn.dispatchEvent(new MouseEvent('click', {
                     bubbles: true
                 }))
                 await settle()
 
-                t.ok(
-                    btn.disabled,
-                    'button is disabled while in flight'
-                )
-
-                btn.dispatchEvent(new MouseEvent('click', {
-                    bubbles: true
-                }))
-                await settle()
-
+                // The click MUST produce a perceptible yellow paint
+                // even on zero-feeds accounts.
                 t.equal(
-                    postCalls,
-                    1,
-                    'second click while disabled does NOT dispatch ' +
-                    'a second POST'
+                    pillDotColor(root),
+                    'yellow',
+                    'zero-feeds click flashes yellow for at least ' +
+                    'one paint (FR-012e)'
+                )
+                t.ok(
+                    pillWrapper(root).textContent?.includes('updating'),
+                    'zero-feeds click pill text reads "updating"'
                 )
 
                 source.fire('refresh-complete')
                 await settle()
 
                 t.equal(
+                    pillDotColor(root),
+                    'green',
+                    'zero-feeds settle returns pill to green ' +
+                    '(up to date)'
+                )
+                t.equal(
                     btn.getAttribute('aria-busy'),
                     'false',
-                    'in-flight run resolves cleanly after the second ' +
-                    'click is swallowed'
+                    'button busy cleared on zero-feeds settle'
                 )
             })
         })

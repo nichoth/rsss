@@ -1,4 +1,4 @@
-import { signal, batch } from '@preact/signals'
+import { signal, batch, computed, effect } from '@preact/signals'
 import { test } from '@substrate-system/tapzero'
 import { State, type AppState } from '../src/client/state.js'
 
@@ -84,6 +84,17 @@ interface PartialState {
 function buildPartialState ():AppState {
     const route = signal('/')
     const routes:string[] = []
+    const refreshInProgress = signal(false)
+    const feedSyncStatus = signal<
+        'inactive'|'updates'|'syncing'|'error'|'synced'
+    >('inactive')
+    const displayedFeedSyncStatus = computed<
+        'inactive'|'updates'|'syncing'|'error'|'synced'
+    >(() => (
+        refreshInProgress.value ?
+            'syncing' :
+            feedSyncStatus.value
+    ))
     const state = {
         _setRoute: (next:string) => {
             routes.push(next)
@@ -100,10 +111,9 @@ function buildPartialState ():AppState {
         authError: signal<string|null>(null),
         feeds: signal([]),
         feedsLoading: signal(false),
-        refreshInProgress: signal(false),
-        feedSyncStatus: signal<
-            'inactive'|'updates'|'syncing'|'error'|'synced'
-        >('inactive'),
+        refreshInProgress,
+        feedSyncStatus,
+        displayedFeedSyncStatus,
         feedSyncError: signal<string|null>(null),
         feedUpdateCounts: signal<Record<string, number>>({}),
         feedUpdateStatus: signal('synced'),
@@ -230,6 +240,12 @@ async t => {
                 State.openEventStream(state)
                 const source = StubEventSource.instances[0]
 
+                t.equal(
+                    state.displayedFeedSyncStatus.value,
+                    'updates',
+                    'pre-click displayed status is the resting value'
+                )
+
                 await State.refreshFeeds(state)
 
                 t.equal(
@@ -238,12 +254,22 @@ async t => {
                     'refreshInProgress is still true after POST resolves'
                 )
                 t.equal(
-                    state.feedSyncStatus.value,
+                    state.displayedFeedSyncStatus.value,
                     'syncing',
-                    'feedSyncStatus stays syncing past POST ack'
+                    'displayedFeedSyncStatus is syncing past POST ack ' +
+                    '(yellow during refresh, FR-003)'
                 )
 
                 source.fire('refresh-complete')
+
+                t.equal(
+                    state.displayedFeedSyncStatus.value,
+                    'syncing',
+                    'displayedFeedSyncStatus is still syncing ' +
+                    'synchronously after refresh-complete (before ' +
+                    'refreshAfterSync settles)'
+                )
+
                 await settle()
 
                 t.equal(
@@ -500,6 +526,62 @@ async t => {
     )
 })
 
+// 012-T011 (US2): failure-path displayed-status transition contract.
+// Asserts the displayed status transitions exactly through
+// <resting> -> 'syncing' -> 'error' with no intermediate
+// 'synced' or 'updates' value.
+test('012-US2: failure-path displayedFeedSyncStatus goes ' +
+    'updates -> syncing -> error with no intermediate value',
+async t => {
+    const state = buildPartialState()
+    state.feedUpdateCounts.value = { 1: 4, 2: 3 }
+    state.feedSyncStatus.value = 'updates'
+    const priorCounts = { ...state.feedUpdateCounts.value }
+
+    const transitions:string[] = []
+    const dispose = effect(() => {
+        transitions.push(state.displayedFeedSyncStatus.value)
+    })
+
+    try {
+        await withStubbedFetch(async () => {
+            return new Response('boom', { status: 500 })
+        }, async () => {
+            await State.refreshFeeds(state).catch(() => undefined)
+        })
+    } finally {
+        dispose()
+    }
+
+    t.deepEqual(
+        transitions,
+        ['updates', 'syncing', 'error'],
+        'displayedFeedSyncStatus transition is exactly ' +
+        'updates -> syncing -> error (no intermediate synced/updates)'
+    )
+    t.deepEqual(
+        state.feedUpdateCounts.value,
+        priorCounts,
+        'feedUpdateCounts is restored to its pre-click snapshot ' +
+        '(010/011 contract)'
+    )
+    t.equal(
+        state.refreshInProgress.value,
+        false,
+        'refreshInProgress is cleared inside the failure batch'
+    )
+    t.equal(
+        state.displayedFeedSyncStatus.value,
+        'error',
+        'displayed status is error after the failure batch'
+    )
+    t.equal(
+        state.feedSyncStatus.value,
+        'error',
+        'underlying feedSyncStatus is error after the failure batch'
+    )
+})
+
 // US2 - T020: failure restores priorCounts
 test('refreshFeeds POST 5xx restores priorCounts and sets error (FR-007)',
     async t => {
@@ -566,6 +648,77 @@ async t => {
         false,
         'refreshInProgress is cleared inside the 401 batch'
     )
+})
+
+// 012-T013 (US3): background SSE feed-updates-available during a
+// manual refresh does NOT exit the displayed yellow state. The
+// underlying counts move so they surface when the manual refresh
+// settles. (FR-007 / FR-011.)
+test('012-US3: background feed-updates-available during refresh ' +
+    'leaves displayedFeedSyncStatus = syncing until settle',
+async t => {
+    const state = buildPartialState()
+    state.feeds.value = [
+        { id: 1, url: 'a' },
+        { id: 7, url: 'b' }
+    ] as never
+    state.feedUpdateCounts.value = { 1: 1 }
+    state.feedSyncStatus.value = 'updates'
+
+    // Simulate the in-flight manual refresh.
+    state.refreshInProgress.value = true
+
+    t.equal(
+        state.displayedFeedSyncStatus.value,
+        'syncing',
+        'pre-SSE: pill is yellow because refreshInProgress is true'
+    )
+
+    await withStubbedEventSource(async () => {
+        State.openEventStream(state)
+        const source = StubEventSource.instances[0]
+
+        // Background SSE bump: counts go from {1: 1} to {1: 1, 7: 4}.
+        source.fire('feed-updates-available', {
+            feedUpdateCounts: { 7: 4 }
+        })
+
+        t.equal(
+            state.feedUpdateCounts.value[7],
+            4,
+            'underlying feedUpdateCounts is updated by the SSE event'
+        )
+        t.equal(
+            state.feedSyncStatus.value,
+            'updates',
+            'underlying feedSyncStatus reflects the new total'
+        )
+        t.equal(
+            state.displayedFeedSyncStatus.value,
+            'syncing',
+            'displayedFeedSyncStatus stays syncing during the ' +
+            'refresh window despite the SSE write (FR-007)'
+        )
+
+        // Simulate the settle batch clearing refreshInProgress.
+        batch(() => {
+            state.refreshInProgress.value = false
+            state.feedsLoading.value = false
+        })
+
+        t.equal(
+            state.displayedFeedSyncStatus.value,
+            'updates',
+            'after settle, displayed surfaces the SSE-bumped value ' +
+            'as the new resting state (FR-011)'
+        )
+        t.equal(
+            state.feedUpdateCounts.value[7],
+            4,
+            'SSE-bumped count is preserved into the resting state'
+        )
+    })
+    State.closeEventStream()
 })
 
 // US1 - T003: broken-caller pattern guard (FR-008 invariant).

@@ -1,4 +1,4 @@
-import { signal } from '@preact/signals'
+import { signal, computed } from '@preact/signals'
 import { test } from '@substrate-system/tapzero'
 import { State, type AppState } from '../src/client/state.js'
 
@@ -71,6 +71,17 @@ type FetchHandler = (
 function buildPartialState ():AppState {
     const route = signal('/')
     const routes:string[] = []
+    const refreshInProgress = signal(false)
+    const feedSyncStatus = signal<
+        'inactive'|'updates'|'syncing'|'error'|'synced'
+    >('inactive')
+    const displayedFeedSyncStatus = computed<
+        'inactive'|'updates'|'syncing'|'error'|'synced'
+    >(() => (
+        refreshInProgress.value ?
+            'syncing' :
+            feedSyncStatus.value
+    ))
     const state = {
         _setRoute: (next:string) => {
             routes.push(next)
@@ -87,10 +98,9 @@ function buildPartialState ():AppState {
         authError: signal<string|null>(null),
         feeds: signal([]),
         feedsLoading: signal(false),
-        refreshInProgress: signal(false),
-        feedSyncStatus: signal<
-            'inactive'|'updates'|'syncing'|'error'|'synced'
-        >('inactive'),
+        refreshInProgress,
+        feedSyncStatus,
+        displayedFeedSyncStatus,
         feedSyncError: signal<string|null>(null),
         feedUpdateCounts: signal<Record<string, number>>({}),
         feedUpdateStatus: signal('synced'),
@@ -194,6 +204,66 @@ test(
             state.feedSyncStatus.value,
             'synced',
             'feedSyncStatus is synced when totalPending === 0'
+        )
+    }
+)
+
+test(
+    '012-T012 (US3): loadFeedStatus during a manual refresh updates the ' +
+    'underlying signals but does NOT exit the displayed yellow state',
+    async t => {
+        const state = buildPartialState()
+        // Pre-click resting state.
+        state.feedSyncStatus.value = 'updates'
+        state.feedUpdateCounts.value = { 1: 2 }
+        // Simulate that a manual refresh is in flight.
+        state.refreshInProgress.value = true
+
+        t.equal(
+            state.displayedFeedSyncStatus.value,
+            'syncing',
+            'pre-loader: pill is yellow (updating) because ' +
+            'refreshInProgress is true'
+        )
+
+        await withStubbedFetch(async () => {
+            return jsonResponse({
+                feedUpdateCounts: { 1: 5, 7: 2 },
+                totalPending: 7
+            })
+        }, async () => {
+            await State.loadFeedStatus(state)
+        })
+
+        // FR-011: underlying signals MUST keep moving so the post-refresh
+        // resting state can fold the loader's payload in.
+        t.deepEqual(
+            state.feedUpdateCounts.value,
+            { 1: 5, 7: 2 },
+            'underlying feedUpdateCounts is updated by the loader'
+        )
+        t.equal(
+            state.feedSyncStatus.value,
+            'updates',
+            'underlying feedSyncStatus is updated by the loader'
+        )
+        // FR-007: the displayed pill MUST stay yellow throughout the
+        // manual-refresh window, even when the loader writes underneath.
+        t.equal(
+            state.displayedFeedSyncStatus.value,
+            'syncing',
+            'displayedFeedSyncStatus stays syncing while ' +
+            'refreshInProgress is true (FR-007)'
+        )
+
+        // Simulate the settle batch clearing refreshInProgress.
+        state.refreshInProgress.value = false
+
+        t.equal(
+            state.displayedFeedSyncStatus.value,
+            'updates',
+            'displayedFeedSyncStatus surfaces the loader payload as ' +
+            'soon as refreshInProgress clears (FR-011)'
         )
     }
 )
