@@ -157,18 +157,14 @@ export const Sidebar:FunctionComponent<{
                     `}
 
                     ${feeds.value.map(feed => {
-                        const feedPath = stripProtocol(
-                            feed.url
-                        )
-                        const isActive = route.value ===
-                            `/feed/${feedPath}`
+                        const feedPath = stripProtocol(feed.url)
+                        const isActive = route.value === `/feed/${feedPath}`
                         const feedUnread = counts.value
                             .perFeed[String(feed.id)] ?? 0
-                        const pending = state.feedUpdateCounts
-                            .value[String(feed.id)] ?? 0
+                        const pending = (state
+                            .feedUpdateCounts.value[String(feed.id)] ?? 0)
                         return html`
-                            <div
-                                class="sidebar-item feed-item ${
+                            <div class="sidebar-item feed-item ${
                                     isActive ? 'active' : ''
                                 }"
                                 key=${feed.id}
@@ -176,13 +172,12 @@ export const Sidebar:FunctionComponent<{
                                 <span class="badge feed-unread-count">
                                     ${feedUnread}
                                 </span>
+                                ${pending > 0 ? `(${pending}) ` : ''}
                                 <a
                                     class="feed-select"
                                     href="/feed/${feedPath}"
                                 >
-                                    ${pending > 0 ?
-                                        `(${pending}) ` :
-                                        ''}${feed.title || feed.url}
+                                    ${feed.title || feed.url}
                                 </a>
 
                             <div class="item-controls">
