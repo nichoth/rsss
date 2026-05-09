@@ -11,6 +11,12 @@
   users with a cache snapshot. Do not gate it to feed-reader routes; settings,
   about, add-feed, and future authenticated routes should use the same
   indicator visibility rules.
+- Header/settings cache agreement can be tested by mounting `Header` and
+  `SettingsRoute` together with the same signals. Persist matching
+  `rsss.localFirst` localStorage values before render because
+  `SettingsRoute` calls `loadLocalFirstSettings()` after mount.
+- Browser component tests run through tapout on a fixed local port, so run
+  them sequentially rather than in parallel.
 - `State.refreshFeeds` owns global feed refresh status transitions for the
   header dot: set `feedSyncStatus` to `syncing` before POSTing
   `/api/feeds/refresh`, clear `feedSyncError`, then set `synced` with empty
@@ -3955,4 +3961,28 @@ Thread: https://ampcode.com/threads/unknown
     timestamp or status key.
   - The refresh safety timeout only guards `feedsLoading`; feed sync status
     should remain synced after a successful refresh.
+---
+
+## 2026-05-09 16:36 PDT - US-004
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Verified the header cache indicator and `/settings`
+  cache section agree across the required cache states.
+  - Added a Chromium component test that mounts `Header` and `SettingsRoute`
+    together and checks the off, empty, partial, and fully cached states.
+  - Updated stale header tests for the removed sponsor iframe and the current
+    feed syncing label.
+  - Confirmed the cache agreement test passes in the focused header harness.
+- Files changed:
+  - `test/header-component.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `SettingsRoute` reloads local-first settings from `rsss.localFirst`
+    after mount, so component tests that set `syncSubscriptions` and
+    `storeContent` should also persist matching localStorage values.
+  - Do not run multiple tapout browser component tests in parallel; they
+    contend for the same fixed port.
+  - Browser Use's required Node REPL tool was not exposed in this session,
+    and Computer Use was blocked by macOS Apple Events permission. Chromium
+    component tests provided the browser-level verification path.
 ---

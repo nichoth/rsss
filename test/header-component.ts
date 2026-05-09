@@ -1,9 +1,11 @@
-import { computed, signal } from '@preact/signals'
+import { batch, computed, signal } from '@preact/signals'
 import { html } from 'htm/preact/index.js'
 import { render } from 'preact'
 import { test } from '@substrate-system/tapzero'
 import { Header } from '../src/client/components/header.js'
 import { type AppState } from '../src/client/state.js'
+import { State } from '../src/client/state.js'
+import { SettingsRoute } from '../src/client/routes/settings.js'
 import {
     isLocalFirstActive,
     syncStatus,
@@ -21,6 +23,11 @@ import {
     storeContent,
     syncSubscriptions
 } from '../src/client/local-first-settings.js'
+import { localFirstSupported } from '../src/client/db/index.js'
+import {
+    _resetStorageUsage,
+    totalStorageBytes
+} from '../src/client/db/storage-usage.js'
 
 type FeedSyncStatus = 'inactive'|'updates'|'syncing'|'error'|'synced'
 
@@ -61,6 +68,20 @@ function headerState (
                 'synced'
         ))
     } as unknown as AppState
+}
+
+function persistLocalFirstSettings (
+    sync:boolean,
+    store:boolean
+):void {
+    localStorage.setItem('rsss.localFirst', JSON.stringify({
+        syncSubscriptions: sync,
+        storeContent: store,
+        defaultCacheMode: 'text_images',
+        defaultMaxSizeBytes: 50_000_000,
+        defaultMaxAgeSeconds: 30 * 86400,
+        defaultAccountMaxSizeBytes: 500_000_000
+    }))
 }
 
 test('Header cache status renders on authenticated app routes', t => {
@@ -277,7 +298,156 @@ test('Header cache status shows neutral state when there are no items', t => {
     }
 })
 
-test('Header sponsor iframes limit embed capabilities', t => {
+test(
+    'Header cache status agrees with settings cache state',
+    async t => {
+        const originalLoadBillingStatus = State.loadBillingStatus
+        State.loadBillingStatus = async () => billingStatus.value
+
+        const body = document.querySelector('body') as HTMLElement
+        const root = document.createElement('div')
+        body.appendChild(root)
+
+        const user = {
+            did: 'did:plc:test123',
+            handle: 'alice.bsky.social'
+        }
+        const state = {
+            ...headerState(user, { route: '/settings' }),
+            isAuthenticated: signal(true),
+            feeds: signal([])
+        } as unknown as AppState
+
+        billingStatus.value = {
+            entitled: true,
+            planId: 'local-first',
+            status: 'active',
+            refreshedAt: Date.now(),
+            useLive: false
+        }
+        localFirstSupported.value = true
+
+        const cases = [
+            {
+                name: 'off',
+                sync: false,
+                store: false,
+                totalBytes: 0,
+                snapshot: {
+                    totalCount: 0,
+                    uncachedCount: 0,
+                    itemsToCache: []
+                },
+                legend: null
+            },
+            {
+                name: 'empty',
+                sync: true,
+                store: true,
+                totalBytes: 0,
+                snapshot: {
+                    totalCount: 0,
+                    uncachedCount: 0,
+                    itemsToCache: []
+                },
+                legend: 'No items yet'
+            },
+            {
+                name: 'partial',
+                sync: true,
+                store: true,
+                totalBytes: 2_000,
+                snapshot: {
+                    totalCount: 3,
+                    uncachedCount: 1,
+                    itemsToCache: []
+                },
+                legend: '1 uncached'
+            },
+            {
+                name: 'full',
+                sync: true,
+                store: true,
+                totalBytes: 2_000,
+                snapshot: {
+                    totalCount: 3,
+                    uncachedCount: 0,
+                    itemsToCache: []
+                },
+                legend: '100% cached'
+            }
+        ]
+
+        try {
+            for (const item of cases) {
+                render(null, root)
+                persistLocalFirstSettings(item.sync, item.store)
+                batch(() => {
+                    syncSubscriptions.value = item.sync
+                    storeContent.value = item.store
+                    totalStorageBytes.value = item.totalBytes
+                    cacheStatus.value = item.snapshot
+                })
+
+                render(html`
+                    <${Header} state=${state} />
+                    <${SettingsRoute} state=${state} />
+                `, root)
+                await nextTask()
+
+                const total = root.querySelector(
+                    '.cache-total'
+                ) as HTMLElement|null
+                const syncBox = root.querySelector(
+                    'check-box[name="sync-subscriptions"]'
+                ) as (HTMLElement & { checked:boolean })|null
+                const storeBox = root.querySelector(
+                    'check-box[name="store-content"]'
+                ) as (HTMLElement & { checked:boolean })|null
+
+                t.equal(
+                    total?.textContent?.trim(),
+                    item.totalBytes === 0 ?
+                        'Total storage used: 0 B' :
+                        'Total storage used: 2.0 KB',
+                    `${item.name}: settings shows cache storage`
+                )
+                t.equal(
+                    Boolean(syncBox?.checked),
+                    item.sync,
+                    `${item.name}: settings sync toggle matches`
+                )
+                t.equal(
+                    Boolean(storeBox?.checked),
+                    item.store,
+                    `${item.name}: settings content toggle matches`
+                )
+
+                const legend = root.querySelector(
+                    '.cache-status-legend'
+                )?.textContent ?? null
+                t.equal(
+                    legend,
+                    item.legend,
+                    `${item.name}: header cache indicator matches`
+                )
+            }
+        } finally {
+            State.loadBillingStatus = originalLoadBillingStatus
+            render(null, root)
+            root.remove()
+            localStorage.removeItem('rsss.localFirst')
+            resetCacheStatus()
+            _resetStorageUsage()
+            billingStatus.value = null
+            localFirstSupported.value = false
+            syncSubscriptions.value = false
+            storeContent.value = false
+        }
+    }
+)
+
+test('Header does not render third-party sponsor iframes', t => {
     const body = document.querySelector('body') as HTMLElement
     const root = document.createElement('div')
     body.appendChild(root)
@@ -285,27 +455,11 @@ test('Header sponsor iframes limit embed capabilities', t => {
     try {
         render(html`<${Header} state=${headerState()} />`, root)
 
-        const frames = Array.from(root.querySelectorAll('iframe'))
-
-        t.ok(frames.length > 0, 'renders sponsor iframe')
-
-        for (const frame of frames) {
-            t.equal(
-                frame.getAttribute('sandbox'),
-                'allow-scripts allow-same-origin',
-                'sets iframe sandbox'
-            )
-            t.equal(
-                frame.getAttribute('loading'),
-                'lazy',
-                'lazy-loads iframe'
-            )
-            t.equal(
-                frame.getAttribute('referrerpolicy'),
-                'no-referrer',
-                'removes iframe referrers'
-            )
-        }
+        t.equal(
+            root.querySelectorAll('iframe').length,
+            0,
+            'does not render external sponsor iframes'
+        )
     } finally {
         render(null, root)
         root.remove()
@@ -484,7 +638,7 @@ test('Header feed status renders one dot for all sync states', t => {
         {
             status: 'syncing',
             color: 'yellow',
-            text: 'refreshing',
+            text: 'updating',
             title: null
         },
         {
@@ -615,7 +769,7 @@ test('Header feed status exposes only the latest retry error', async t => {
         )
         t.equal(
             status.getAttribute('aria-label'),
-            'Feed sync status: refreshing',
+            'Feed sync status: updating',
             'retry syncing state replaces the old error label'
         )
 

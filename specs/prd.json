@@ -80,7 +80,7 @@
         "Verify in browser using dev-browser skill: walk through all four state combinations and confirm header/settings agree in each"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
