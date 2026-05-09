@@ -1,22 +1,5 @@
 ## Codebase Patterns
 
-- Cache status header visibility is gated by both local-first settings:
-  `syncSubscriptions` and `storeContent`. Component tests that expect the
-  indicator to render must opt both signals in, alongside an entitled user
-  and a non-null `cacheStatus` snapshot.
-- Empty cache snapshots with `totalCount === 0` render as the neutral
-  "No items yet" header state. Only snapshots with `totalCount > 0` and
-  `uncachedCount === 0` should render the green "100% cached" state.
-- Header cache status visibility is app-wide for authenticated, entitled
-  users with a cache snapshot. Do not gate it to feed-reader routes; settings,
-  about, add-feed, and future authenticated routes should use the same
-  indicator visibility rules.
-- Header/settings cache agreement can be tested by mounting `Header` and
-  `SettingsRoute` together with the same signals. Persist matching
-  `rsss.localFirst` localStorage values before render because
-  `SettingsRoute` calls `loadLocalFirstSettings()` after mount.
-- Browser component tests run through tapout on a fixed local port, so run
-  them sequentially rather than in parallel.
 - `State.refreshFeeds` owns global feed refresh status transitions for the
   header dot: set `feedSyncStatus` to `syncing` before POSTing
   `/api/feeds/refresh`, clear `feedSyncError`, then set `synced` with empty
@@ -57,82 +40,6 @@
 - `State.loadFeeds` derives header feed sync status from canonical
   `feedUpdateCounts`; treat legacy `feedUpdateStatus` as compatibility data,
   not the client state hydration source.
-
-## 2026-05-09 16:43 PDT - US-005
-Thread: https://ampcode.com/threads/unknown
-- What was implemented: Added focused tests for the new header cache
-  visibility and empty-state rules in `test/cache-status.ts`.
-  - Covered disabled sync, disabled article caching, neutral empty state,
-    settings/about route visibility, and existing uncached/fully cached
-    states.
-  - Added a focused cache-status test runner so the file can bundle both
-    component CSS and SQLite WASM fixtures.
-- Files changed:
-  - `test/cache-status.ts`
-  - `test/run-cache-status.mjs`
-  - `test/run-all-tests.mjs`
-  - `package.json`
-  - `specs/prd.json`
-  - `progress.log`
-- **Learnings for future iterations:**
-  - `test/cache-status.ts` now mixes SQLite cache-status coverage and
-    header cache-status component coverage, so its focused runner needs
-    both `.css=text` and `.wasm=dataurl` esbuild loaders.
-  - Existing header cache-status tests in `test/header-component.ts` are
-    broader integration coverage; `test/cache-status.ts` now owns the
-    focused regression cases requested by the cache-status PRD.
----
-
-## 2026-05-09 16:31 PDT - US-003
-Thread: https://ampcode.com/threads/unknown
-- What was implemented: Added the neutral header cache state for empty
-  local cache snapshots.
-  - Split zero-item snapshots from fully cached snapshots in
-    `CacheStatus`.
-  - Rendered the empty state as gray "No items yet" status text with no
-    cache action button.
-  - Updated the empty snapshot comment so it no longer describes empty
-    local state as "100% cached".
-  - Added header component coverage for the neutral empty state.
-- Files changed:
-  - `src/client/components/cache-status.ts`
-  - `src/client/cache-status-state.ts`
-  - `test/header-component.ts`
-  - `specs/prd.json`
-  - `progress.log`
-- **Learnings for future iterations:**
-  - Cache status UI should check `totalCount` before `uncachedCount`; an
-    empty cache snapshot is neutral, not successful.
-  - The repo's focused browser component tests run through esbuild and
-    tapout, not `npx vitest`, because the Cloudflare Vite plugin rejects
-    Vitest's generated `resolve.external` config.
-  - Browser plugin verification was unavailable in this session because
-    the Node REPL browser runtime was not exposed and Computer Use was
-    blocked by macOS Apple Events permission.
----
-
-## 2026-05-09 16:25 PDT - US-002
-Thread: https://ampcode.com/threads/unknown
-- What was implemented: Hid the header cache status indicator when local
-  sync or article content caching is disabled.
-  - Added `syncSubscriptions` and `storeContent` to the `CacheStatus`
-    visibility gate.
-  - Added header component coverage showing the indicator disappears
-    immediately when either setting signal is toggled off.
-  - Updated existing route visibility coverage to opt into both settings.
-- Files changed:
-  - `src/client/components/cache-status.ts`
-  - `test/header-component.ts`
-  - `specs/prd.json`
-  - `progress.log`
-- **Learnings for future iterations:**
-  - Cache status render tests now need four visible-state prerequisites:
-    authenticated user, entitled billing status, a non-null cache snapshot,
-    and both local-first cache settings enabled.
-  - Reading Preact signals directly inside component gates is enough to
-    subscribe the header to settings toggles without adding a separate
-    effect.
----
 
 ## 2026-05-02 14:14 PDT - US-152
 Thread: https://ampcode.com/threads/unknown
@@ -348,27 +255,6 @@ Thread: https://ampcode.com/threads/unknown
     `state.user.value` is set; online-event tests that need to own the sync
     window should let that startup cycle settle before installing a hanging
     `/api/sync` fetch stub.
----
-
-## 2026-05-09 16:22 PDT - US-001
-Thread: https://ampcode.com/threads/unknown
-- What was implemented: Made the header cache indicator render on all
-  authenticated app routes.
-  - Removed the feed-reader-only route guard from `CacheStatus`.
-  - Deleted the now-unused `isFeedReaderRoute` helper.
-  - Added header component coverage for `/`, `/starred`, `/feed/1`,
-    `/settings`, `/about`, and `/add-feed`.
-- Files changed:
-  - `src/client/components/cache-status.ts`
-  - `test/header-component.ts`
-  - `specs/prd.json`
-  - `progress.log`
-- **Learnings for future iterations:**
-  - Header cache status should stay route-agnostic; authenticated,
-    entitled users with a cache snapshot should see it on every app route.
-  - The full `npm test` runner is the canonical browser bundle path for
-    `Header`; isolated `test/header-component.ts` runs can expose older
-    fixture assumptions that the full suite already initializes.
 ---
 ## 2026-04-28 18:44 PDT - US-120
 Thread: https://ampcode.com/threads/unknown
@@ -3986,28 +3872,4 @@ Thread: https://ampcode.com/threads/unknown
     timestamp or status key.
   - The refresh safety timeout only guards `feedsLoading`; feed sync status
     should remain synced after a successful refresh.
----
-
-## 2026-05-09 16:36 PDT - US-004
-Thread: https://ampcode.com/threads/unknown
-- What was implemented: Verified the header cache indicator and `/settings`
-  cache section agree across the required cache states.
-  - Added a Chromium component test that mounts `Header` and `SettingsRoute`
-    together and checks the off, empty, partial, and fully cached states.
-  - Updated stale header tests for the removed sponsor iframe and the current
-    feed syncing label.
-  - Confirmed the cache agreement test passes in the focused header harness.
-- Files changed:
-  - `test/header-component.ts`
-  - `specs/prd.json`
-  - `progress.log`
-- **Learnings for future iterations:**
-  - `SettingsRoute` reloads local-first settings from `rsss.localFirst`
-    after mount, so component tests that set `syncSubscriptions` and
-    `storeContent` should also persist matching localStorage values.
-  - Do not run multiple tapout browser component tests in parallel; they
-    contend for the same fixed port.
-  - Browser Use's required Node REPL tool was not exposed in this session,
-    and Computer Use was blocked by macOS Apple Events permission. Chromium
-    component tests provided the browser-level verification path.
 ---

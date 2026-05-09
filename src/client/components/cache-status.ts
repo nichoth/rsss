@@ -4,6 +4,10 @@ import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
 import { State, type AppState } from '../state.js'
 import { billingStatus } from '../billing-status.js'
 import {
+    storeContent,
+    syncSubscriptions
+} from '../local-first-settings.js'
+import {
     cacheStatus,
     cacheActionInProgress,
     cacheActionProgress,
@@ -11,12 +15,6 @@ import {
 } from '../cache-status-state.js'
 import { Dot } from './dot.js'
 import './cache-status.css'
-
-function isFeedReaderRoute (route:string):boolean {
-    if (route === '/') return true
-    if (route === '/starred') return true
-    return route.startsWith('/feed/')
-}
 
 export const CacheStatus:FunctionComponent<{
     state:AppState
@@ -72,10 +70,24 @@ export const CacheStatus:FunctionComponent<{
     if (!state.user.value) return null
     const billing = billingStatus.value
     if (!billing || !billing.entitled) return null
-    if (!isFeedReaderRoute(state.route.value)) return null
+    if (!syncSubscriptions.value) return null
+    if (!storeContent.value) return null
 
     const snapshot = cacheStatus.value
     if (snapshot === null) return null
+
+    if (snapshot.totalCount === 0) {
+        return html`
+            <span
+                class="cache-status empty"
+                role="status"
+                aria-label="Cache status: no items yet"
+            >
+                <span class="cache-status-legend">No items yet</span>
+                <${Dot} color="gray" />
+            </span>
+        `
+    }
 
     if (snapshot.uncachedCount === 0) {
         return html`

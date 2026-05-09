@@ -1,0 +1,2436 @@
+{
+  "project": "RSSS",
+  "branchName": "ralph/local-first-sqlite-opfs",
+  "description": "Local-first mode using SQLite WASM + OPFS in the browser. Per-device opt-in syncs feed subscriptions, items, and read/starred state to a local SQLite database; an optional second toggle stores article content locally. Last-write-wins conflict resolution on `updated_at`, with the Cloudflare Durable Object as the merge point. Falls back transparently to the existing remote adapter on browsers without OPFS support.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Extract shared SQL schema to a single source-of-truth file",
+      "description": "As a developer, I want the table/index/trigger definitions to live in one shared file so the Durable Object and the future browser SQLite database cannot drift.",
+      "acceptanceCriteria": [
+        "New file `src/shared/schema.sql` (or `src/shared/db/schema.ts` exporting a string) contains the `feeds` and `items` CREATE TABLE statements, indexes, and `updated_at` triggers currently inline in `src/server/durable-objects/index.ts`",
+        "`src/server/durable-objects/index.ts` imports and executes the shared schema instead of inline strings; no behavior change",
+        "Server-only `ALTER TABLE` migration block (adding `updated_at` to pre-existing rows) stays in the DO",
+        "`npm run test:db` passes",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Add LWW conflict resolution to server mutating endpoints",
+      "description": "As a developer, I need server endpoints to reject stale writes by comparing `client_updated_at` against the row's current `updated_at`, so multi-device edits converge correctly.",
+      "acceptanceCriteria": [
+        "PATCH /api/items/:id, POST /api/feeds, DELETE /api/feeds/:id, and POST /api/items/mark-all-read accept an optional `client_updated_at` field in the JSON body",
+        "When `client_updated_at` is present and the row's current `updated_at > client_updated_at`, respond 409 with the authoritative current row(s) in the body",
+        "When `client_updated_at` is absent, behavior is unchanged (back-compat for existing clients)",
+        "New tests in `test/db-adapter.ts` (or a new `test/server-lww.ts`) cover: stale write rejected, fresh write accepted, missing field uses old behavior",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Add COOP/COEP headers to the Vite dev server",
+      "description": "As a developer, I need cross-origin isolation in dev so OPFS sync access handles work locally.",
+      "acceptanceCriteria": [
+        "`vite.config.js` `server` config sets `headers: { 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'require-corp' }`",
+        "After `npm start`, evaluating `self.crossOriginIsolated` in the browser console returns `true`",
+        "Existing Bluesky OAuth login flow still completes locally without errors",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Add COOP/COEP headers in the Cloudflare Worker",
+      "description": "As a developer, I need the production Worker to send the same cross-origin isolation headers so OPFS works in deployed builds.",
+      "acceptanceCriteria": [
+        "A Hono middleware in `src/server/index.ts` sets `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` on document and JS responses",
+        "`npm run build` completes; previewing the Worker via wrangler shows the headers on `/` and on emitted JS chunks",
+        "Existing API routes (feeds, items, sync, auth) still respond correctly",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Install sqlite-wasm and add lazy-load init module",
+      "description": "As a developer, I want sqlite-wasm available as a dependency, loaded only via dynamic import, so users with the feature off pay no bundle cost.",
+      "acceptanceCriteria": [
+        "Add `@sqlite.org/sqlite-wasm` to `package.json` dependencies and run `npm install`",
+        "New file `src/client/db/sqlite-init.ts` exports `async function initSqlite()` that does a dynamic `import('@sqlite.org/sqlite-wasm')` and returns the resolved sqlite3 namespace",
+        "`grep -r \"@sqlite.org/sqlite-wasm\" src/client/` finds no static imports, only the dynamic one",
+        "`npm run build` completes and emits sqlite-wasm code in a separate chunk under `public/`",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Add localFirst settings model in localStorage",
+      "description": "As a developer, I want a small reactive settings model so the rest of the app can react to the two local-first toggles.",
+      "acceptanceCriteria": [
+        "New file `src/client/local-first-settings.ts` exports two `@preact/signals` signals: `syncSubscriptions:Signal<boolean>` and `storeContent:Signal<boolean>`, plus `loadLocalFirstSettings()` and `saveLocalFirstSettings()`",
+        "Both signals default to `false`; settings are persisted as a single JSON object under `localStorage` key `rsss.localFirst`",
+        "Helper `setSyncSubscriptions(v:boolean)` uses `batch()` to also force `storeContent` to `false` when `syncSubscriptions` is set to `false`",
+        "New tests cover: load with no stored value, save+load round-trip, dependent-toggle invariant",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Open OPFS-backed SQLite database with shared schema",
+      "description": "As a developer, I need a function that opens (or creates) an OPFS SQLite database scoped to the user and runs the shared schema.",
+      "acceptanceCriteria": [
+        "`src/client/db/sqlite-init.ts` adds `async function openLocalDb(did:string):Promise<Sqlite3Db>` that uses the OPFS-SAH-pool VFS, file name derived from `did`",
+        "On open, runs the shared schema from US-001; idempotent across calls",
+        "Throws a typed error if OPFS is unavailable so callers can fall back",
+        "Tests run against `:memory:` (via a test-mode flag in the same module) and assert that the expected tables and indexes exist after `openLocalDb`",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Implement localAdapter read methods",
+      "description": "As a developer, I need the read half of the local adapter so authenticated reads can be served from SQLite.",
+      "acceptanceCriteria": [
+        "New file `src/client/db/local-adapter.ts` exports `localAdapter:Partial<DbAdapter>` (writes added in US-009) implementing `getFeeds`, `getItems`, `getItemByRoute`, `getCounts`",
+        "Method signatures and return shapes match `remoteAdapter` exactly (verified by assigning to `DbAdapter` after US-009)",
+        "`getItems` honors `feedId`, `isRead`, `isStarred`, `limit`, `offset` filters",
+        "`getCounts` returns `{ unread, starred, total }` computed from the local DB",
+        "New file `test/local-adapter.ts` exercises every read method against a seeded `:memory:` DB",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Implement localAdapter write methods",
+      "description": "As a developer, I need the write half of the local adapter so user actions update the local DB. Outbox wiring comes in US-010.",
+      "acceptanceCriteria": [
+        "Add `addFeed`, `deleteFeed`, `updateItem`, `markAllRead` to `localAdapter` against the OPFS-backed DB",
+        "Each write stamps `updated_at = datetime('now')` on every affected row (or relies on the existing trigger)",
+        "`addFeed` returns the inserted Feed; `deleteFeed`/`updateItem`/`markAllRead` return void as in `remoteAdapter`",
+        "`localAdapter` now satisfies the full `DbAdapter` interface (compile-time check)",
+        "`test/local-adapter.ts` covers each write method, asserting both DB state and return value",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Add outbox table and wire it into local writes",
+      "description": "As a developer, I want every local write to append an outbox row in the same transaction so push-sync (US-015) has work to drain.",
+      "acceptanceCriteria": [
+        "Schema (shared or client-only addendum) adds an `outbox` table with columns `id INTEGER PRIMARY KEY, op TEXT NOT NULL, target_id INTEGER, payload TEXT NOT NULL, client_op_id TEXT NOT NULL UNIQUE, client_updated_at TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT`",
+        "Each `localAdapter` write method inserts the matching outbox row in the same SQLite transaction as the data update",
+        "`client_op_id` is generated client-side (UUID or `crypto.randomUUID`)",
+        "Tests in `test/local-adapter.ts` assert that each write produces one outbox row with the correct `op`, `payload`, and `client_updated_at`",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Implement adapter factory with OPFS detection and fallback",
+      "description": "As a developer, I want a single entry point that chooses `localAdapter` or `remoteAdapter` based on opt-in and browser capability.",
+      "acceptanceCriteria": [
+        "`src/client/db/index.ts` exports `async function getAdapter():Promise<DbAdapter>` returning `localAdapter` only when (a) `syncSubscriptions.value === true` and (b) `isLocalFirstSupported() === true`; otherwise `remoteAdapter`",
+        "`isLocalFirstSupported()` probes `navigator.storage?.getDirectory`, `crossOriginIsolated`, and `typeof FileSystemSyncAccessHandle !== 'undefined'`; result cached for the session",
+        "Both helpers are exported for use by the settings UI",
+        "Tests cover both branches by stubbing globals, including the case where the user has opted in but support is missing (returns `remoteAdapter`)",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Refactor state.ts to use the adapter factory",
+      "description": "As a developer, I want `state.ts` to consume `getAdapter()` so the rest of the app is decoupled from which adapter is in use.",
+      "acceptanceCriteria": [
+        "`src/client/state.ts` no longer imports `remoteAdapter` directly; it calls `await getAdapter()` and caches the result on the State instance",
+        "All existing methods (`loadFeeds`, `addFeed`, `deleteFeed`, `loadItems`, `loadItemByRoute`, `loadCounts`, `toggleItemRead`, `toggleItemStarred`, `markAllRead`) call through the cached adapter",
+        "With local-first off (default) every existing route works exactly as before",
+        "`npm run test` passes",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Add settings panel with two local-first toggles",
+      "description": "As a user, I want a settings page where I can opt in to local subscriptions sync and, separately, local content storage.",
+      "acceptanceCriteria": [
+        "A Settings route (or panel reachable from the header) renders two `@substrate-system/check-box` toggles labelled \"Sync subscriptions and read state to this device\" and \"Store article content locally for offline reading\"",
+        "Toggles are bound to the signals from US-006 and persist via `saveLocalFirstSettings()`",
+        "Content toggle is disabled when subscriptions toggle is off, and disabled+greyed when `isLocalFirstSupported()` returns false",
+        "When `isLocalFirstSupported()` is false, an explanatory note (\"Local storage is not supported in this browser\") appears above the toggles",
+        "Toggling on does NOT yet trigger bootstrap (that wiring is US-016); just saves the setting",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Implement pull-sync (server -> local)",
+      "description": "As a user, I want my local DB to receive changes the server has made since my last sync.",
+      "acceptanceCriteria": [
+        "New module `src/client/db/pull-sync.ts` exports `async function pullSync()` that calls `/api/sync?since=<lastPullAt>` and upserts returned feeds and items into the local DB",
+        "`lastPullAt` is read/written from a `sync_meta` single-row table; first call (no row) omits `since` and treats response as a full snapshot",
+        "When `storeContent.value === false`, item upserts store `NULL` for `content` and `description`",
+        "Hooked to run on app startup when authenticated and `getAdapter()` returned `localAdapter`, and on the window `online` event",
+        "Tests cover delta upsert, content stripping, and `lastPullAt` advancement (using a stubbed `fetch`)",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "Implement push-sync drain",
+      "description": "As a user, I want my offline edits to upload to the server once I'm back online, with sane handling of conflicts and auth failures.",
+      "acceptanceCriteria": [
+        "New module `src/client/db/push-sync.ts` exports `async function pushSync()` that reads outbox rows in `id` order and calls the matching backend endpoint with `client_updated_at` and `client_op_id` in the body",
+        "On 2xx: delete the outbox row",
+        "On 5xx or network error: increment `attempts` and `last_error`; row remains for next cycle",
+        "On 409 (LWW conflict from US-002): upsert the server's authoritative row into the local DB and delete the outbox row",
+        "On 401: halt drain and surface to the auth flow; outbox preserved",
+        "Push runs after every successful pull and on the `online` event",
+        "Tests cover happy path, 5xx retry, 409 reconciliation, and 401 halt",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 15,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "First-time bootstrap flow with progress indicator",
+      "description": "As a user enabling local-first for the first time, I want a clear progress experience while my data is downloaded.",
+      "acceptanceCriteria": [
+        "When `syncSubscriptions` flips from `false` to `true`, the app calls `openLocalDb(did)` (US-007), runs an initial `pullSync()` without `since` (US-014), and shows a non-blocking progress UI with running counts of feeds and items as they land",
+        "Reads continue to be served from `remoteAdapter` until bootstrap completes; once done, `getAdapter()` begins returning `localAdapter`",
+        "On bootstrap failure: revert the toggle to `false`, show an error notice, and remove the OPFS file",
+        "Re-running bootstrap on an existing local DB is idempotent (upserts, no duplicates)",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 16,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-017",
+      "title": "Implement reset/disable flow",
+      "description": "As a user, I want turning local-first off to delete my local SQLite file, and a separate reset button to wipe and re-bootstrap.",
+      "acceptanceCriteria": [
+        "When `syncSubscriptions` flips from `true` to `false`, a confirmation dialog names what will be deleted (subscriptions cache, items cache, pending offline changes if any)",
+        "On confirm: best-effort `pushSync()` drain; if offline, warn and proceed; remove the OPFS file via `FileSystemDirectoryHandle.removeEntry`; flip the factory to return `remoteAdapter` for the rest of the session",
+        "On cancel: revert the toggle back to `true` without changes",
+        "Settings adds a \"Reset local data\" button that performs a full wipe + immediate re-bootstrap without changing the toggle",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 17,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-018",
+      "title": "Add sync status indicator",
+      "description": "As a user, I want to see at a glance whether local-first is online, syncing, or has errors.",
+      "acceptanceCriteria": [
+        "A small status element in the header renders one of: \"Synced HH:MM\", \"Offline - N pending\", \"Syncing...\", \"Sync error\" with a tooltip showing the last error message",
+        "Hidden entirely when `getAdapter()` returns `remoteAdapter`",
+        "Driven by `@preact/signals` updated by `pullSync` and `pushSync`; multi-signal updates wrapped in `batch()`",
+        "Online/offline state tracked via `navigator.onLine` and `online`/`offline` events",
+        "Pending count read from the outbox table",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 18,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-019",
+      "title": "SSRF: validate feed URLs before fetching",
+      "description": "As a developer, I need to validate user-supplied feed URLs to prevent SSRF and unbounded fetches.",
+      "acceptanceCriteria": [
+        "Validate `new URL(feedUrl).protocol` is 'http:' or 'https:' before calling fetch; reject with 400 otherwise",
+        "Reject URLs whose hostname resolves to localhost, 127.*, 0.0.0.0, ::1, *.local with 400",
+        "Add `signal: AbortSignal.timeout(15_000)` to all feed fetch calls in `src/server/durable-objects/index.ts`",
+        "Cap response body at 5MB: read via streaming reader, abort and discard if limit exceeded",
+        "Tests cover: valid URL accepted, non-http scheme rejected, localhost rejected, oversized body aborted",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 19,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-020",
+      "title": "Multi-tab OPFS coordination via BroadcastChannel",
+      "description": "As a user, I want opening a second tab to degrade gracefully instead of silently hanging or corrupting the primary tab's database.",
+      "acceptanceCriteria": [
+        "On OPFS SAH pool acquisition failure, explicitly detect the exclusive-lock error and surface 'local data is open in another tab' in the UI",
+        "Second tab falls back to remoteAdapter rather than spinning or showing a generic error",
+        "A BroadcastChannel ('rsss-tab') is used so subsequent tabs detect the primary and skip `openLocalDb`",
+        "Closing the primary tab broadcasts a 'released' message so a waiting tab can promote itself to primary",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 20,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-021",
+      "title": "Refactor API middleware onto a sub-router",
+      "description": "As a developer, I want entitlement-gated routes on a dedicated sub-router so future routes cannot accidentally bypass auth/entitlement checks.",
+      "acceptanceCriteria": [
+        "Create a Hono sub-app `dataRouter` for all entitlement-gated routes; mount at `/api` via `app.route('/api', dataRouter)`",
+        "`dataRouter` applies `requireAuth` and `requireEntitlement` as top-level middleware so every route inherits both",
+        "Auth and billing routes (`/api/auth/*`, `/api/billing/*`) remain on the main `app` and are NOT on `dataRouter`",
+        "All existing API routes continue to respond correctly after the refactor",
+        "Typecheck passes"
+      ],
+      "priority": 21,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-022",
+      "title": "Fix push-then-pull sync ordering to preserve optimistic writes",
+      "description": "As a user, I want my optimistic local writes to survive a sync cycle without being overwritten by a stale server pull.",
+      "acceptanceCriteria": [
+        "`pushSync` runs before `pullSync` in every sync cycle so the server is up to date before the local DB is overwritten",
+        "`pullSync` skips rows referenced by pending outbox entries, OR 409 conflict resolution re-applies outbox semantics on top of the server row",
+        "Tests cover: optimistic write survives a full sync cycle, 409 conflict resolves to correct final state",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 22,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-023",
+      "title": "Reconcile optimistic feed insert ID with server-assigned ID",
+      "description": "As a user, I want adding a feed to not create duplicate rows after the server returns its canonical ID.",
+      "acceptanceCriteria": [
+        "On 2xx response from the `add_feed` outbox push, parse the server response `{ feed }` to get the canonical server ID",
+        "Delete the optimistic local-ID row and upsert the canonical server row in the same transaction",
+        "No duplicate feed rows appear in the local DB after a successful add + sync cycle",
+        "Tests cover: add feed locally, simulate push 2xx with a different server ID, assert only one row exists with the server ID",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 23,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-024",
+      "title": "Enable SQLite foreign key enforcement with PRAGMA",
+      "description": "As a developer, I need `PRAGMA foreign_keys = ON` executed after every DB open so ON DELETE CASCADE is actually enforced.",
+      "acceptanceCriteria": [
+        "`PRAGMA foreign_keys = ON;` is executed immediately after opening the DB in both `openLocalDb` (client) and the DO's `initDatabase` (server)",
+        "After enabling on the server, `DELETE FROM feeds WHERE id = ?` also removes child items rows via cascade",
+        "Typecheck passes"
+      ],
+      "priority": 24,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-025",
+      "title": "Add outbox attempt cap and dead-letter table",
+      "description": "As a user, I want a persistently failing outbox row to stop retrying after 10 attempts instead of blocking sync forever.",
+      "acceptanceCriteria": [
+        "After 10 failed attempts, move the outbox row to a `dead_letter_outbox` table (same schema as `outbox`) rather than continuing to retry",
+        "The sync status indicator shows a distinct warning when `dead_letter_outbox` has rows",
+        "Schema migration adds `dead_letter_outbox` in both local and server contexts",
+        "Tests cover: row promoted to dead_letter after 10 attempts, sync status reflects dead-letter count",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 25,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-026",
+      "title": "Replace regex feed parser with a streaming XML parser",
+      "description": "As a developer, I need the feed parser to handle real-world RSS/Atom correctly without catastrophic backtracking or namespace confusion.",
+      "acceptanceCriteria": [
+        "Install `fast-xml-parser` (or equivalent) and rewrite `parseRss` and `parseAtom` to use it instead of regex",
+        "Response body is streamed and aborted after 5MB; no `await response.text()` on unbounded input",
+        "`getTagContent` correctly handles namespaced tags such as `dc:creator` and `media:title`",
+        "Existing feed parsing tests continue to pass",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 26,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-027",
+      "title": "Make POST /feeds non-blocking using waitUntil",
+      "description": "As a user, I want adding a feed to return a 201 immediately rather than waiting up to 30 seconds for the initial fetch.",
+      "acceptanceCriteria": [
+        "`POST /feeds` inserts the feed record and returns 201 immediately",
+        "The initial `fetchFeed` call is deferred via `ctx.waitUntil(this.fetchFeed(feed))`",
+        "Items appear on the next sync cycle without the add-feed request having to wait",
+        "Typecheck passes"
+      ],
+      "priority": 27,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-028",
+      "title": "Fix alarm(): bounded concurrency, awaited rescheduling, per-feed error logging",
+      "description": "As a developer, I want alarm() to fetch feeds with bounded concurrency, persist its reschedule, and record per-feed failures.",
+      "acceptanceCriteria": [
+        "`alarm()` uses a concurrency limit of 8 (e.g. p-limit or a manual queue) instead of `Promise.all` over all feeds at once",
+        "`this.ctx.storage.setAlarm(...)` is awaited",
+        "`fetchFeed` records `last_error` and `last_status` into the feeds table row on failure instead of swallowing errors silently",
+        "Typecheck passes"
+      ],
+      "priority": 28,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-029",
+      "title": "Restrict CORS to same origin and add CSRF protection",
+      "description": "As a developer, I want the CORS configuration to match the actual auth model and prevent cross-origin state-changing requests.",
+      "acceptanceCriteria": [
+        "`cors()` is replaced or configured with an explicit `origin` matching the app's production URL rather than `*`",
+        "State-changing routes (POST, PATCH, DELETE) check the `Origin` or `Sec-Fetch-Site` header and reject cross-origin requests with 403, OR session cookies are upgraded to `SameSite=Strict`",
+        "All existing same-origin API calls continue to work",
+        "Typecheck passes"
+      ],
+      "priority": 29,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-030",
+      "title": "Fix COEP iframe compatibility for GitHub sponsor buttons",
+      "description": "As a user, I want sponsor iframes to load correctly under cross-origin isolation without being silently blocked.",
+      "acceptanceCriteria": [
+        "Switch `Cross-Origin-Embedder-Policy` from `require-corp` to `credentialless` in both `src/server/isolation-headers.ts` and `vite.config.js`, OR remove GitHub iframes and replace with plain anchor links",
+        "`crossOriginIsolated` still returns `true` in the browser after the change (OPFS still works)",
+        "Sponsor content loads without being blocked in Chromium and recent Firefox",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 30,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-031",
+      "title": "Narrow verifySubscription return type to a string union",
+      "description": "As a developer, I want the subscription status to be a narrowed union type so future SDK changes surface as type errors rather than silent misclassification.",
+      "acceptanceCriteria": [
+        "`VerifiedSubscription` interface has `status: 'active' | 'scheduled'` rather than `status: string`",
+        "`verifySubscription` performs explicit narrowing: returns `null` for any status not in the known union",
+        "The `as 'active'|'scheduled'` cast in `src/server/index.ts` is removed",
+        "Typecheck passes"
+      ],
+      "priority": 31,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-032",
+      "title": "Standardize SQLite timestamp format across client and server",
+      "description": "As a developer, I want all timestamps to use the same string format so pull-sync comparisons are correct.",
+      "acceptanceCriteria": [
+        "Add a `formatSqliteTs(date: Date): string` helper that produces `'YYYY-MM-DD HH:MM:SS'` (space separator, no milliseconds, no Z)",
+        "`addFeed` in `src/client/db/local-adapter.ts` uses `formatSqliteTs(new Date())` instead of `new Date().toISOString()`",
+        "All other client-side timestamp writes use `datetime('now')` or `formatSqliteTs` consistently; no ISO-format strings remain",
+        "Tests assert timestamps written by `addFeed` sort correctly against server-returned timestamps",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 32,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-033",
+      "title": "Fix email dedupe key epoch and add retry on transient send failure",
+      "description": "As a user, I want billing emails to be sent reliably and not incorrectly suppressed on re-subscriptions within the same week.",
+      "acceptanceCriteria": [
+        "Dedupe key includes a coarse weekly epoch (e.g. `Math.floor(Date.now() / (7*24*60*60*1000))`) so re-subscriptions in a new week always get a fresh key",
+        "On transient Resend failure (5xx or network error), `sendOnce` schedules one retry via `ctx.waitUntil` with a short delay instead of silently dropping the send",
+        "If the retry also fails, the error is logged with enough context to diagnose",
+        "Typecheck passes"
+      ],
+      "priority": 33,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-034",
+      "title": "Resolve is_locally_cached column: fully ship or remove",
+      "description": "As a developer, I want the is_locally_cached column to be either fully implemented with UI and sync wiring, or removed entirely.",
+      "acceptanceCriteria": [
+        "Either: add a UI control to toggle `is_locally_cached`, wire it into pull-sync as a filter for content storage, and document the feature",
+        "Or: remove the `is_locally_cached` column from the schema, its migration, and the PATCH endpoint that toggles it",
+        "No half-finished references to `is_locally_cached` remain after the chosen path",
+        "Typecheck passes"
+      ],
+      "priority": 34,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-035",
+      "title": "Fix getItemByRoute and findItemByRoute to use exact link matching",
+      "description": "As a user, I want article routing to always resolve to the correct item even when multiple feeds share similar URL paths.",
+      "acceptanceCriteria": [
+        "`getItemByRoute` in the DO uses `WHERE items.link = ?` with a short list of normalized forms (trailing slash, https vs http) instead of `LIKE %candidate%`",
+        "`findItemByRoute` in `src/client/state.ts` compares `item.link` with exact or normalized equality rather than `item.link?.includes(itemRoute)`",
+        "Both helpers try normalized forms in order: exact, trailing-slash variant, scheme-swap; no substring matching",
+        "Tests cover: two feeds with overlapping URL paths, assert the correct item is returned",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 35,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-036",
+      "title": "Complete the README Deploy section",
+      "description": "As a developer, I want the README to document all required environment variables and deployment verification steps so a fresh deploy succeeds without guessing.",
+      "acceptanceCriteria": [
+        "README lists all required env vars: `ADMIN_TOKEN`, `SESSION_SECRET`, `OAUTH_CLIENT_ID`, `AUTUMN_SECRET_KEY`, `RESEND_API_KEY`, `RESEND_FROM`",
+        "README includes post-deploy verification steps referencing `/api/health` and `/oauth/client-metadata.json`",
+        "README documents how to rotate `SESSION_SECRET` and the impact on active sessions",
+        "README notes the `compatibility_flags: nodejs_compat` requirement and where to set KV `preview_id` for `wrangler dev`",
+        "`wrangler kv namespace create SESSIONS` (no colon) replaces any deprecated colon-form command throughout the README",
+        "Typecheck passes"
+      ],
+      "priority": 36,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-037",
+      "title": "Cache DO migration state to skip re-introspection on wakeup",
+      "description": "As a developer, I want the DO constructor to skip migration introspection when the schema is already current.",
+      "acceptanceCriteria": [
+        "After running migrations, write `{ migration_v: <N> }` to DO storage",
+        "On constructor, read the stored version; if it matches the current version, skip `PRAGMA table_info` and ALTER TABLE checks",
+        "Incrementing the target migration version triggers a fresh introspection and migration run",
+        "Typecheck passes"
+      ],
+      "priority": 37,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-038",
+      "title": "Remove redundant localStorage user state duplication",
+      "description": "As a developer, I want to eliminate the unused USER_STORAGE_KEY write to localStorage to avoid confusion about what is authoritative.",
+      "acceptanceCriteria": [
+        "Remove all writes to `localStorage` under `USER_STORAGE_KEY` in `src/client/state.ts`",
+        "Remove the `USER_STORAGE_KEY` constant if it has no readers other than the removed writes",
+        "No behavior change for end users",
+        "Typecheck passes"
+      ],
+      "priority": 38,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-039",
+      "title": "Consolidate Feed and Item type definitions to a single source of truth",
+      "description": "As a developer, I want one canonical Feed and Item interface so both client state and DB code import from the same place.",
+      "acceptanceCriteria": [
+        "`src/client/db/types.ts` is the single source of truth for `Feed` and `Item` interfaces",
+        "`src/client/state.ts` removes its own `Feed`/`Item` type definitions and imports from `db/types.ts`",
+        "Any missing fields (e.g. `updated_at`) are reconciled in `db/types.ts`",
+        "No duplicate type definitions remain across the client codebase",
+        "Typecheck passes"
+      ],
+      "priority": 39,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-040",
+      "title": "Fix DEBUG localStorage seeding to not overwrite user customizations",
+      "description": "As a developer, I want the DEBUG namespace to be seeded only once and not overwritten on every page load.",
+      "acceptanceCriteria": [
+        "`src/client/index.ts` only writes the default DEBUG value if `localStorage.getItem('DEBUG')` is null",
+        "In production, the DEBUG key is removed only if it matches the dev default value, not user-customized values",
+        "Typecheck passes"
+      ],
+      "priority": 40,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-041",
+      "title": "Fix sync status UI flicker with a single sync orchestrator",
+      "description": "As a user, I want the sync badge to not briefly flash '0 pending' between the pull and push phases of a sync cycle.",
+      "acceptanceCriteria": [
+        "Extract a `runSync()` function (e.g. in `src/client/db/sync.ts`) that runs `pushSync` then `pullSync` sequentially and calls `setSyncDone` once at the end",
+        "`setSyncDone` is not called between push and pull, only after both complete",
+        "All callers of the sync cycle use `runSync()` instead of calling push/pull separately",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 41,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-042",
+      "title": "Guard State effect against double-fire on auth change",
+      "description": "As a developer, I want the bootstrap/load effect in State() to not run twice when checkAuth emits two rapid signal changes.",
+      "acceptanceCriteria": [
+        "Add a generation counter or in-flight flag in `State()` that prevents the effect body from running concurrently with itself",
+        "If `checkAuth` sets user to null then immediately to a value, the bootstrap runs once for the final value",
+        "Typecheck passes"
+      ],
+      "priority": 42,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-043",
+      "title": "Handle 401 in pull-sync with a typed auth error",
+      "description": "As a user, I want a session expiry detected during pull-sync to show a re-login prompt instead of a generic sync error.",
+      "acceptanceCriteria": [
+        "`pullSync` throws a typed `PullSyncAuthError` on 401 responses, matching the pattern of `PushSyncAuthError`",
+        "The sync orchestrator catches `PullSyncAuthError` and triggers the same re-auth UI flow used for push-sync",
+        "Generic non-2xx errors still result in a 'Sync error' status message",
+        "Typecheck passes"
+      ],
+      "priority": 43,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-044",
+      "title": "Fix getOrCreateCustomer to return and use the customer email",
+      "description": "As a developer, I want getOrCreateCustomer to thread the customer email through so resolveContactEmail is not needed for data already at hand.",
+      "acceptanceCriteria": [
+        "`getOrCreateCustomer` returns `{ customerId:string, email:string }` (or equivalent)",
+        "The caller in `src/server/index.ts` uses the returned `email` instead of making a redundant `resolveContactEmail` call",
+        "Typecheck passes"
+      ],
+      "priority": 44,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-045",
+      "title": "Use URL-safe base64 consistently in session cookie encoding",
+      "description": "As a developer, I want both the payload and signature in the session cookie to use URL-safe base64 so the cookie is safe in all transport contexts.",
+      "acceptanceCriteria": [
+        "`createSessionCookie` encodes `payloadB64` with the same `base64UrlEncode` helper used for the signature, replacing `btoa`",
+        "`verifySessionCookie` decodes `payloadB64` with `base64UrlDecode` to match",
+        "Existing session cookie tests are updated and pass with the new encoding",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 45,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-046",
+      "title": "Add missing test coverage for OAuth, billing, email, and DO handlers",
+      "description": "As a developer, I want critical paths that are currently untested to have at least basic coverage.",
+      "acceptanceCriteria": [
+        "Tests cover `createSessionCookie` / `verifySessionCookie` round-trip and tampered-signature rejection",
+        "Tests cover `verifySubscription` with a mocked Autumn client: active, scheduled, and unknown status",
+        "Tests cover email dedupe with a mocked KV: first send goes through, second within the window is suppressed",
+        "Tests cover the DO's `POST /feeds`, `GET /feeds`, and `POST /feeds/:id/refresh` handlers via an in-process harness",
+        "Tests cover the exact-link `getItemByRoute` logic from US-035",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 46,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-047",
+      "title": "Add GitHub Actions CI configuration",
+      "description": "As a developer, I want tests and typechecks to run automatically on pull requests so failures block merges.",
+      "acceptanceCriteria": [
+        "Add `.github/workflows/ci.yml` that runs `npm test` and `npm run typecheck` on push and pull_request events targeting `main`",
+        "Workflow uses the Node.js version matching the project's engines field or `.nvmrc`",
+        "A failing test or typecheck causes the workflow to exit non-zero",
+        "Typecheck passes"
+      ],
+      "priority": 47,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-048",
+      "title": "Fix online/offline event listener leak in State()",
+      "description": "As a developer, I want the online/offline listeners added in State() to be removable so tests and hot-reload do not accumulate them.",
+      "acceptanceCriteria": [
+        "`State()` returns a `cleanup` function that calls `removeEventListener` for the `online` and `offline` handlers it registered",
+        "`src/client/index.ts` holds a reference to the cleanup function for module teardown",
+        "Typecheck passes"
+      ],
+      "priority": 48,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-049",
+      "title": "Add security attributes to Header component iframes",
+      "description": "As a developer, I want embedded iframes to carry sandbox, loading, and referrerpolicy attributes to limit their capabilities.",
+      "acceptanceCriteria": [
+        "All iframes in `src/client/components/header.ts` have `sandbox='allow-scripts allow-same-origin'` (or stricter)",
+        "All iframes have `loading='lazy'` and `referrerpolicy='no-referrer'`",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 49,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-050",
+      "title": "Honor pushSync errors in the disable/reset local-first flow",
+      "description": "As a user, I want to be warned and given a choice if unsynced changes cannot be uploaded before my local data is deleted.",
+      "acceptanceCriteria": [
+        "`disableLocalFirst` awaits `pushSync()` without swallowing errors; on failure it shows an error and aborts the disable rather than wiping data",
+        "`resetLocalFirst` similarly awaits `pushSync()`; on failure it surfaces the error and aborts unless the user explicitly confirms they accept data loss",
+        "UI text accurately reflects the behavior: e.g. 'sync will run first; if it fails, the reset will be cancelled'",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 50,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-051",
+      "title": "Remove dead code",
+      "description": "As a developer, I want unused exports and commented-out code removed to reduce maintenance surface.",
+      "acceptanceCriteria": [
+        "Remove commented-out `getAttr` in `parseRss` (lines ~730-734 of `src/server/durable-objects/index.ts`)",
+        "Remove `generateSessionToken` if it has no callers outside its module",
+        "Remove unused `_state` parameters from `loadBillingStatus`, `signalCheckoutFailed`, and `openCustomerPortal` in `state.ts`",
+        "Typecheck passes after removals"
+      ],
+      "priority": 51,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-052",
+      "title": "Fix minor type-safety issues in the client",
+      "description": "As a developer, I want small type-unsafe patterns corrected so the codebase compiles cleanly with no unsafe casts.",
+      "acceptanceCriteria": [
+        "`els.namedItem('new-feed-url') as HTMLInputElement` replaces the untyped `els['new-feed-url']` index in `src/client/components/sidebar.ts`",
+        "Typecheck passes"
+      ],
+      "priority": 52,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-053",
+      "title": "Remove internal DO CORS and deduplicate health routes",
+      "description": "As a developer, I want pointless CORS middleware on the internal DO router and duplicate health route registrations removed.",
+      "acceptanceCriteria": [
+        "Remove `cors()` from the Hono app inside the Durable Object (`src/server/durable-objects/index.ts`) since the DO is only reached via service binding, not a browser",
+        "Remove one of the two health check route registrations from `src/server/index.ts` (`/health` or `/api/health`); update any docs referencing the removed path",
+        "Typecheck passes"
+      ],
+      "priority": 53,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-054",
+      "title": "Fix parseInt calls to include explicit radix 10",
+      "description": "As a developer, I want all parseInt calls to explicitly pass radix 10 to satisfy lint rules and make intent clear.",
+      "acceptanceCriteria": [
+        "All `parseInt(...)` calls in `src/server/durable-objects/index.ts` include `, 10` as the second argument",
+        "Typecheck passes"
+      ],
+      "priority": 54,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-055",
+      "title": "Fix README wrangler command syntax and email relative URLs",
+      "description": "As a developer, I want the README to use the current wrangler CLI syntax and email templates to use absolute URLs.",
+      "acceptanceCriteria": [
+        "Replace `wrangler kv:namespace create` with `wrangler kv namespace create` (no colon) in the README",
+        "Replace the relative `/settings` href in `src/server/email.ts` text/HTML with an absolute URL built from `baseUrl`",
+        "Typecheck passes"
+      ],
+      "priority": 55,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-056",
+      "title": "Extract routing helpers from state.ts into a routing.ts module",
+      "description": "As a developer, I want pure routing helpers separated from state management so state.ts is smaller and types are easier to consolidate.",
+      "acceptanceCriteria": [
+        "New file `src/client/routing.ts` exports `routeToItemRoute` and `findItemByRoute`",
+        "`src/client/state.ts` imports these from `routing.ts` and removes its own definitions",
+        "The canonical `Feed`/`Item` types from US-039 are used in `routing.ts`",
+        "All existing route-to-item resolution continues to work correctly",
+        "Typecheck passes"
+      ],
+      "priority": 56,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-057",
+      "title": "Add clarifying comment for async OAuth callback routing",
+      "description": "As a developer, I want a brief comment in routes/index.ts explaining the async control flow after handleOAuthCallback so future readers are not confused.",
+      "acceptanceCriteria": [
+        "A comment at lines ~47-61 in `src/client/routes/index.ts` explains that `handleOAuthCallback` is async, makes a network call, and may change the active route after the initial `LoginPage` render",
+        "Comment is one or two sentences and does not repeat what the code already says",
+        "Typecheck passes"
+      ],
+      "priority": 57,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-058",
+      "title": "Add SQLite worker message bridge",
+      "description": "As a developer, I want a dedicated SQLite worker with a typed promise-based message bridge so browser SQLite work can run off the main thread.",
+      "acceptanceCriteria": [
+        "Add a SQLite worker module under `src/client/db/` that initializes `@sqlite.org/sqlite-wasm` inside the worker",
+        "Add a main-thread client helper that sends typed request messages and resolves or rejects promises from worker responses",
+        "The worker supports at least `open`, `exec`, `query`, and `close` messages needed by the existing local DB code",
+        "Worker errors are propagated to callers with useful messages",
+        "Tests cover successful request/response flow and worker error propagation using a mocked worker",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 58,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-059",
+      "title": "Move local DB open and schema setup into the SQLite worker",
+      "description": "As a developer, I want `openLocalDb` to open the OPFS-backed SQLite database through the worker so OPFS persistence uses the correct browser context.",
+      "acceptanceCriteria": [
+        "`openLocalDb(did)` delegates production database opening to the SQLite worker instead of constructing the sqlite DB directly on the main thread",
+        "The worker opens the per-user OPFS database file and runs `SCHEMA_SQL`, `OUTBOX_SQL`, and `SYNC_META_SQL` idempotently",
+        "Test mode can still use an in-memory database for unit tests without requiring OPFS",
+        "Existing local adapter, pull-sync, push-sync, and bootstrap tests continue to pass",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 59,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-060",
+      "title": "Detect OPFS support from the SQLite worker",
+      "description": "As a user, I want local-first to enable only when the worker can actually open an OPFS-backed SQLite database.",
+      "acceptanceCriteria": [
+        "`isLocalFirstSupported()` consults the SQLite worker or a worker-backed probe before returning true",
+        "The probe checks `navigator.storage.getDirectory` and confirms the selected SQLite VFS is available",
+        "The probe does not rely on main-thread-only `globalThis.FileSystemSyncAccessHandle` checks",
+        "When the worker probe fails, `getAdapter(did)` returns `remoteAdapter` and settings show local storage as unavailable",
+        "Tests cover supported, unsupported, and worker-open-failure cases",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 60,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-061",
+      "title": "Remove sqlite-init from default Vite build inputs",
+      "description": "As a user who does not enable local-first, I do not want SQLite WASM or its worker assets loaded on the initial app path.",
+      "acceptanceCriteria": [
+        "Remove `sqlite-init` as a standalone Vite build input unless a documented worker packaging requirement needs it",
+        "A fresh app load with local-first disabled does not request sqlite-wasm assets in the browser network panel",
+        "After enabling local-first, the SQLite worker and WASM assets are requested lazily",
+        "`npm run build` emits worker and WASM assets without adding SQLite to the initial entry bundle",
+        "Document the chunk-inspection command or steps in a short code comment or docs note",
+        "Typecheck passes"
+      ],
+      "priority": 61,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-062",
+      "title": "Add browser test for OPFS persistence across reload",
+      "description": "As a user, I want data synced to local-first storage to survive reloads and remain readable from SQLite.",
+      "acceptanceCriteria": [
+        "Add a browser test that enables local-first, bootstraps fixture feed/item data, and verifies the data appears in the UI",
+        "The test reloads the page and verifies feeds and items still render from the local SQLite DB",
+        "The test verifies a reload does not trigger a full bootstrap when local data already exists",
+        "The test disables local-first and verifies the local OPFS database is removed or no longer opened",
+        "If the test cannot run reliably in CI, document the reason and provide a manual browser verification script",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 62,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-063",
+      "title": "Refresh UI state after online sync completes",
+      "description": "As a user, I want feeds, counts, item lists, and the open reader item to reflect the latest local database state after coming back online.",
+      "acceptanceCriteria": [
+        "After the online-event sync cycle completes, `State.loadFeeds`, `State.loadItems`, and `State.loadCounts` run against the active adapter",
+        "If a route item is open, the route item is reloaded after sync completes",
+        "Pull and push errors update sync status without clearing existing local data from the UI",
+        "Pending outbox count is refreshed after every push attempt",
+        "Tests cover online-event sync followed by feeds/items/counts reload",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 63,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-064",
+      "title": "Document or implement idempotent client_op_id handling",
+      "description": "As a developer, I want outbox retries to be safe so duplicate network attempts do not create duplicate feeds or conflicting state.",
+      "acceptanceCriteria": [
+        "Every outbox operation sent by `pushSync` includes `client_op_id` in the request body",
+        "Either server mutating endpoints store and deduplicate processed `client_op_id` values, or a docs note explains why current row and URL constraints are sufficient for v1",
+        "Conflict responses for feed, item, and mark-all-read operations return authoritative data in a consistent documented shape",
+        "Client 409 handling upserts the authoritative server data and clears the matching outbox row",
+        "Tests cover duplicate add-feed retry and one item update conflict path",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 64,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-065",
+      "title": "Define and enforce content storage toggle behavior",
+      "description": "As a user, I want the store-content toggle to behave predictably when I turn it on or off.",
+      "acceptanceCriteria": [
+        "Decide whether disabling `storeContent` purges existing local item `content` and `description` values or only affects future pulls",
+        "If disabling purges content, implement the local SQL cleanup when the toggle is turned off",
+        "If disabling affects only future pulls, update settings copy or docs to state that existing stored content remains until reset",
+        "Reader route fetches missing content from the server when online and content is absent locally",
+        "Offline reader state with missing content renders a non-crashing empty or unavailable state",
+        "Tests cover `storeContent` true, false, and toggled-off behavior",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 65,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-066",
+      "title": "Handle local SQLite open, quota, and corruption failures",
+      "description": "As a user, I want a clear recovery path when the local SQLite database cannot be opened or written.",
+      "acceptanceCriteria": [
+        "Local DB open failures are classified into unavailable, locked, quota, corruption, or unknown error categories when possible",
+        "Quota errors show an actionable settings error instead of silently falling back",
+        "Corrupt or incompatible local DB errors expose a reset-local-data path",
+        "Reset closes the SQLite worker DB handle before removing the OPFS database file",
+        "Failed bootstrap reverts the toggle, clears in-memory adapter state, and removes partial local data",
+        "Tests cover failed open, failed bootstrap, and reset after failure",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 66,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-067",
+      "title": "Reconcile local-first PWA and SQLite documentation",
+      "description": "As a developer, I want README and DOCS to match the implemented local-first architecture so future work starts from accurate assumptions.",
+      "acceptanceCriteria": [
+        "Decide whether local-first v1 includes a service worker",
+        "If v1 includes a service worker, add the service worker and registration described in `DOCS/README.md`",
+        "If v1 does not include a service worker, update `DOCS/README.md` and README to remove or qualify service worker claims",
+        "README file tree comments match the implemented `@sqlite.org/sqlite-wasm` worker and OPFS approach",
+        "Docs describe the chosen SQLite VFS, browser support, fallback behavior, and any multi-tab limitation",
+        "Typecheck passes"
+      ],
+      "priority": 67,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-068",
+      "title": "Accessibility and CSS pass for local-first settings and status",
+      "description": "As a user, I want local-first controls and sync status to be accessible, readable, and consistent with the project's CSS rules.",
+      "acceptanceCriteria": [
+        "Settings local-first controls are keyboard accessible and expose useful labels",
+        "Sync status text and tooltip copy clearly communicate synced, syncing, offline, pending, and error states",
+        "CSS for local-first settings and sync status uses only global color variables",
+        "CSS does not use border-radius except for icons or icon-buttons",
+        "Text fits on mobile and desktop without overlapping adjacent controls",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 68,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-069",
+      "title": "Paginate /api/sync end-to-end (client + server)",
+      "description": "As a user with a large feed backlog, I want bootstrap and incremental sync to page through results so I do not OOM the worker, the browser, or the network.",
+      "acceptanceCriteria": [
+        "DO `/sync` accepts a cursor (`(updated_at, id)`) and a `limit` (hard cap 500 items per page); returns `{feeds, items, hasMore, nextCursor, latestUpdatedAt}`",
+        "No `SELECT *` on feeds/items without `LIMIT` and `WHERE (updated_at, id) > cursor` ordering",
+        "Client `pull-sync` and `bootstrap` loop until `hasMore === false`",
+        "Cursor is committed per-page so a resumed bootstrap does not redo completed pages",
+        "Bootstrap progress signals tick per page, not per item-loop iteration",
+        "Regression test: 1500-item dataset bootstraps in 3+ pages without OOM and without losing rows on simulated network interruption between pages",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 69,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-070",
+      "title": "Distinguish transient from terminal bootstrap errors",
+      "description": "As a user with a flaky network, I want a transient bootstrap failure to leave my settings and OPFS file alone so I can retry without losing my preference.",
+      "acceptanceCriteria": [
+        "`bootstrapLocalDb` `catch` classifies errors as transient (network, 5xx, abort) or terminal (corruption, schema mismatch, quota)",
+        "Transient: leave `syncSubscriptions` on, leave OPFS file in place, surface a retry button via a signal",
+        "Terminal: prompt user before wiping OPFS or flipping the toggle off",
+        "No `setSyncSubscriptions(false)` or `removeOpfsDb` call outside the terminal branch",
+        "Regression test: simulated `fetch` rejection during bootstrap leaves `syncSubscriptions === true` and the OPFS file present; user-triggered retry succeeds",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 70,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-071",
+      "title": "Fix add_feed reconciliation cascade-deleting local item state",
+      "description": "As a user who marked items read on an offline-added feed, I want my read/star state to survive when the feed is reconciled with its server-canonical id.",
+      "acceptanceCriteria": [
+        "`reconcileSuccessfulAddFeed` does not issue a cascade-causing `DELETE FROM feeds WHERE id = ?` when items are attached",
+        "After reconcile, items previously attached to the optimistic feed are reattached to the server-canonical feed id with their original `is_read` and `is_starred` values",
+        "Regression test: add feed offline, mark two items read and one starred, push sync (server returns canonical id), assert all three flags survive on the new feed id",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 71,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-072",
+      "title": "Stabilize update_item outbox payload and verify both directions",
+      "description": "As a user toggling read/unread or star/unstar, I want the local row, outbox payload, and server PATCH to agree on the value being committed.",
+      "acceptanceCriteria": [
+        "Outbox `update_item` payload booleans match what was actually written to the local items row (no boolean/0-1 divergence between payload and row)",
+        "Regression test covers `is_read: false` (mark unread) and `is_starred: false` (unstar), not just the `true` direction",
+        "Regression test covers toggle-toggle-toggle within one drain window: final local state matches final outbox row write",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 72,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-073",
+      "title": "Single timestamp source for items/feeds writes",
+      "description": "As the sync system, I need every `updated_at` write to use one timestamp source so that `last_pull_at` string comparisons do not lose rows.",
+      "acceptanceCriteria": [
+        "Every place that writes `updated_at` uses `formatSqliteTs(new Date())` (or the inverse: a single `datetime('now')` everywhere - pick one and apply uniformly)",
+        "No SQL fragment combines `formatSqliteTs(...)` with `datetime('now')` for the same row write",
+        "`last_pull_at` written by the client uses the same format as values used in the DO's `WHERE updated_at > ?` clause",
+        "Regression test: server returns `latestUpdatedAt`, client immediately writes a row, next pull's `since` does not skip that row even when the values are within one second of each other",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 73,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-074",
+      "title": "Replace BroadcastChannel-only tab coordination with Web Locks API",
+      "description": "As a user with multiple tabs open, I want only one tab to hold the OPFS handle, with crash-safe lock semantics, so I never see 'Local data is open in another tab' after a tab dies.",
+      "acceptanceCriteria": [
+        "`navigator.locks.request('rsss-opfs', { mode: 'exclusive' }, ...)` is the source of truth for primary-tab status",
+        "BroadcastChannel is removed or demoted to UI-status hint only",
+        "Tab crash (force-kill, not graceful close) releases the lock automatically; another tab acquires it without user refresh",
+        "Regression test: two tabs, primary tab killed, second tab acquires the lock and starts using the local adapter without page refresh",
+        "Regression test: bootstrap-in-progress race (Tab A bootstrapping, Tab B opens) - Tab B does not silently stay on remote adapter forever",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 74,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-075",
+      "title": "Reuse SQLite worker across probe and open",
+      "description": "As a user on a slow filesystem, I want OPFS-SAH-pool installed once per session, not on every probe and every retry, so page load is not bloated by directory walks.",
+      "acceptanceCriteria": [
+        "`probeOpfsSupport` and `openLocalDb` share a worker, or the probe result is cached for the session and skipped on subsequent opens",
+        "No duplicate `installOpfsSAHPoolVfs` invocations across probe + open in the steady-state session",
+        "Regression test: instrumented test asserts `installOpfsSAHPoolVfs` is invoked exactly once per fresh session across probe and open",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 75,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-076",
+      "title": "Auto-recover and notify when OPFS lock becomes available",
+      "description": "As a user whose tab fell back to the remote adapter, I want it to upgrade to local automatically when another tab releases the lock.",
+      "acceptanceCriteria": [
+        "When a `released` BroadcastChannel message (or Web Locks acquisition, post-US-074) makes the lock available, the blocked tab automatically attempts re-acquire and triggers `pullSync`",
+        "A signal bumps when the lock state transitions so the UI can re-render",
+        "Regression test: simulate lock-release event; assert `getAdapter` returns the local adapter on the next call without manual refresh and a sync is triggered",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 76,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-077",
+      "title": "Add server-side billing entitlement gate to dataRouter",
+      "description": "As the operator of a paid product, I want every `/api/sync`, `/api/feeds`, `/api/items` route to require a current entitlement so non-paying users cannot use the sync infrastructure.",
+      "acceptanceCriteria": [
+        "`dataRouter.use('*', requireAuth, requireEntitlement)` (or equivalent) blocks unentitled sessions with `402 Payment Required`",
+        "`requireEntitlement` calls `resolveBilling(c.env, session.did)` and returns 402 when `!isEntitled(billing)`",
+        "Existing client `SyncBillingError` / `PushSyncBillingError` paths trigger correctly when the server returns 402",
+        "Regression test: an authenticated session with no entitlement receives 402 from `/api/sync`, `/api/feeds`, `/api/items`, `/api/items/mark-all-read`, `/api/feeds/:id/refresh`",
+        "Regression test: entitled session continues to receive 200/201/204 as appropriate",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 77,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-078",
+      "title": "Gate dev billing shortcut on NODE_ENV === 'development', not !useLive(env)",
+      "description": "As the operator, I want missing or disabled Autumn config in production to fail closed (503), not silently entitle every user for free.",
+      "acceptanceCriteria": [
+        "`/api/billing/checkout` and `/api/billing/checkout/return` write `status: 'active'` to KV only when `c.env.NODE_ENV === 'development'`",
+        "In production with missing/disabled Autumn config, return 503",
+        "Regression test: `NODE_ENV='production'` + `!useLive(env)` -> 503; `NODE_ENV='development'` + `!useLive(env)` -> existing dev behavior",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 78,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-079",
+      "title": "Default cookie Secure flag to true; do not depend on vars.NODE_ENV",
+      "description": "As a user logging in over HTTPS, I want the session cookie to always carry `Secure` in production so a downgrade-to-http:// redirect cannot leak my session id.",
+      "acceptanceCriteria": [
+        "Session cookie sets `Secure: true` unless the request is loopback (use existing loopback detection at oauth.ts:313-316 or hostname check)",
+        "Removed reliance on `c.env.NODE_ENV === 'production'` for the `Secure` flag decision",
+        "Regression test: session cookie issued for `https://rsss.space` host carries `Secure`; session cookie issued for `http://127.0.0.1` does not",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 79,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-080",
+      "title": "Remove AUTUMN_SECRET_KEY from wrangler.jsonc vars block",
+      "description": "As the operator, I want secret bindings to live in `wrangler secret put` only so the next deployer cannot accidentally commit a live key.",
+      "acceptanceCriteria": [
+        "`wrangler.jsonc` `vars` block does not declare `AUTUMN_SECRET_KEY`",
+        "README documents `AUTUMN_SECRET_KEY` only via `wrangler secret put`, consistent with other secret bindings",
+        "Boot/health check (or deploy script) fails loudly if `AUTUMN_SECRET_KEY` is unset in production",
+        "Regression test: deploy lint/check script fails when `AUTUMN_SECRET_KEY` appears in `vars`",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 80,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-081",
+      "title": "Lock down dev-login route and remove fallback secret",
+      "description": "As the operator, I want a default `wrangler deploy` to never expose the dev-login route or a hardcoded session secret.",
+      "acceptanceCriteria": [
+        "Hardcoded `'dev-secret-key-32-chars-long!!'` fallback removed; route returns 500 if `SESSION_SECRET` is missing",
+        "Default `NODE_ENV` is treated as `production` when unset (or boot fails fast if missing)",
+        "`/api/auth/dev-login` is additionally gated by request hostname being `127.0.0.1` or `localhost` (defense in depth on top of the env check)",
+        "Regression test: `POST /api/auth/dev-login` to non-loopback hostname returns 403 even if `NODE_ENV` is misconfigured",
+        "Regression test: missing `SESSION_SECRET` causes 500 from dev-login (not silent acceptance)",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 81,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-082",
+      "title": "Force-pull skipped rows after their outbox row clears",
+      "description": "As a user whose feed had a pending outbox write during sync, I want the eventual server-side update (description re-parsed, `last_fetched`, etc.) to land in my local DB after the outbox drains.",
+      "acceptanceCriteria": [
+        "`setLastPullAt` is not advanced past skipped rows, OR a per-row 'needs-pull-after-clear' flag triggers a targeted re-pull when the outbox row is removed",
+        "Regression test: queue an outbox `update_item`; pull sync arrives with a server change to the same item; outbox drains; subsequent pull lands the server change",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 82,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-083",
+      "title": "Serialize concurrent runSync invocations via promise mutex",
+      "description": "As the sync subsystem, I want concurrent `runSync` triggers (auth effect + `online` event + manual) coalesced into a single in-flight cycle so I do not double-issue HTTP requests or fail BEGIN-within-BEGIN.",
+      "acceptanceCriteria": [
+        "Per-DB `Promise` mutex around `runSync`; concurrent callers receive the same in-flight promise",
+        "No 'cannot start a transaction within a transaction' SQLite error from concurrent triggers",
+        "No duplicate HTTP requests for the same `client_op_id`",
+        "Regression test: invoke `runSync` twice in parallel; assert exactly one push and one pull HTTP exchange",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 83,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-084",
+      "title": "Gate online event handler on isLocalFirstActive",
+      "description": "As the sync subsystem, I want to skip work when the user has disabled local-first so I do not push/pull against a DB that is about to be wiped.",
+      "acceptanceCriteria": [
+        "`handleOnline` returns early when `!isLocalFirstActive.value`",
+        "Regression test: toggle local-first off, dispatch `online` event, assert no `runSync` was triggered",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 84,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-085",
+      "title": "Rewrite outbox delete_feed target_id when its add_feed reconciles",
+      "description": "As a user who adds and immediately deletes a feed offline, I want the delete to apply against the canonical server id, not the optimistic local id.",
+      "acceptanceCriteria": [
+        "On `add_feed` 2xx reconcile, scan outbox for `delete_feed` rows with `target_id === <old_local_id>` and rewrite to `target_id = <new_server_id>`",
+        "Regression test: enqueue `add_feed` then `delete_feed` for the same optimistic id, drain push, assert server receives `DELETE /api/feeds/<server_id>` (not `<old_local_id>`) and final state has no orphan feed",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 85,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-086",
+      "title": "Tie-break equal-timestamp update_item writes",
+      "description": "As the LWW conflict resolver, I want a stable secondary order so two updates within the same millisecond do not produce ambiguous resolution.",
+      "acceptanceCriteria": [
+        "Either: append a monotonic counter to `client_updated_at`, or document the resolution rule and enforce it in both client and server LWW logic",
+        "Regression test: two `updateItem` calls in the same tick produce deterministic post-sync state on the server",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 86,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-087",
+      "title": "Document and test the push-then-pull invariant for mark-all-read",
+      "description": "As the sync subsystem, I want the push-then-pull ordering invariant explicit and tested so a future refactor cannot silently break the mark-all-read offline flow.",
+      "acceptanceCriteria": [
+        "`sync.ts` and `pull-sync.ts` carry a one-line comment naming the invariant: `getPendingOutboxRefs` is called *after* `pushSync` resolves",
+        "Regression test for 'mark_all_read offline -> server has new items -> come online -> drain push -> pull' sequence - new items end up visible (not silently skipped)",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 87,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-088",
+      "title": "Differentiate transient vs permanent push failures in attempt-cap logic",
+      "description": "As the outbox drain loop, I want 5xx blips not to consume the dead-letter budget so a brief server outage does not permanently drop user writes.",
+      "acceptanceCriteria": [
+        "5xx -> exponential backoff with attempt counter reset on success",
+        "4xx (other than 401/402/409) -> immediate dead-letter",
+        "401/402 continue to throw out of the loop unchanged",
+        "Regression test: simulate 10 sequential 5xx then 1 success - outbox row drains; the row is not in dead-letter",
+        "Regression test: simulate one 400 - outbox row goes to dead-letter immediately",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 88,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-089",
+      "title": "Probe storage quota before bootstrap; surface low-storage warning",
+      "description": "As a user on a low-storage device, I want to be warned before bootstrap starts writing a 50,000-item DB I cannot fit.",
+      "acceptanceCriteria": [
+        "Before `bootstrapLocalDb` writes any rows, call `navigator.storage.estimate()`",
+        "If `quota - usage < 100 MB` (configurable constant), surface a warning signal and require explicit user confirmation to proceed",
+        "Regression test: mock `storage.estimate` returning low free space; assert bootstrap does not proceed without explicit confirmation",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 89,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-090",
+      "title": "Make disableLocalFirst cancel-safe for in-flight sync",
+      "description": "As a user toggling local-first off, I do not want a UI error flash from a sync that is mid-fetch when I toggle.",
+      "acceptanceCriteria": [
+        "`disableLocalFirst` sets a 'disable in progress' flag that `runSync` checks at entry and at await boundaries (or uses an `AbortController`)",
+        "In-flight sync aborts cleanly without `setSyncError`",
+        "OPFS file removal does not race with re-open by an in-flight sync",
+        "Regression test: trigger a sync that hangs on a fetch, call `disableLocalFirst`, assert no `setSyncError` is called and OPFS file is removed exactly once",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 90,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-091",
+      "title": "Defer setSyncSubscriptions(true) until billing status loads",
+      "description": "As a user opening Settings before `loadBillingStatus` resolves, I want my toggle to apply once billing status arrives, not silently no-op.",
+      "acceptanceCriteria": [
+        "When `billingStatus.value === null`, the toggle either shows a loading state or queues the change and applies once `loadBillingStatus` resolves",
+        "No silent no-op when billing status is still loading",
+        "Regression test: open settings before billing resolves, toggle on, await billing load, assert `syncSubscriptions === true`",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 91,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-092",
+      "title": "Harden SSRF defense - IP-aware blocklist + manual redirects",
+      "description": "As the operator, I want feed-fetch to block private/internal addresses by their resolved IP and refuse to follow redirects to them, defeating DNS rebinding and numeric-IP encoding tricks.",
+      "acceptanceCriteria": [
+        "`validateFeedUrl` parses hostname into an IP (when applicable) and rejects RFC1918, link-local (`169.254/16`), unique-local (`fc00::/7`), IPv6 link-local (`fe80::/10`), IPv4-mapped (`::ffff:127.0.0.1`), and `[::]`",
+        "Numeric encodings (`http://2130706433/`, `http://0177.0.0.1/`, `http://0x7f.0.0.1/`) are rejected via canonical IP comparison",
+        "`fetchFeedText` sets `redirect: 'manual'`, follows at most 3 redirects, and re-validates each location header",
+        "DNS-over-HTTPS pre-resolution (or platform equivalent) re-checks the resolved IP immediately before fetch",
+        "Regression test covers each blocked encoding form and a redirect chain ending at a private IP",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 92,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-093",
+      "title": "Cap hostile XML in feed parser",
+      "description": "As the feed-fetch subsystem, I want hostile or oversized feeds bounded so a single bad publisher cannot stall the alarm or fill SQLite with a 4 MB row.",
+      "acceptanceCriteria": [
+        "`parsedFeed.items.length` capped at 1000 before insertion; excess truncated and `last_error` records 'feed too large'",
+        "Per-field caps: `content` <= 1 MB, `description` <= 64 KB, `title` <= 8 KB",
+        "Insert errors no longer blanket-swallowed (see US-095)",
+        "Regression test feeds: 5000-item feed -> only 1000 inserted; 4 MB content field -> truncated to 1 MB",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 93,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-094",
+      "title": "Make alarm reschedule survive mid-refresh kill",
+      "description": "As the operator, I want the next alarm always scheduled even when the current alarm is killed by the CPU budget mid-work.",
+      "acceptanceCriteria": [
+        "Alarm schedules `next` at the start (or in a `try/finally`), not after refresh completion",
+        "If the alarm runs out of budget, refresh resumes from where it left off on the next alarm via batch tracking in DO storage",
+        "Regression test: simulate alarm kill mid-refresh; assert next alarm is still scheduled and the remaining feeds are processed on it",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 94,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-095",
+      "title": "Stop swallowing INSERT errors in feed parser",
+      "description": "As the operator, I want non-duplicate-key INSERT failures observable so a user with a broken feed sees an error instead of 'no new items forever'.",
+      "acceptanceCriteria": [
+        "The `catch` block distinguishes SQLite duplicate-key (ignorable) from other errors (logged + recorded in feed `last_error`)",
+        "Regression test: simulated row-too-big INSERT records `last_error` on the feed row instead of being swallowed",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 95,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-096",
+      "title": "Strengthen CSRF check beyond Sec-Fetch-Site heuristics",
+      "description": "As the operator, I want state-changing routes refused when the request lacks both `Origin` and `Sec-Fetch-Site`, with a CSRF token as defense in depth.",
+      "acceptanceCriteria": [
+        "`isCrossOriginStateChange` rejects any state-changing method (POST/PATCH/DELETE/PUT) that lacks both `Origin` AND `Sec-Fetch-Site`",
+        "CSRF token issued in a header-readable cookie at session creation, required as `X-CSRF-Token` echo on state-changing routes",
+        "`APP_ORIGIN` is required at boot; missing config fails closed",
+        "Regression test: state-changing request with missing both headers -> 403; valid CSRF token round-trip -> 200",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 96,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-097",
+      "title": "Audit withIsolationHeaders content-type gating and document COEP credentialless",
+      "description": "As a reviewer, I want explicit test coverage and inline documentation for the `credentialless` cookie-stripping behavior on cross-origin subresources.",
+      "acceptanceCriteria": [
+        "Inline comment explains `credentialless` choice and the cookie-stripping consequence for third-party feed thumbnails",
+        "Regression test: cross-origin image fetch verifies the COEP behavior matches expectation (no auth cookies sent)",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 97,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-098",
+      "title": "Tighten CORS allowlist and require APP_ORIGIN at boot",
+      "description": "As the operator, I want the CORS allowlist to never silently fall back to a hardcoded production origin in a misconfigured deploy.",
+      "acceptanceCriteria": [
+        "Boot fails when `APP_ORIGIN` is unset (no `DEFAULT_APP_ORIGIN` fallback at runtime)",
+        "`allowedCorsOrigin` echoes `origin` only when `origin === c.env.APP_ORIGIN`",
+        "Regression test: missing `APP_ORIGIN` env causes boot/health-check failure",
+        "Regression test: cross-origin request from a non-allowlisted origin -> no `Access-Control-Allow-Origin` echoed",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 98,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-099",
+      "title": "Validate session record shape after KV JSON.parse",
+      "description": "As the auth middleware, I want a corrupted KV session record rejected loudly instead of producing an undefined `did` downstream.",
+      "acceptanceCriteria": [
+        "`verifySessionCookie` validates `typeof record.session === 'object' && typeof record.session.did === 'string' && typeof record.session.handle === 'string'` before returning",
+        "Malformed records cause cookie destruction and a 401, not a downstream crash",
+        "Regression test: write a malformed `session:<sid>` KV record; assert 401 plus cookie cleared",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 99,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-100",
+      "title": "Normalize feed URLs for idempotency",
+      "description": "As a user adding the same feed twice with different casing or trailing slash, I want the server to deduplicate them.",
+      "acceptanceCriteria": [
+        "`validateFeedUrl` canonicalizes: lowercase host, strip trailing slash on path-root, lowercase scheme (already done by URL)",
+        "DO `add_feed` lookup uses the canonical form",
+        "Regression test: `https://Example.COM/feed/` and `https://example.com/feed` resolve to the same row",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 100,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-101",
+      "title": "Clamp client_updated_at server-side to defeat client clock spoofing",
+      "description": "As the LWW conflict resolver, I want client-supplied timestamps clamped to a sane upper bound so a buggy or malicious client cannot pin itself to win every conflict.",
+      "acceptanceCriteria": [
+        "`client_updated_at` server-side is clamped: `min(client_updated_at, now() + 5min)`",
+        "When clamping triggers, log the event for observability",
+        "Regression test: client sends `client_updated_at: '9999-12-31T23:59:59'`; server stores and uses the clamped value, not the client's",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 101,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-102",
+      "title": "Per-feed rate limit on /feeds/:id/refresh",
+      "description": "As the operator, I want manual refresh capped so an authenticated user cannot turn the service into a DOS amplifier against third-party publishers.",
+      "acceptanceCriteria": [
+        "DO storage tracks `last_manual_refresh_at` per feed; `fetchFeed` is no-op (or 429) if called within 60 seconds of the previous manual refresh",
+        "Regression test: 100 rapid `POST /api/feeds/:id/refresh` calls trigger only one outbound `fetchFeed`",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 102,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-103",
+      "title": "Send subscription emails to Autumn-verified addresses, not user-submitted",
+      "description": "As the operator, I do not want logged-in users to send RSSS-branded emails to arbitrary recipients.",
+      "acceptanceCriteria": [
+        "`sendSubscriptionStarted` and related email triggers use the email Autumn has on file (`customer.email`), never the request body's `email` field",
+        "`stashPendingEmail` continues to record what email Autumn should bind, but is not the recipient source",
+        "Regression test: `POST /api/billing/checkout` with `body.email = 'attacker@example.com'` does not result in an email being sent to that address",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 103,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-104",
+      "title": "Drop GET /logout",
+      "description": "As a user, I do not want a stray `<img src='/logout'>` or pre-fetcher to log me out.",
+      "acceptanceCriteria": [
+        "GET `/logout` handler removed (or returns 405)",
+        "All client logout call sites use `POST /api/auth/logout`",
+        "Regression test: `GET /logout` returns 405 (or 404); `POST /api/auth/logout` continues to work",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 104,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-105",
+      "title": "Forward only the headers the DO needs",
+      "description": "As the worker proxying to the DO, I want to drop client-supplied `Authorization` and other unnecessary headers so a future DO route cannot become a confused deputy.",
+      "acceptanceCriteria": [
+        "`dataRouter` constructs the DO request with an explicit allowlist of headers (`Content-Type`, RSSS custom headers, `cookie` if needed). All other client headers stripped",
+        "Regression test: client `Authorization: Bearer xyz` is not present on the request the DO sees",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 105,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-106",
+      "title": "Wire all client-side test files into npm test",
+      "description": "As a maintainer, I want `npm test` to actually exercise push-sync, pull-sync, bootstrap, local-adapter, adapter-factory, tab-coordination, and local-first-settings so a green checkmark reflects real coverage.",
+      "acceptanceCriteria": [
+        "Every test file under `test/` that exercises a high-risk client module is reachable via either `test/index.ts` imports or `test/run-all-tests.mjs` script entries",
+        "`npm test` invokes all of the following: tab-coordination, pull-sync, push-sync, bootstrap, local-adapter, adapter-factory, sqlite-init, local-first",
+        "Wa-sqlite tests (`--loader:.wasm=dataurl`) run as part of `npm test`, not only when explicitly invoked",
+        "Regression: a deliberate failure in any of those test files causes `npm test` to fail",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 106,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-107",
+      "title": "Test bootstrap interruption and resumption",
+      "description": "As a maintainer, I want regression tests for the catastrophic recovery path so US-070's behavior cannot silently regress.",
+      "acceptanceCriteria": [
+        "Test: network error mid-bootstrap leaves no OPFS file behind in the terminal-error path",
+        "Test: user can re-toggle and re-bootstrap after a transient failure (no auto-disable)",
+        "Test: bootstrap with a partial outbox already present (a reset+bootstrap with leftover outbox rows) completes cleanly",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 107,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-108",
+      "title": "Test dead-letter outbox path",
+      "description": "As a maintainer, I want regression tests asserting the attempt-cap behavior, so US-088 cannot silently regress.",
+      "acceptanceCriteria": [
+        "Test: after the configured number of failures, a row moves to `dead_letter_outbox`",
+        "Test: `setSyncDone` payload includes `deadLetters` count",
+        "Test: a row in `dead_letter_outbox` is not retried",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 108,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-109",
+      "title": "Test add_feed reconcile cascade with attached items",
+      "description": "As a maintainer, I want a test that asserts user item state survives `add_feed` reconcile when the optimistic feed already has attached items.",
+      "acceptanceCriteria": [
+        "Test: optimistic feed with two items (one read, one starred) reconciles via push 2xx; both items reappear under the canonical feed id with their flags intact",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 109,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-110",
+      "title": "Test clock skew and timestamp format mismatches",
+      "description": "As a maintainer, I want a test that fails if the timestamp formats diverge across `last_pull_at` write and `WHERE updated_at > ?` read.",
+      "acceptanceCriteria": [
+        "Test: server sends `latestUpdatedAt = '2026-04-25 10:00:00'`; client writes a feed locally; next pull's `since` does not skip the local write",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 110,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-111",
+      "title": "Test concurrent runSync invocations",
+      "description": "As a maintainer, I want a test that fails if the `runSync` mutex is removed.",
+      "acceptanceCriteria": [
+        "Test: two `runSync(db)` calls in parallel produce exactly one push HTTP exchange and one pull HTTP exchange",
+        "Test: SQLite 'cannot start a transaction within a transaction' never occurs under concurrent invocation",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 111,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-112",
+      "title": "Test disableLocalFirst while a sync is in flight",
+      "description": "As a maintainer, I want a test that fails if a user-visible error flashes from a cancelled sync.",
+      "acceptanceCriteria": [
+        "Test: start a sync that hangs on `fetch`; call `disableLocalFirst`; assert no `setSyncError` was invoked",
+        "Test: OPFS file is removed exactly once (no race with in-flight worker open)",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 112,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-113",
+      "title": "Test online event during a sync",
+      "description": "As a maintainer, I want a test that exercises the re-entrant `handleOnline` path so US-084 does not silently regress.",
+      "acceptanceCriteria": [
+        "Test: dispatch `online` event while a sync is already in flight; assert second sync is coalesced (not duplicated)",
+        "Test: dispatch `online` event with `isLocalFirstActive === false`; assert no sync is triggered",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 113,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-114",
+      "title": "Test storage quota exceeded path",
+      "description": "As a maintainer, I want a test that exercises `classifyLocalDbError`'s `'quota'` branch.",
+      "acceptanceCriteria": [
+        "Test: mock SQLite write throwing QuotaExceededError; assert the error is classified as `'quota'`",
+        "Test: bootstrap path and steady-state path both surface the quota error to the UI signal (not swallowed)",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 114,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-115",
+      "title": "Test runSync errors surface to UI through setSyncError",
+      "description": "As a maintainer, I want an end-to-end test for the trackStatus plumbing so the half-and-half flow does not regress.",
+      "acceptanceCriteria": [
+        "Test: pullSync throws a network error; assert `setSyncError` is called once with the expected message",
+        "Test: pushSync throws a non-auth error; assert `setSyncError` is called once",
+        "Test: auth (401) and billing (402) errors continue to throw out of `runSync` rather than become silent setSyncError calls (or whatever the documented behavior is)",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 115,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-116",
+      "title": "Test the billing entitlement gate",
+      "description": "As a maintainer, I want a server-side test asserting unentitled sessions cannot reach `dataRouter` routes.",
+      "acceptanceCriteria": [
+        "Test: authenticated session with no Autumn entitlement -> 402 from each `dataRouter` route",
+        "Test: authenticated session with active entitlement -> 200/201/204 as appropriate",
+        "Test: NODE_ENV=production with missing Autumn config -> 503 from `/api/billing/checkout` (paired with US-078)",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 116,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-117",
+      "title": "Add thumbnail_url column to items schema and Item type",
+      "description": "As a developer, I need a place to store each post's thumbnail URL so the client can render it without re-fetching anything.",
+      "acceptanceCriteria": [
+        "Add `thumbnail_url TEXT` (nullable, no default) to the `items` CREATE TABLE in `src/shared/schema.ts` between `pub_date` and `is_read`",
+        "Bump `USER_DO_MIGRATION_VERSION` in `src/server/durable-objects/index.ts` from 2 to 3",
+        "Add new private method `migrateAddItemThumbnail()` modeled on `migrateAddFeedFailureColumns` (PRAGMA table_info guard, then `ALTER TABLE items ADD COLUMN thumbnail_url TEXT`) and call it from `initDatabase()` alongside the existing migrations",
+        "Add `thumbnail_url:string|null` to the `Item` interface in `src/client/db/types.ts`",
+        "Client OPFS-backed SQLite path picks the column up on fresh installs (TABLES_SQL is shared); existing local DBs survive the schema change without errors -- match whatever pattern was used for `last_error` / `last_status`",
+        "`npm run typecheck` passes",
+        "`npm run test:db` passes"
+      ],
+      "priority": 117,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-118",
+      "title": "Extract feed-provided image hints during RSS and Atom parsing",
+      "description": "As a developer, I need parseRss and parseAtom in the Durable Object to surface a candidate image URL per item so we have a fallback when OG fetching fails or is unavailable.",
+      "acceptanceCriteria": [
+        "Add `imageUrl:string | null` to the `ParsedFeedItem` interface in `src/server/durable-objects/index.ts`",
+        "Add private helper `extractFirstImgSrc(html)` using a single `<img ... src=\"...\">` regex (no DOM parser added)",
+        "Add private helper `resolveImageUrl(candidate, itemLink, feedLink)` that resolves relatives via `new URL(candidate, base)`, drops non-http(s) results, and returns `null` on parse failure",
+        "Add private helper `getRssItemImage(item)` that tries in order: `media:thumbnail @_url`, first `media:content` with `@_medium=\"image\"` or `@_type` starting with `image/` (read `@_url`), first `enclosure` with `@_type` starting with `image/` (read `@_url`), then first `<img src>` in `content:encoded` / `encoded` / `content` / `description`",
+        "Add private helper `getAtomEntryImage(entry)` that tries in order: `media:thumbnail @_url`, first `<link rel=\"enclosure\" type=\"image/*\">` `@_href`, then first `<img src>` in `content` / `summary`",
+        "Update both `items.push(...)` calls in `parseRss` (around `:1180`) and `parseAtom` (around `:1245`) to populate `imageUrl: this.resolveImageUrl(getter(node), entryLink, feedLink)`",
+        "Add tests in `test/feed-parser.ts` covering each branch: media:thumbnail, media:content (image), enclosure (image), img-in-description, atom link rel=enclosure, atom img-in-content, relative URL resolution, and non-image enclosure ignored",
+        "`npm run typecheck` and `npm run lint` pass",
+        "Tests pass"
+      ],
+      "priority": 118,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-119",
+      "title": "Add fetchOgImage helper that reuses feed-fetch SSRF protections",
+      "description": "As a developer, I need a server-side helper that fetches an article URL, reads up to </head>, and extracts og:image (with twitter:image fallback), reusing the SSRF pipeline that fetchFeedText already enforces.",
+      "acceptanceCriteria": [
+        "New exported function `fetchOgImage(url, options)` lives in `src/server/feed-fetch.ts` (or a new `src/server/og-fetch.ts` if that file gets crowded -- pick one)",
+        "Reuses the existing `validateFeedUrl`, DoH hostname check, redirect cap (3), 15s timeout, and bounded body reader from feed-fetch.ts -- factor shared internals if needed, do not duplicate the SSRF logic weakly",
+        "Reads the response only up to `</head>` or 256 KiB, whichever comes first",
+        "Skips parsing when `Content-Type` is not `text/html` or `application/xhtml+xml`",
+        "Looks for, in order: `property=\"og:image\"`, `property=\"og:image:secure_url\"`, `property=\"og:image:url\"`, `name=\"twitter:image\"` (regex/scanner, no HTML parser dependency)",
+        "Resolves the resulting URL against the article URL via `new URL(candidate, articleUrl)`; drops non-http(s) values; drops `http:` results so mixed-content blocking does not happen on https pages",
+        "Returns `null` on any failure (network, non-2xx, blocked host, timeout, parse miss, wrong content-type) -- never throws to the caller",
+        "New test file `test/og-fetch.ts` (or extend `test/feed-fetch-security.ts`) covers: og:image hit, og:image:secure_url fallback, twitter:image fallback, no-meta page, redirect followed, redirect-loop capped, blocked host, non-HTML content-type, http-only result dropped",
+        "`npm run typecheck` and `npm run lint` pass",
+        "Tests pass"
+      ],
+      "priority": 119,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-120",
+      "title": "Wire OG fetching into feed ingestion with concurrency cap and time budget",
+      "description": "As a developer, I need fetchFeed in the Durable Object to compute thumbnail_url for newly inserted items by trying og:image first then falling back to the parser-supplied imageUrl.",
+      "acceptanceCriteria": [
+        "In `fetchFeed` in `src/server/durable-objects/index.ts`, detect which `INSERT OR IGNORE` calls actually inserted (check `this.sql.exec(...).rowsWritten` or equivalent, or query last_insert_rowid) and collect those new rows along with their `link` and parser-supplied `imageUrl`",
+        "For each newly inserted item with a non-null `link`, call `fetchOgImage(item.link)`; if it returns null, fall back to the parser-supplied `imageUrl`; if both are null, leave thumbnail_url null",
+        "OG fetches run concurrently via `Promise.allSettled` with a small concurrency cap (4) so a single feed cannot stampede one origin",
+        "An overall wall-time budget per `fetchFeed` call (10 seconds) caps total OG-fetch time; any item whose fetch is still pending at the deadline falls back to parser-supplied imageUrl",
+        "Persist via `UPDATE items SET thumbnail_url = ? WHERE id = ? AND thumbnail_url IS NULL` so existing non-null values are never overwritten and pre-feature rows stay null",
+        "OG-fetch failures are logged but never set `feeds.last_error` or `feeds.last_status` (per-item OG failures must not surface as feed-level errors)",
+        "Existing feed-related tests in the repo still pass; add a smoke test (in `test/feed-parser.ts` or a new test) that with a mocked `fetchOgImage` returning a URL, the resulting item row has the expected `thumbnail_url`",
+        "`npm run typecheck` and `npm run lint` pass",
+        "Tests pass"
+      ],
+      "priority": 120,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-121",
+      "title": "Surface thumbnail_url through items API and sync paths",
+      "description": "As a developer, I need the server-to-client items payload and bidirectional sync to include thumbnail_url so the client can render it.",
+      "acceptanceCriteria": [
+        "Add `items.thumbnail_url` to the `ITEM_SYNC_COLUMNS` constant in `src/server/durable-objects/index.ts` (after `items.pub_date`)",
+        "Audit every other `SELECT ... FROM items` in `src/server/durable-objects/index.ts` (getItems, item-by-route, push/pull sync, etc.) and add `thumbnail_url` to the column list",
+        "Client DB adapter writes `thumbnail_url` when persisting synced rows locally (mirror whatever pattern handles the other nullable string columns)",
+        "Existing tests in `test/sync.ts`, `test/db-adapter.ts`, `test/local-adapter.ts`, `test/api-router.ts`, `test/pull-sync.ts`, and `test/push-sync.ts` still pass",
+        "Add at least one assertion (in `test/sync.ts` or `test/db-adapter.ts`) that `thumbnail_url` round-trips: a server row with a non-null thumbnail_url ends up with the same value on the client",
+        "`npm run typecheck` passes",
+        "Tests pass"
+      ],
+      "priority": 121,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-122",
+      "title": "Render thumbnail at the left of each item row when available",
+      "description": "As a user, I want to see a small image at the left of each post row when the post has one, so I can recognize articles at a glance.",
+      "acceptanceCriteria": [
+        "In `src/client/components/item-row.ts`, render an `<img class=\"item-thumbnail\">` before `.item-main` inside the existing `<a class=\"item-link\">` when `item.thumbnail_url` is non-null and non-empty",
+        "Image attributes: `loading=\"lazy\"`, `decoding=\"async\"`, `referrerpolicy=\"no-referrer\"`, `alt=\"\"` (decorative -- title carries the accessible label)",
+        "`onError` handler hides the element (e.g. sets a local signal that conditionally renders the img), so a dead URL does not leave a broken-image icon in the row",
+        "In `src/client/components/item-row.css`, style `.item-thumbnail` as a fixed 80x80 box with `object-fit: cover`, using nested selectors inside `.item-row { ... }` per the project style guide -- no new top-level class blocks",
+        "Border-radius and any colors must reference variables from `_variables.css`; do not introduce new hardcoded colors or font sizes below 1rem",
+        "Rows where `item.thumbnail_url` is null render byte-for-byte the same DOM and CSS as before this feature: no placeholder, no reserved column, no shifted text",
+        "All TypeScript follows project conventions: no space between `:` and type annotation, lines under 80 columns, ternaries split across lines per CLAUDE.md style",
+        "`npm run typecheck`, `npm run lint`, and `npm run stylelint` pass",
+        "Verify in browser using dev-browser skill: subscribe to a feed known to expose og:image (any typical blog), let it ingest, confirm thumbnails render at 80x80 on the left and that rows without thumbnails are visually unchanged from before"
+      ],
+      "priority": 122,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-123",
+      "title": "Add feed_cache_policy table to local schema",
+      "description": "As a developer, I need a per-feed cache policy table so users can override site-wide cache defaults on a per-feed basis.",
+      "acceptanceCriteria": [
+        "`src/client/db/local-schema.ts` exports a new `FEED_CACHE_POLICY_SQL` constant containing `CREATE TABLE IF NOT EXISTS feed_cache_policy (feed_id INTEGER PRIMARY KEY, cache_mode TEXT CHECK (cache_mode IN ('text','text_images')), max_size_bytes INTEGER, max_age_seconds INTEGER, updated_at TEXT NOT NULL DEFAULT (datetime('now')))`",
+        "Every column except `feed_id` and `updated_at` is nullable; NULL means \"inherit site-wide default\"",
+        "`src/client/db/sqlite-init.ts` (or wherever schema is applied on open) executes `FEED_CACHE_POLICY_SQL` alongside the existing schema so it is created on every open and is idempotent",
+        "New file `test/feed-cache-policy.ts` (or extend `test/local-adapter.ts`) asserts the table exists with the expected columns and that `INSERT OR REPLACE` works for upserting policy rows",
+        "No behavior change to existing reads/writes",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 123,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-124",
+      "title": "Add site-wide cache defaults to local-first-settings",
+      "description": "As a developer, I need site-wide cache defaults persisted alongside the existing local-first settings so they survive reload.",
+      "acceptanceCriteria": [
+        "`src/client/local-first-settings.ts` adds three exported signals: `defaultCacheMode:Signal<'text'|'text_images'>` (default `'text_images'`), `defaultMaxSizeBytes:Signal<number>` (default 50_000_000), `defaultMaxAgeSeconds:Signal<number>` (default 30 * 86400)",
+        "`loadLocalFirstSettings` reads these from the existing `LS_KEY` JSON and sets them inside the existing `batch(...)`",
+        "`saveLocalFirstSettings` writes these alongside `syncSubscriptions` and `storeContent`",
+        "Corrupt or missing fields fall back to the defaults above without throwing",
+        "No new top-level localStorage key; reuse `rsss.localFirst`",
+        "TypeScript style follows project conventions (no space before `:`, lines under 80 cols, ternaries split across lines)",
+        "New tests in `test/local-first-settings.ts` (create if missing) cover load+save round-trip and the missing-field fallback",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 124,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-125",
+      "title": "Add cached_images table to local schema",
+      "description": "As a developer, I need to track which image URLs have been cached locally, their owning feed/item, and their byte size, so size limits and the storage display work.",
+      "acceptanceCriteria": [
+        "`src/client/db/local-schema.ts` exports a new `CACHED_IMAGES_SQL` constant: `CREATE TABLE IF NOT EXISTS cached_images (url TEXT PRIMARY KEY, feed_id INTEGER NOT NULL, item_id INTEGER, bytes INTEGER NOT NULL, cached_at TEXT NOT NULL DEFAULT (datetime('now')))` plus an index on `feed_id` and an index on `cached_at`",
+        "Schema is applied on every DB open alongside existing tables, idempotently",
+        "New helper `src/client/db/cached-images.ts` exports `recordCachedImage(db, {url, feedId, itemId, bytes})`, `getFeedCacheSize(db, feedId):Promise<number>`, `getTotalCacheSize(db):Promise<number>`, and `deleteCachedImagesForFeed(db, feedId):Promise<string[]>` (returns the URLs that were removed so callers can evict them from Cache Storage)",
+        "Tests in `test/cached-images.ts` cover record, sum-by-feed, sum-total, and delete-by-feed against a `:memory:` DB",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 125,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-126",
+      "title": "Cache item images via Cache Storage during ingest",
+      "description": "As a user with `text_images` mode enabled for a feed, I want images referenced in cached items to be downloaded into Cache Storage so they are available offline.",
+      "acceptanceCriteria": [
+        "New module `src/client/db/image-cache.ts` exports `cacheItemImages(db, item, policy):Promise<void>` that: parses `<img src=\"...\">` URLs out of `item.content` and `item.description`, fetches each, stores the response in a Cache Storage bucket named `rsss-images-v1`, and records a `cached_images` row via the helper from US-125",
+        "Skip URLs that are already present in `cached_images` (idempotent)",
+        "When the effective cache mode for the item's feed is `'text'`, the function returns immediately without fetching anything",
+        "The effective policy is resolved from `feed_cache_policy` for that feed, falling back to `defaultCacheMode` from US-124",
+        "Errors fetching individual images are caught and logged (no PII), do not abort the loop, and do not write a `cached_images` row",
+        "Hook this into the existing pull-sync code path (`src/client/db/pull-sync.ts`) so that when a new item is inserted with `storeContent` enabled, `cacheItemImages` is invoked for that item",
+        "New tests in `test/image-cache.ts` mock `fetch` and `caches` to assert: text mode skips, text_images mode caches new URLs, already-cached URLs are skipped, fetch errors do not write rows",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 126,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-127",
+      "title": "Add site-wide cache controls section to /settings",
+      "description": "As a user, I want default cache controls on the /settings page so all feeds without explicit overrides follow the same policy.",
+      "acceptanceCriteria": [
+        "`src/client/routes/settings.ts` renders a new `<section class=\"settings-section cache-section\">` titled \"Cache\" placed after the existing local-first section and before the per-feed list",
+        "Section contains: a radio group bound to `defaultCacheMode` with options \"Text only\" / \"Text and images\"; a number input bound to `defaultMaxSizeBytes` labelled \"Max cache size per feed (MB)\" with `min=1`; a number input bound to `defaultMaxAgeSeconds` labelled \"Keep cached items for (days)\" with `min=1`",
+        "Inputs convert between MB / days for display and bytes / seconds in the underlying signal",
+        "Changes call `saveLocalFirstSettings()` immediately and update the signals inside a `batch(...)`",
+        "Helper text: \"These defaults apply to feeds with no override.\"",
+        "Styling lives in `src/client/routes/settings.css` using nested selectors inside `.cache-section { ... }`; uses variables from `_variables.css`; no font-size below 1rem",
+        "TypeScript follows project conventions (no space before `:`, lines under 80 cols)",
+        "Typecheck and lint pass",
+        "Verify in browser using dev-browser skill: navigate to `/settings`, change each control, reload the page, confirm values persist"
+      ],
+      "priority": 127,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-128",
+      "title": "Per-feed cache controls in /settings feed list",
+      "description": "As a user, I want to edit cache settings for an individual feed from the /settings feed list so I can manage everything in one place.",
+      "acceptanceCriteria": [
+        "Each row in `.settings-feeds-list` (in `src/client/routes/settings.ts`) shows the effective cache mode for that feed with a `(default)` tag when inherited from site defaults",
+        "Each row has an expand/edit affordance (button or `<details>`) that reveals per-feed controls: cache mode select with options \"Use default\" / \"Text only\" / \"Text + images\"; max-size override input (blank = use default); max-age override input (blank = use default)",
+        "Saving \"Use default\" writes NULL to the corresponding column in `feed_cache_policy` (do NOT copy the current default value)",
+        "Saving an explicit value upserts a row in `feed_cache_policy` for that `feed_id`",
+        "After save, the displayed effective values update without a page reload",
+        "All policy reads use the same effective-policy resolver from US-126 (extract a shared helper if needed)",
+        "Styling uses nested selectors and variables from `_variables.css`; no font-size below 1rem",
+        "TypeScript follows project conventions",
+        "Typecheck and lint pass",
+        "Verify in browser using dev-browser skill: subscribe to a feed, set a per-feed override, reload, confirm the override sticks; clear it back to \"Use default\" and confirm the row no longer shows an override"
+      ],
+      "priority": 128,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-129",
+      "title": "Per-feed cache controls on the feed-reader page",
+      "description": "As a user, I want to change a single feed's cache settings while reading it without navigating to /settings.",
+      "acceptanceCriteria": [
+        "`src/client/routes/feed-reader.ts` adds a cache-controls UI (a button that opens an inline panel or `<details>` block) showing the same per-feed controls as US-128",
+        "The panel writes through the same `feed_cache_policy` upsert helper used in US-128 (no duplicate logic)",
+        "Edits made on the feed-reader page are reflected on `/settings` after navigation (no caching of stale state)",
+        "Styling lives in `src/client/routes/feed-reader.css` using nested selectors inside `.feed-reader { ... }`; uses variables from `_variables.css`; no font-size below 1rem",
+        "TypeScript follows project conventions",
+        "Typecheck and lint pass",
+        "Verify in browser using dev-browser skill: open a feed, toggle its cache mode, navigate to `/settings`, confirm the change is reflected there"
+      ],
+      "priority": 129,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-130",
+      "title": "Show storage used per feed in /settings",
+      "description": "As a user, I want to see how much space each feed's cache is using so I can make informed cleanup decisions.",
+      "acceptanceCriteria": [
+        "`src/client/util.ts` (or a new file) exports `formatBytes(n:number):string` returning e.g. `'1.2 MB'` / `'340 KB'` / `'0 B'` -- check `util.ts` first and only add if not present",
+        "Each feed row in `.settings-feeds-list` shows storage used for that feed: `text bytes` (from `LENGTH(content) + LENGTH(description)` summed over `items WHERE feed_id = ?`) plus image bytes (from `SUM(bytes) FROM cached_images WHERE feed_id = ?`)",
+        "The cache section header shows total account usage = sum of both across all feeds",
+        "Numbers refresh after any save/clear action without a page reload",
+        "Queries are executed via the existing SQLite worker client; no synchronous DB calls on the main thread",
+        "Styling uses nested selectors and variables from `_variables.css`; no font-size below 1rem",
+        "Tests in `test/cached-images.ts` (or new `test/storage-usage.ts`) cover the per-feed and total queries against a seeded `:memory:` DB",
+        "Tests pass",
+        "Typecheck and lint pass",
+        "Verify in browser using dev-browser skill: with at least two feeds cached, confirm per-feed numbers and the account total are non-zero and add up correctly"
+      ],
+      "priority": 130,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-131",
+      "title": "Clear-cache action per feed",
+      "description": "As a user, I want a \"Clear cache\" button per feed so I can free space for one feed without nuking everything.",
+      "acceptanceCriteria": [
+        "`src/client/db/content-storage.ts` adds `clearFeedCache(db, feedId:number):Promise<void>` that: nulls `content` and `description` on `items WHERE feed_id = ?`; deletes `cached_images` rows for that feed (via the helper from US-125) and evicts the corresponding URLs from the `rsss-images-v1` Cache Storage bucket",
+        "A \"Clear cache\" button is added to the per-feed editor in both `/settings` (US-128) and the feed-reader page (US-129)",
+        "Clicking the button shows a confirmation prompt (`window.confirm` is acceptable) before clearing",
+        "After clear, the storage display from US-130 updates to 0 for that feed and the account total decreases by the freed amount",
+        "The action is idempotent (running twice does not throw)",
+        "TypeScript follows project conventions",
+        "New tests in `test/content-storage.ts` (extend if exists, else create) cover: clears text, removes cached_images rows, returns the URL list for cache eviction",
+        "Tests pass",
+        "Typecheck and lint pass",
+        "Verify in browser using dev-browser skill: clear cache for one feed, confirm its storage drops to 0 while another feed's cache is unchanged"
+      ],
+      "priority": 131,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-132",
+      "title": "Evict cached items older than max_age on sync cycle",
+      "description": "As a user, I want stale cached content to be removed automatically so my disk does not fill up with old articles.",
+      "acceptanceCriteria": [
+        "New module `src/client/db/cache-eviction.ts` exports `evictByMaxAge(db):Promise<{itemsEvicted:number, imagesEvicted:number}>`",
+        "For each feed, resolve the effective `max_age_seconds` (per-feed override, else site default) and: null `content`/`description` on items where `(julianday('now') - julianday(items.updated_at)) * 86400 > max_age_seconds`; delete matching `cached_images` rows and evict their URLs from Cache Storage",
+        "Items currently being read in an open tab are best-effort skipped: read a `currently-open-item-id` value from a small in-memory registry exposed by `src/client/state.ts` (add the registry in this story)",
+        "`src/client/db/sync-cycle.ts` calls `evictByMaxAge` once per sync cycle, after the pull-sync step, before push-sync",
+        "Tests in `test/cache-eviction.ts` cover: TTL respects per-feed override, falls back to site default, skips currently-open item id, returns accurate counts",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 132,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-133",
+      "title": "Evict by per-feed size cap on sync cycle",
+      "description": "As a user, I want each feed's cache to stay under its configured size cap so one greedy feed cannot consume all my storage.",
+      "acceptanceCriteria": [
+        "`src/client/db/cache-eviction.ts` adds `evictByFeedSizeCap(db):Promise<{feedsTrimmed:number, bytesFreed:number}>`",
+        "For each feed: compute current size (text + images, same calculation as US-130); if it exceeds the effective `max_size_bytes` (per-feed override, else site default), evict items oldest-first by `items.updated_at` -- nulling text and removing cached_images rows -- until current size is below the cap",
+        "Skip the currently-open item id from the same registry as US-132",
+        "Cache Storage URLs corresponding to evicted `cached_images` rows are removed from the `rsss-images-v1` bucket",
+        "`src/client/db/sync-cycle.ts` calls `evictByFeedSizeCap` after `evictByMaxAge`",
+        "Tests in `test/cache-eviction.ts` cover: per-feed override respected, default applied when no override, oldest-first ordering, currently-open item skipped, no-op when under cap",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 133,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-134",
+      "title": "Evict by account-wide size cap and surface the setting",
+      "description": "As a user, I want to cap total cache size across all feeds so the app cannot grow unbounded on disk.",
+      "acceptanceCriteria": [
+        "`src/client/local-first-settings.ts` adds a `defaultAccountMaxSizeBytes:Signal<number>` (default 500_000_000) persisted in the same `LS_KEY` JSON; missing field falls back to the default",
+        "`src/client/routes/settings.ts` cache section adds a number input \"Total cache size (MB)\" bound to this signal alongside the existing per-feed default cap from US-127",
+        "`src/client/db/cache-eviction.ts` adds `evictByAccountSizeCap(db):Promise<{bytesFreed:number}>`: if total cache (text + images, all feeds) exceeds the cap, evict oldest items across all feeds -- nulling text, removing `cached_images` rows, and clearing the corresponding Cache Storage entries -- until total is under the cap; skip the currently-open item id",
+        "`src/client/db/sync-cycle.ts` calls `evictByAccountSizeCap` after `evictByFeedSizeCap`",
+        "Tests in `test/cache-eviction.ts` cover: trims when over cap across feeds, no-op when under cap, currently-open item skipped, oldest-first across feeds (not per-feed)",
+        "Tests pass",
+        "Typecheck and lint pass",
+        "Verify in browser using dev-browser skill: set a small account cap (e.g. 5 MB), trigger a sync, confirm total cache is reduced below the cap and the storage display reflects the new total"
+      ],
+      "priority": 134,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-135",
+      "title": "Add feed-update status signals to client AppState",
+      "description": "As a developer, I need `feedUpdateStatus` and `feedsWithUpdates` signals on `AppState` so any component can react to whether the user has pending server-side feed updates.",
+      "acceptanceCriteria": [
+        "`src/client/state.ts` adds `feedUpdateStatus:Signal<'synced'|'updates'>` to the `AppState` type and initializes it to `'synced'` in `State()`",
+        "`src/client/state.ts` adds `feedsWithUpdates:Signal<string[]>` to the `AppState` type and initializes it to `[]` in `State()`",
+        "Any place that sets both signals together must wrap the updates in `batch()` from `@preact/signals`",
+        "No automatic refresh is triggered from these signals -- they are display-only state",
+        "Typecheck and lint pass"
+      ],
+      "priority": 135,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-136",
+      "title": "Track per-user, per-feed last-pulled cursor on the server",
+      "description": "As a backend developer, I need the user's Durable Object to record a cursor per followed feed so it can compute which feeds have un-pulled items.",
+      "acceptanceCriteria": [
+        "Extend the shared schema (`src/shared/schema.sql` or `src/shared/db/schema.ts`) so each row in `feeds` has a `last_pulled_at` TEXT (ISO timestamp, nullable) column; add a server-side `ALTER TABLE` migration block in `src/server/durable-objects/index.ts` that backfills existing rows to the latest item's `published_at` (or `NULL` if no items)",
+        "`src/server/durable-objects/index.ts` updates `last_pulled_at` to the maximum item `published_at` for that feed at the end of every successful per-feed refresh (`POST /feeds/:id/refresh`) and global refresh (`POST /feeds/refresh`)",
+        "A new helper `getFeedsWithUpdates():string[]` in the DO returns the IDs of feeds where `MAX(items.published_at) > feeds.last_pulled_at` (or where `last_pulled_at IS NULL` and items exist)",
+        "New tests in `test/feed-cursor.ts` cover: cursor advances on full refresh, cursor advances on per-feed refresh, helper returns only feeds with newer items, helper returns empty when all feeds caught up",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 136,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-137",
+      "title": "Include feed-update status in initial fetch response",
+      "description": "As a user, I want the indicator to be correct on first paint so I never see a stale 'synced' state when there are pending updates.",
+      "acceptanceCriteria": [
+        "The DO's `GET /feeds` route in `src/server/durable-objects/index.ts` adds `feedUpdateStatus:'synced'|'updates'` and `feedsWithUpdates:string[]` to its JSON response, computed via the helper from US-136",
+        "`src/client/state.ts` populates `state.feedUpdateStatus` and `state.feedsWithUpdates` (signals from US-135) from this response in a `batch()` call when feeds are first loaded",
+        "If the response omits the new fields (back-compat), the client treats it as `'synced'` with `[]`",
+        "Tests in `test/feed-cursor.ts` (extend) cover: bootstrap response shape includes the new fields, values reflect the cursor state",
+        "Tests pass",
+        "Typecheck and lint pass",
+        "Verify in browser using dev-browser skill: load the app with at least one feed that has unpulled items (e.g. by manually setting `last_pulled_at` back), confirm the header indicator shows 'updates' immediately on first paint"
+      ],
+      "priority": 137,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-138",
+      "title": "Server SSE events for feed-updates-available / -cleared",
+      "description": "As a user, I want the indicator to react in real time when new items appear on the server, without me reloading.",
+      "acceptanceCriteria": [
+        "`src/server/durable-objects/index.ts` adds two new SSE event types via the existing `broadcast()` method: `feed-updates-available` (payload `{ feedIds:string[] }`) and `feed-updates-cleared` (payload `{ feedIds:string[] }`)",
+        "After a server-driven feed fetch/parse cycle inserts new items for a followed feed, the DO emits `feed-updates-available` with the affected feed IDs (only if those feeds were NOT already in the un-synced set, to avoid spam)",
+        "After a successful manual refresh advances `last_pulled_at` to cover all items, the DO emits `feed-updates-cleared` with the affected feed IDs",
+        "Events are scoped to the user's DO (no cross-user leakage) -- existing per-DO `broadcast()` already provides this",
+        "New tests in `test/feed-cursor.ts` (extend) cover: `available` emitted on new items, not re-emitted while feed is still un-synced, `cleared` emitted after refresh catches up",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 138,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-139",
+      "title": "Client subscribes to feed-update SSE events",
+      "description": "As a user, I want my header indicator and `/updates` page to react in real time as the server pushes events.",
+      "acceptanceCriteria": [
+        "`State.openEventStream` in `src/client/state.ts` adds two new listeners on the existing `EventSource`: `feed-updates-available` and `feed-updates-cleared`",
+        "On `feed-updates-available`: parse `feedIds` from `event.data` JSON, merge the IDs into `state.feedsWithUpdates` (deduped), and set `state.feedUpdateStatus.value = 'updates'` -- both inside `batch()`",
+        "On `feed-updates-cleared`: parse `feedIds`, remove them from `state.feedsWithUpdates`, and if the resulting list is empty set `state.feedUpdateStatus.value = 'synced'` -- both inside `batch()`",
+        "Neither handler calls `State.refreshFeeds` or any other auto-pull -- the user must click manually",
+        "Existing `feed-updated` and `refresh-complete` handlers are unchanged",
+        "Typecheck and lint pass"
+      ],
+      "priority": 139,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-140",
+      "title": "Add FeedStatus indicator component to header",
+      "description": "As a user, I want to see 'status: synced' or 'status: updates' with a colored dot in the header so I know whether I have unpulled feed updates at a glance.",
+      "acceptanceCriteria": [
+        "New file `src/client/components/feed-status.ts` exports `FeedStatus:FunctionComponent<{ state:AppState }>`",
+        "New file `src/client/components/feed-status.css` styles the component using CSS variables from `_variables.css` / `_vars.css`; no font sizes below 1rem",
+        "Renders `<${Dot} color=\"green\" />` followed by the text `status: synced` when `state.feedUpdateStatus.value === 'synced'`",
+        "Renders `<${Dot} color=\"yellow\" />` followed by `status: ` and `<a href=\"/updates\">updates</a>` when `state.feedUpdateStatus.value === 'updates'`",
+        "The `/updates` link uses a plain `<a href>` so the existing client-side router intercepts it",
+        "Component has `role=\"status\"` and `aria-live=\"polite\"` for screen readers",
+        "Hidden for anonymous users (returns `null` when `state.user.value` is falsy)",
+        "`src/client/components/header.ts` imports and renders `<${FeedStatus} state=${state} />` inside `.header-right.desktop-nav`, immediately after `<${SyncStatus} />` and before the logout button",
+        "Existing `SyncStatus` component is unchanged and still rendered alongside",
+        "Typecheck and lint pass",
+        "Verify in browser using dev-browser skill: log in, confirm 'status: synced' with green dot is visible in the header; manually set `state.feedUpdateStatus.value = 'updates'` from the browser console and confirm the dot turns yellow and 'updates' becomes a link to /updates"
+      ],
+      "priority": 140,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-141",
+      "title": "Add /updates client-side route",
+      "description": "As a user, I want a dedicated page that shows which feeds have pending updates.",
+      "acceptanceCriteria": [
+        "New files `src/client/routes/updates.ts` and `src/client/routes/updates.css`",
+        "`src/client/routes/index.ts` registers `router.addRoute('/updates', ...)` following the existing pattern used for `/settings`",
+        "Route component reads `state.feedsWithUpdates` and renders a heading 'Pending Updates' plus a list of feeds whose IDs are in that signal (resolve titles by joining against `state.feeds`)",
+        "When `state.feedsWithUpdates.value.length === 0`, render the empty state: 'All feeds are up to date.'",
+        "Anonymous users are redirected to `/login` (match the existing protected-route pattern used by `/settings`)",
+        "Page is exported in the `routes` array of `src/client/routes/index.ts` only if other protected routes are also exported there (mirror existing convention)",
+        "Typecheck and lint pass",
+        "Verify in browser using dev-browser skill: navigate to /updates while logged in, confirm the page renders; with no pending updates the empty state shows; with pending updates a list of feed titles renders"
+      ],
+      "priority": 141,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-142",
+      "title": "Per-feed pending-items preview endpoint and expandable rows",
+      "description": "As a user, I want to see the titles of pending items before I pull them, so I can decide whether the refresh is worth my time.",
+      "acceptanceCriteria": [
+        "New DO route `GET /feeds/:id/pending` in `src/server/durable-objects/index.ts` returns `{ items:Array<{ id:string, title:string, published_at:string }> }` for items in that feed whose `published_at > feeds.last_pulled_at` (limit 50, newest first)",
+        "Route is exposed via the existing data-router proxy at `/api/feeds/:id/pending` (no extra config needed -- `dataRouter.all('*')` already proxies)",
+        "`src/client/routes/updates.ts` renders each feed row as an expandable disclosure (collapsed by default) using a native `<details>`/`<summary>` or an existing toggle pattern in the codebase",
+        "Expanding a row fetches the preview endpoint lazily, shows a spinner while loading, and renders item titles with `published_at` formatted via `toLocaleString()`",
+        "Preview data is held in component-local state (or a per-feed signal) -- it does NOT mutate `state.items` or any reader state",
+        "Errors render an inline message inside the expanded row; the row stays expanded so the user can retry",
+        "New tests in `test/feed-cursor.ts` (extend) cover: pending endpoint returns only items past the cursor, ordering newest first, limit honored",
+        "Tests pass",
+        "Typecheck and lint pass",
+        "Verify in browser using dev-browser skill: on /updates, expand a feed row, confirm titles + dates render and that closing/reopening does not crash"
+      ],
+      "priority": 142,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-143",
+      "title": "Per-feed Refresh button on /updates",
+      "description": "As a user, I want to refresh a single feed from the /updates page without pulling everything.",
+      "acceptanceCriteria": [
+        "`src/client/state.ts` exports a new action `State.refreshFeed(state:AppState, feedId:string):Promise<void>` that POSTs to `/api/feeds/:id/refresh` and, on success, removes `feedId` from `state.feedsWithUpdates` and (if the list is now empty) sets `state.feedUpdateStatus.value = 'synced'` -- both inside `batch()`",
+        "Each feed row on `/updates` includes a Refresh `<${Button}>` (existing `src/client/components/button.ts`) with `isSpinning` bound to a local in-flight signal",
+        "Button is disabled while in-flight to prevent double-click",
+        "On success the row disappears from the list (because the feed ID is removed from `state.feedsWithUpdates`); when the list becomes empty the empty state from US-141 takes over",
+        "On failure the row stays, an inline error message renders, and the button becomes clickable again",
+        "Server-side success path emits `feed-updates-cleared` (covered by US-138) so other tabs/devices clear in real time",
+        "Typecheck and lint pass",
+        "Verify in browser using dev-browser skill: on /updates with at least one pending feed, click Refresh on one row, confirm the row disappears and the header indicator updates correctly (still 'updates' if other feeds remain, 'synced' if that was the last one)"
+      ],
+      "priority": 143,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-144",
+      "title": "Audit and lock down: no automatic feed refresh paths",
+      "description": "As a user, I never want feeds pulled automatically; refresh must always be an explicit click (sidebar global or per-feed on /updates).",
+      "acceptanceCriteria": [
+        "Audit `src/client/` for callers of `State.refreshFeeds` and `State.refreshFeed`: the only allowed callers are `src/client/components/sidebar-footer.ts` (global Refresh Feeds button) and `src/client/routes/updates.ts` (per-feed Refresh button)",
+        "Remove or guard any callers triggered by timers (`setInterval`, `setTimeout` for periodic sync), `visibilitychange`, `focus`, `online`, route changes, or SSE events",
+        "If a legitimate post-sync refresh exists (e.g. `State.refreshAfterSync` reacting to local-first DB sync completion), document it in a code comment as 'local-first DB sync, NOT server feed pull' so future readers do not confuse the two flows",
+        "After global Refresh Feeds completes successfully, `state.feedsWithUpdates` is cleared and `state.feedUpdateStatus` is set to `'synced'` in a `batch()` (defensive client-side update independent of the SSE `feed-updates-cleared` event)",
+        "Add a unit test in `test/state-refresh-audit.ts` that scans the client source (or imports) for unauthorized `refreshFeeds` / `refreshFeed` call sites and fails if any are found outside the two allowed files",
+        "Tests pass",
+        "Typecheck and lint pass",
+        "Verify in browser using dev-browser skill: leave the app idle for 60 seconds with the network tab open, confirm no `/api/feeds/refresh` or `/api/feeds/:id/refresh` requests fire without a click"
+      ],
+      "priority": 144,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-145",
+      "title": "Extend Dot component to support gray and blue colors",
+      "description": "As a developer, I need the `Dot` component to support the full color set used by the new sync-status indicator.",
+      "acceptanceCriteria": [
+        "`src/client/components/dot.ts` accepts `color?:'gray'|'blue'|'yellow'|'red'|'green'`",
+        "`gray` and `blue` styles added to `dot.css` using variables from `_variables.css`; if a suitable variable does not exist, add one (e.g. `--color-dot-gray`, `--color-dot-blue`) and reuse existing palette values where possible",
+        "Existing call sites compile unchanged (the new colors are additive; no breaking change to current consumers)",
+        "Typecheck passes",
+        "Lint passes (`npm run lint`)"
+      ],
+      "priority": 145,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-146",
+      "title": "Server returns per-feed update counts on bootstrap",
+      "description": "As a backend developer, I need the bootstrap/initial-data endpoint to return per-feed counts of pending items so the client can render the dot without an extra round trip.",
+      "acceptanceCriteria": [
+        "Bootstrap response includes `feedUpdateCounts:Record<string,number>` mapping feed ID to pending count",
+        "Counts are read from the server's already-cached state populated by the existing background fetch loop; the bootstrap handler does NOT trigger a live fetch of remote feeds",
+        "Counts are computed against the user's per-feed cursor",
+        "Response shape documented in the relevant API type / schema file",
+        "Unit test covers: no feeds, some feeds with 0 pending, some feeds with N pending",
+        "Anonymous users do not receive `feedUpdateCounts` in their bootstrap response (FR-11)",
+        "Tests pass",
+        "Typecheck passes",
+        "Lint passes"
+      ],
+      "priority": 146,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-147",
+      "title": "Add feedSyncStatus and feedUpdateCounts signals to AppState",
+      "description": "As a developer, I need a single signal that captures every state the header dot can be in, plus the per-feed counts, so the UI logic stays simple with one source of truth.",
+      "acceptanceCriteria": [
+        "`src/client/state.ts` adds `feedSyncStatus:Signal<'inactive'|'updates'|'syncing'|'error'|'synced'>` to `AppState`",
+        "`src/client/state.ts` adds `feedUpdateCounts:Signal<Record<string,number>>` to `AppState`",
+        "Default values before bootstrap: `feedSyncStatus = 'inactive'`, `feedUpdateCounts = {}`",
+        "Resolve overlap with existing `feedUpdateStatus:Signal<'synced'|'updates'>` and `feedsWithUpdates:Signal<string[]>` (state.ts:170-171, 201-202): either replace them with the new signals (updating all call sites) OR keep them as derived views over the new signals; document the choice in a code comment. There must be only one source of truth",
+        "All multi-signal writes use `batch()`",
+        "Typecheck passes",
+        "Lint passes"
+      ],
+      "priority": 147,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-148",
+      "title": "Hydrate sync status from the bootstrap response",
+      "description": "As a user, I want the header dot to be correct on first paint, so I never see a flash of the wrong color.",
+      "acceptanceCriteria": [
+        "Bootstrap hydration block in `src/client/state.ts` (around lines 1091-1095) reads `feedUpdateCounts` from the response and assigns it to the new signal",
+        "If the sum of counts is 0: set `feedSyncStatus = 'synced'`",
+        "If the sum of counts is > 0: set `feedSyncStatus = 'updates'`",
+        "If the bootstrap call fails: leave `feedSyncStatus = 'inactive'` (gray); show no error in the header (errors only come from explicit sync attempts)",
+        "All signal writes wrapped in `batch()`",
+        "Unit/integration test covers the three branches (empty counts, non-empty counts, bootstrap failure)",
+        "Tests pass",
+        "Typecheck passes",
+        "Lint passes"
+      ],
+      "priority": 148,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-149",
+      "title": "Header FeedStatus renders single Dot for all five sync states",
+      "description": "As a user, I want the header to show a single dot whose color tells me at a glance what the sync state is.",
+      "acceptanceCriteria": [
+        "`src/client/components/feed-status.ts` renders a single `Dot` whose color is derived from `feedSyncStatus`: inactive=gray, updates=blue, syncing=yellow, error=red, synced=green",
+        "When status is `'updates'`, the dot is followed by a numeric count equal to the sum of `feedUpdateCounts` values (e.g. `<dot> 3`)",
+        "When status is `'error'`, the dot is followed by short text such as `sync failed` and a `title=` attribute carrying the error message",
+        "Component has `role=\"status\"` and `aria-live=\"polite\"` so screen readers announce transitions",
+        "Anonymous users do not see the indicator (no dot rendered)",
+        "Only ONE global dot in the header (no per-feed dots — see Non-Goals)",
+        "Typecheck passes",
+        "Lint passes",
+        "Verify in browser using dev-browser skill: load app while signed in, confirm dot color matches state and count appears when status is 'updates'"
+      ],
+      "priority": 149,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-150",
+      "title": "Wire global Sync button to drive feedSyncStatus transitions",
+      "description": "As a user, I want one obvious button that pulls all feed updates and drives the header dot through syncing/synced/error states.",
+      "acceptanceCriteria": [
+        "Reuse the existing global Refresh Feeds button in `src/client/components/sidebar-footer.ts` — do NOT introduce a second button",
+        "Clicking the button transitions `feedSyncStatus` -> `'syncing'` (yellow dot) using `batch()`",
+        "Button uses `isSpinning` prop on the existing `Button` component while in flight to prevent double-click",
+        "Drive these transitions from inside the existing `State.refreshFeeds` action — do NOT create a parallel sync function",
+        "On success: clear `feedUpdateCounts` to `{}` and set `feedSyncStatus = 'synced'` (green dot) in a single `batch()`",
+        "On error: set `feedSyncStatus = 'error'` (red dot) and surface the error message via the header `title` attribute (and an existing toast/error region if one exists)",
+        "Audit confirms no automatic sync paths: no `setInterval`/`setTimeout` periodic sync, no `visibilitychange`/`focus`/`online` triggers, no route-change triggers, no SSE-driven sync",
+        "Typecheck passes",
+        "Lint passes",
+        "Verify in browser using dev-browser skill: click Sync, confirm dot turns yellow then green; with network offline confirm dot turns red and `title` shows error"
+      ],
+      "priority": 150,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-151",
+      "title": "Sticky green: synced state persists until new updates arrive",
+      "description": "As a user, I want a 'synced' indicator that stays put, so I can trust the header rather than having to remember when I last synced.",
+      "acceptanceCriteria": [
+        "After a successful sync, `feedSyncStatus` stays `'synced'` indefinitely — no timeout reverts it to `'inactive'`",
+        "The next time `feedUpdateCounts` becomes non-empty (next bootstrap reporting pending counts), `feedSyncStatus` flips to `'updates'`",
+        "If the user reloads the page and the bootstrap returns no pending counts, the header remains green (`'synced'`), NOT gray",
+        "If the user reloads and the bootstrap returns non-empty counts, the header shows blue (`'updates'`) with the count",
+        "Test covers: synced state survives across simulated idle period; reload-with-empty-counts produces green; reload-with-counts produces blue",
+        "Tests pass",
+        "Typecheck passes",
+        "Lint passes",
+        "Verify in browser using dev-browser skill: trigger a sync to green, reload the page, confirm header is still green when no new updates exist"
+      ],
+      "priority": 151,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-152",
+      "title": "Error state recovers cleanly on retry",
+      "description": "As a user, when a sync fails, I want to be able to retry and have the header recover correctly.",
+      "acceptanceCriteria": [
+        "Clicking the global Sync button while `feedSyncStatus === 'error'` re-attempts the sync and transitions to `'syncing'` (yellow)",
+        "After a successful retry, status moves to `'synced'` (green)",
+        "After a second consecutive failure, status returns to `'error'` (red) carrying the latest error message",
+        "Previous error message is REPLACED, not stacked (only the most recent error is exposed via `title`/error region)",
+        "Test covers the retry path: error -> syncing -> synced; and error -> syncing -> error with replaced message",
+        "Tests pass",
+        "Typecheck passes",
+        "Lint passes",
+        "Verify in browser using dev-browser skill: force a sync failure, click Sync again with network restored, confirm dot goes yellow then green"
+      ],
+      "priority": 152,
+      "passes": true,
+      "notes": ""
+    }
+  ]
+}
