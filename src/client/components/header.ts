@@ -6,6 +6,7 @@ import { type AppState } from '../state.js'
 import { State } from '../state.js'
 import { SyncStatus } from './sync-status.js'
 import { FeedStatus } from './feed-status.js'
+import { CacheStatus } from './cache-status.js'
 import { UserIcon } from './user-icon.js'
 import './header.css'
 
@@ -88,6 +89,7 @@ export const Header:FunctionComponent<{
 
             <div class="header header-right desktop-nav">
                 <${SyncStatus} />
+                <${CacheStatus} state=${state} />
                 <${FeedStatus} state=${state} />
                 ${user.value && html`
                     <button

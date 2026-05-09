@@ -33,7 +33,10 @@ import {
     fetchFullArticle as remoteFetchFullArticle,
     FetchFullThrottledError
 } from './db/remote-adapter.js'
-import { storeContent } from './local-first-settings.js'
+import {
+    storeContent,
+    defaultCacheMode
+} from './local-first-settings.js'
 import {
     getOutboxCount,
     PushSyncAuthError,
@@ -52,11 +55,22 @@ import {
 } from './routing.js'
 import {
     type BillingStatus,
+    billingStatus,
     setBillingStatus,
     setBillingError,
     setCheckoutInProgress,
     resetBilling
 } from './billing-status.js'
+import {
+    recomputeCacheStatus,
+    cacheStatus,
+    cacheActionInProgress,
+    cacheActionProgress,
+    cacheActionError,
+    type ItemToCache
+} from './cache-status-state.js'
+import { cacheItemImages } from './db/image-cache.js'
+import { feedPolicies } from './db/feed-cache-policy.js'
 const debug = Debug('rsss:state')
 
 const CHECKOUT_EMAIL_KEY = 'rsss_checkout_email'
@@ -491,6 +505,25 @@ export function State ():AppState {
 
     window.addEventListener('online', handleOnline)
     window.addEventListener('offline', handleOffline)
+
+    // Recompute the local-cache-health snapshot when relevant inputs
+    // change: paid status, store-content / default cache mode toggles,
+    // or per-feed policy edits. Item changes are handled inline by
+    // loadItems / fetchFullArticle / cacheUncachedItems.
+    effect(() => {
+        // Read each signal so the effect subscribes to changes.
+        const _deps = [
+            state.user.value,
+            state.selectedFeedId.value,
+            billingStatus.value,
+            isLocalFirstActive.value,
+            storeContent.value,
+            defaultCacheMode.value,
+            feedPolicies.value
+        ]
+        if (_deps.length === 0) return
+        recomputeCacheStatus(state).catch(() => {})
+    })
 
     state.cleanup = () => {
         window.removeEventListener('online', handleOnline)
@@ -1471,6 +1504,8 @@ State.loadItems = async function (
         }
         state.itemsLoading.value = false
     })
+
+    recomputeCacheStatus(state).catch(() => {})
 }
 
 /**
@@ -1676,6 +1711,81 @@ State.fetchFullArticle = async function (
         articleFetchingItemId.value = null
         articleFetchError.value = null
     })
+
+    recomputeCacheStatus(state).catch(() => {})
+}
+
+/**
+ * Top up the local cache for items in the current view that are missing
+ * body content or images according to their effective cache policy.
+ * Idempotent: skips items that are already fully cached.
+ */
+State.cacheUncachedItems = async function (
+    state:AppState
+):Promise<void> {
+    if (cacheActionInProgress.value) return
+    const did = state.user.value?.did
+    if (!did) return
+    const db = getLocalDb(did)
+    if (!db) return
+
+    const items:ItemToCache[] =
+        cacheStatus.value?.itemsToCache ?? []
+    if (items.length === 0) return
+
+    const total = items.length
+    let failures = 0
+
+    batch(() => {
+        cacheActionInProgress.value = true
+        cacheActionProgress.value = { current: 0, total }
+        cacheActionError.value = null
+    })
+
+    for (let i = 0; i < items.length; i++) {
+        const item = items[i]
+        cacheActionProgress.value = { current: i + 1, total }
+
+        try {
+            if (item.missingBody && storeContent.value) {
+                await State.fetchFullArticle(state, item.id)
+            }
+            if (item.missingImageUrls.length > 0) {
+                const policy = feedPolicies.value[item.feed_id] ?? null
+                const fresh = state.items.value.find(
+                    (it) => it.id === item.id
+                ) ?? null
+                const target = fresh ?
+                    {
+                        id: fresh.id,
+                        feed_id: fresh.feed_id,
+                        content: fresh.content ?? null,
+                        description: fresh.description ?? null
+                    } :
+                    {
+                        id: item.id,
+                        feed_id: item.feed_id,
+                        content: item.content,
+                        description: item.description
+                    }
+                await cacheItemImages(db, target, policy)
+            }
+        } catch (err) {
+            failures++
+            debug('cacheUncachedItems item error:', err)
+        }
+    }
+
+    batch(() => {
+        cacheActionInProgress.value = false
+        cacheActionProgress.value = null
+        if (failures > 0) {
+            cacheActionError.value =
+                "Some items couldn't be cached. Try again."
+        }
+    })
+
+    await recomputeCacheStatus(state)
 }
 
 /**

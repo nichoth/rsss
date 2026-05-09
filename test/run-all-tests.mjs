@@ -55,6 +55,11 @@ const commands = [
         '--loader:.wasm=dataurl',
         '| tapout'
     ].join(' '),
+    [
+        'esbuild ./test/cache-status.ts --bundle',
+        '--loader:.wasm=dataurl',
+        '| tapout'
+    ].join(' '),
     'esbuild ./test/local-first-settings.ts --bundle | tapout',
     [
         'esbuild ./test/session-record.ts --bundle --platform=node',
