@@ -124,7 +124,7 @@ export const ConfirmCloseRoute:FunctionComponent<{
             `}
 
             <p>
-                Your Bluesky account itself is not affected. RSSS
+                Your Bluesky account is not affected. RSSS
                 only deletes the data we store about your feeds and
                 reading history.
             </p>

@@ -34,7 +34,6 @@
 
         &.danger {
             border-color: var(--color-error);
-            border-left-width: 4px;
         }
 
         & p {
