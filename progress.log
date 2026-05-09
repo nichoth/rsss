@@ -1,5 +1,9 @@
 ## Codebase Patterns
 
+- Header cache status visibility is app-wide for authenticated, entitled
+  users with a cache snapshot. Do not gate it to feed-reader routes; settings,
+  about, add-feed, and future authenticated routes should use the same
+  indicator visibility rules.
 - `State.refreshFeeds` owns global feed refresh status transitions for the
   header dot: set `feedSyncStatus` to `syncing` before POSTing
   `/api/feeds/refresh`, clear `feedSyncError`, then set `synced` with empty
@@ -255,6 +259,27 @@ Thread: https://ampcode.com/threads/unknown
     `state.user.value` is set; online-event tests that need to own the sync
     window should let that startup cycle settle before installing a hanging
     `/api/sync` fetch stub.
+---
+
+## 2026-05-09 16:22 PDT - US-001
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Made the header cache indicator render on all
+  authenticated app routes.
+  - Removed the feed-reader-only route guard from `CacheStatus`.
+  - Deleted the now-unused `isFeedReaderRoute` helper.
+  - Added header component coverage for `/`, `/starred`, `/feed/1`,
+    `/settings`, `/about`, and `/add-feed`.
+- Files changed:
+  - `src/client/components/cache-status.ts`
+  - `test/header-component.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Header cache status should stay route-agnostic; authenticated,
+    entitled users with a cache snapshot should see it on every app route.
+  - The full `npm test` runner is the canonical browser bundle path for
+    `Header`; isolated `test/header-component.ts` runs can expose older
+    fixture assumptions that the full suite already initializes.
 ---
 ## 2026-04-28 18:44 PDT - US-120
 Thread: https://ampcode.com/threads/unknown

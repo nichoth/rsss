@@ -13,6 +13,10 @@ import {
     syncedAt
 } from '../src/client/db/sync-status.js'
 import { billingStatus } from '../src/client/billing-status.js'
+import {
+    cacheStatus,
+    resetCacheStatus
+} from '../src/client/cache-status-state.js'
 
 type FeedSyncStatus = 'inactive'|'updates'|'syncing'|'error'|'synced'
 
@@ -23,6 +27,7 @@ function nextTask ():Promise<void> {
 function headerState (
     user:{ did:string; handle:string; avatar?:string }|null = null,
     options:{
+        route?:string,
         feedSyncStatus?:FeedSyncStatus,
         feedUpdateCounts?:Record<string, number>,
         feedSyncError?:string|null
@@ -36,9 +41,12 @@ function headerState (
     )
 
     return {
-        route: signal('/'),
+        route: signal(options.route ?? '/'),
         user: signal(user),
         feedSyncStatus,
+        displayedFeedSyncStatus: computed<FeedSyncStatus>(() => (
+            feedSyncStatus.value
+        )),
         feedUpdateCounts,
         feedSyncError: signal<string|null>(
             options.feedSyncError ?? null
@@ -50,6 +58,51 @@ function headerState (
         ))
     } as unknown as AppState
 }
+
+test('Header cache status renders on authenticated app routes', t => {
+    const body = document.querySelector('body') as HTMLElement
+    const root = document.createElement('div')
+    body.appendChild(root)
+
+    const user = {
+        did: 'did:plc:test123',
+        handle: 'alice.bsky.social'
+    }
+
+    billingStatus.value = {
+        entitled: true,
+        planId: 'local-first',
+        status: 'active',
+        refreshedAt: Date.now(),
+        useLive: false
+    }
+    cacheStatus.value = {
+        uncachedCount: 0,
+        totalCount: 2,
+        itemsToCache: []
+    }
+
+    try {
+        for (const route of ['/', '/starred', '/feed/1', '/settings',
+            '/about', '/add-feed']) {
+            render(null, root)
+            render(html`<${Header} state=${headerState(user, {
+                route
+            })} />`, root)
+
+            const status = root.querySelector(
+                '.cache-status'
+            ) as HTMLElement|null
+
+            t.ok(status, `renders cache status on ${route}`)
+        }
+    } finally {
+        render(null, root)
+        root.remove()
+        resetCacheStatus()
+        billingStatus.value = null
+    }
+})
 
 test('Header sponsor iframes limit embed capabilities', t => {
     const body = document.querySelector('body') as HTMLElement

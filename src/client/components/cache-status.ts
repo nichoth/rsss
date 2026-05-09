@@ -12,12 +12,6 @@ import {
 import { Dot } from './dot.js'
 import './cache-status.css'
 
-function isFeedReaderRoute (route:string):boolean {
-    if (route === '/') return true
-    if (route === '/starred') return true
-    return route.startsWith('/feed/')
-}
-
 export const CacheStatus:FunctionComponent<{
     state:AppState
 }> = function ({ state }) {
@@ -72,7 +66,6 @@ export const CacheStatus:FunctionComponent<{
     if (!state.user.value) return null
     const billing = billingStatus.value
     if (!billing || !billing.entitled) return null
-    if (!isFeedReaderRoute(state.route.value)) return null
 
     const snapshot = cacheStatus.value
     if (snapshot === null) return null

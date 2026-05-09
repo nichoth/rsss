@@ -20,7 +20,7 @@
         "Verify in browser using dev-browser skill: indicator appears on `/settings` and `/about` in addition to feed reader routes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
