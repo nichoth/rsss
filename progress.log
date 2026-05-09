@@ -1,5 +1,9 @@
 ## Codebase Patterns
 
+- Cache status header visibility is gated by both local-first settings:
+  `syncSubscriptions` and `storeContent`. Component tests that expect the
+  indicator to render must opt both signals in, alongside an entitled user
+  and a non-null `cacheStatus` snapshot.
 - Header cache status visibility is app-wide for authenticated, entitled
   users with a cache snapshot. Do not gate it to feed-reader routes; settings,
   about, add-feed, and future authenticated routes should use the same
@@ -44,6 +48,29 @@
 - `State.loadFeeds` derives header feed sync status from canonical
   `feedUpdateCounts`; treat legacy `feedUpdateStatus` as compatibility data,
   not the client state hydration source.
+
+## 2026-05-09 16:25 PDT - US-002
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Hid the header cache status indicator when local
+  sync or article content caching is disabled.
+  - Added `syncSubscriptions` and `storeContent` to the `CacheStatus`
+    visibility gate.
+  - Added header component coverage showing the indicator disappears
+    immediately when either setting signal is toggled off.
+  - Updated existing route visibility coverage to opt into both settings.
+- Files changed:
+  - `src/client/components/cache-status.ts`
+  - `test/header-component.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Cache status render tests now need four visible-state prerequisites:
+    authenticated user, entitled billing status, a non-null cache snapshot,
+    and both local-first cache settings enabled.
+  - Reading Preact signals directly inside component gates is enough to
+    subscribe the header to settings toggles without adding a separate
+    effect.
+---
 
 ## 2026-05-02 14:14 PDT - US-152
 Thread: https://ampcode.com/threads/unknown

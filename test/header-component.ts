@@ -17,6 +17,10 @@ import {
     cacheStatus,
     resetCacheStatus
 } from '../src/client/cache-status-state.js'
+import {
+    storeContent,
+    syncSubscriptions
+} from '../src/client/local-first-settings.js'
 
 type FeedSyncStatus = 'inactive'|'updates'|'syncing'|'error'|'synced'
 
@@ -81,6 +85,8 @@ test('Header cache status renders on authenticated app routes', t => {
         totalCount: 2,
         itemsToCache: []
     }
+    syncSubscriptions.value = true
+    storeContent.value = true
 
     try {
         for (const route of ['/', '/starred', '/feed/1', '/settings',
@@ -101,8 +107,116 @@ test('Header cache status renders on authenticated app routes', t => {
         root.remove()
         resetCacheStatus()
         billingStatus.value = null
+        syncSubscriptions.value = false
+        storeContent.value = false
     }
 })
+
+test(
+    'Header cache status hides when sync subscriptions are disabled',
+    async t => {
+        const body = document.querySelector('body') as HTMLElement
+        const root = document.createElement('div')
+        body.appendChild(root)
+
+        const user = {
+            did: 'did:plc:test123',
+            handle: 'alice.bsky.social'
+        }
+
+        billingStatus.value = {
+            entitled: true,
+            planId: 'local-first',
+            status: 'active',
+            refreshedAt: Date.now(),
+            useLive: false
+        }
+        cacheStatus.value = {
+            uncachedCount: 0,
+            totalCount: 2,
+            itemsToCache: []
+        }
+        syncSubscriptions.value = true
+        storeContent.value = true
+
+        try {
+            render(html`<${Header} state=${headerState(user)} />`, root)
+
+            t.ok(
+                root.querySelector('.cache-status'),
+                'renders while sync subscriptions are enabled'
+            )
+
+            syncSubscriptions.value = false
+            await nextTask()
+
+            t.ok(
+                !root.querySelector('.cache-status'),
+                'hides after sync subscriptions are disabled'
+            )
+        } finally {
+            render(null, root)
+            root.remove()
+            resetCacheStatus()
+            billingStatus.value = null
+            syncSubscriptions.value = false
+            storeContent.value = false
+        }
+    }
+)
+
+test(
+    'Header cache status hides when article content caching is disabled',
+    async t => {
+        const body = document.querySelector('body') as HTMLElement
+        const root = document.createElement('div')
+        body.appendChild(root)
+
+        const user = {
+            did: 'did:plc:test123',
+            handle: 'alice.bsky.social'
+        }
+
+        billingStatus.value = {
+            entitled: true,
+            planId: 'local-first',
+            status: 'active',
+            refreshedAt: Date.now(),
+            useLive: false
+        }
+        cacheStatus.value = {
+            uncachedCount: 1,
+            totalCount: 2,
+            itemsToCache: []
+        }
+        syncSubscriptions.value = true
+        storeContent.value = true
+
+        try {
+            render(html`<${Header} state=${headerState(user)} />`, root)
+
+            t.ok(
+                root.querySelector('.cache-status'),
+                'renders while article content caching is enabled'
+            )
+
+            storeContent.value = false
+            await nextTask()
+
+            t.ok(
+                !root.querySelector('.cache-status'),
+                'hides after article content caching is disabled'
+            )
+        } finally {
+            render(null, root)
+            root.remove()
+            resetCacheStatus()
+            billingStatus.value = null
+            syncSubscriptions.value = false
+            storeContent.value = false
+        }
+    }
+)
 
 test('Header sponsor iframes limit embed capabilities', t => {
     const body = document.querySelector('body') as HTMLElement

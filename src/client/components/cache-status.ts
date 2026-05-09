@@ -4,6 +4,10 @@ import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
 import { State, type AppState } from '../state.js'
 import { billingStatus } from '../billing-status.js'
 import {
+    storeContent,
+    syncSubscriptions
+} from '../local-first-settings.js'
+import {
     cacheStatus,
     cacheActionInProgress,
     cacheActionProgress,
@@ -66,6 +70,8 @@ export const CacheStatus:FunctionComponent<{
     if (!state.user.value) return null
     const billing = billingStatus.value
     if (!billing || !billing.entitled) return null
+    if (!syncSubscriptions.value) return null
+    if (!storeContent.value) return null
 
     const snapshot = cacheStatus.value
     if (snapshot === null) return null

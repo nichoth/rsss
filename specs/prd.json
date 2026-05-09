@@ -39,7 +39,7 @@
         "Verify in browser using dev-browser skill: toggle off 'Sync subscriptions and read state to this device' → indicator disappears; toggle off 'Store article content locally' with sync on → indicator disappears"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
