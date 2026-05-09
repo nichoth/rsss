@@ -63,7 +63,7 @@
         "Verify in browser using dev-browser skill: with sync + article cache enabled and no items yet, header shows the gray 'No items yet' state, not green '100% cached'"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

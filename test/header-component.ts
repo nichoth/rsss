@@ -218,6 +218,65 @@ test(
     }
 )
 
+test('Header cache status shows neutral state when there are no items', t => {
+    const body = document.querySelector('body') as HTMLElement
+    const root = document.createElement('div')
+    body.appendChild(root)
+
+    const user = {
+        did: 'did:plc:test123',
+        handle: 'alice.bsky.social'
+    }
+
+    billingStatus.value = {
+        entitled: true,
+        planId: 'local-first',
+        status: 'active',
+        refreshedAt: Date.now(),
+        useLive: false
+    }
+    cacheStatus.value = {
+        uncachedCount: 0,
+        totalCount: 0,
+        itemsToCache: []
+    }
+    syncSubscriptions.value = true
+    storeContent.value = true
+
+    try {
+        render(html`<${Header} state=${headerState(user)} />`, root)
+
+        const status = root.querySelector(
+            '.cache-status'
+        ) as HTMLElement|null
+        const dot = root.querySelector('.cache-status svg.dot')
+
+        t.ok(status, 'renders cache status')
+        t.equal(
+            status?.getAttribute('aria-label'),
+            'Cache status: no items yet',
+            'uses neutral accessible label'
+        )
+        t.equal(
+            root.querySelector('.cache-status-legend')?.textContent,
+            'No items yet',
+            'renders neutral legend'
+        )
+        t.ok(dot?.classList.contains('gray'), 'uses gray dot')
+        t.ok(
+            !root.querySelector('.cache-status-toggle'),
+            'neutral state is not interactive'
+        )
+    } finally {
+        render(null, root)
+        root.remove()
+        resetCacheStatus()
+        billingStatus.value = null
+        syncSubscriptions.value = false
+        storeContent.value = false
+    }
+})
+
 test('Header sponsor iframes limit embed capabilities', t => {
     const body = document.querySelector('body') as HTMLElement
     const root = document.createElement('div')

@@ -67,7 +67,7 @@ export async function recomputeCacheStatus (state:{
     const db = getBootstrappedDb() ?? getLocalDb(did)
     if (!db || !isLocalFirstActive.value) {
         // Paid but no local DB / sync off: nothing locally to cache, so
-        // the indicator reads as "100% cached" rather than disappearing.
+        // callers render a neutral or hidden state instead of success.
         cacheStatus.value = EMPTY_SNAPSHOT
         return
     }

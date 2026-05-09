@@ -76,6 +76,19 @@ export const CacheStatus:FunctionComponent<{
     const snapshot = cacheStatus.value
     if (snapshot === null) return null
 
+    if (snapshot.totalCount === 0) {
+        return html`
+            <span
+                class="cache-status empty"
+                role="status"
+                aria-label="Cache status: no items yet"
+            >
+                <span class="cache-status-legend">No items yet</span>
+                <${Dot} color="gray" />
+            </span>
+        `
+    }
+
     if (snapshot.uncachedCount === 0) {
         return html`
             <span

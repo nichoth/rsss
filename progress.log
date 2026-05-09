@@ -4,6 +4,9 @@
   `syncSubscriptions` and `storeContent`. Component tests that expect the
   indicator to render must opt both signals in, alongside an entitled user
   and a non-null `cacheStatus` snapshot.
+- Empty cache snapshots with `totalCount === 0` render as the neutral
+  "No items yet" header state. Only snapshots with `totalCount > 0` and
+  `uncachedCount === 0` should render the green "100% cached" state.
 - Header cache status visibility is app-wide for authenticated, entitled
   users with a cache snapshot. Do not gate it to feed-reader routes; settings,
   about, add-feed, and future authenticated routes should use the same
@@ -48,6 +51,34 @@
 - `State.loadFeeds` derives header feed sync status from canonical
   `feedUpdateCounts`; treat legacy `feedUpdateStatus` as compatibility data,
   not the client state hydration source.
+
+## 2026-05-09 16:31 PDT - US-003
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added the neutral header cache state for empty
+  local cache snapshots.
+  - Split zero-item snapshots from fully cached snapshots in
+    `CacheStatus`.
+  - Rendered the empty state as gray "No items yet" status text with no
+    cache action button.
+  - Updated the empty snapshot comment so it no longer describes empty
+    local state as "100% cached".
+  - Added header component coverage for the neutral empty state.
+- Files changed:
+  - `src/client/components/cache-status.ts`
+  - `src/client/cache-status-state.ts`
+  - `test/header-component.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Cache status UI should check `totalCount` before `uncachedCount`; an
+    empty cache snapshot is neutral, not successful.
+  - The repo's focused browser component tests run through esbuild and
+    tapout, not `npx vitest`, because the Cloudflare Vite plugin rejects
+    Vitest's generated `resolve.external` config.
+  - Browser plugin verification was unavailable in this session because
+    the Node REPL browser runtime was not exposed and Computer Use was
+    blocked by macOS Apple Events permission.
+---
 
 ## 2026-05-09 16:25 PDT - US-002
 Thread: https://ampcode.com/threads/unknown
