@@ -107,38 +107,6 @@
         font-size: 1rem;
     }
 
-    & .sync-local-data {
-        margin-top: 1.5rem;
-        padding-top: 1rem;
-        border-top: 1px solid var(--color-border-subtle);
-        display: flex;
-        align-items: center;
-        gap: 1rem;
-
-        & .sync-desc {
-            margin: 0;
-            color: var(--color-text-secondary);
-        }
-    }
-}
-
-.btn-sync {
-    background-color: transparent;
-    color: var(--color-primary);
-    border: 1px solid var(--color-primary);
-    padding: 0.4rem 0.8rem;
-    cursor: pointer;
-    flex-shrink: 0;
-
-    &:hover {
-        background-color: var(--color-primary);
-        color: var(--color-surface);
-    }
-
-    &:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
 }
 
 .btn-retry-bootstrap {

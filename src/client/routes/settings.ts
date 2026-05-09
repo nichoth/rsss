@@ -38,8 +38,6 @@ import {
     purgeStoredContent,
     clearFeedCache
 } from '../db/index.js'
-import { runSyncCycle } from '../db/sync-cycle.js'
-import { syncStatus, syncError } from '../db/sync-status.js'
 import {
     feedPolicies,
     loadFeedPolicies,
@@ -373,18 +371,6 @@ export const SettingsRoute:FunctionComponent<{
         }
     }
 
-    async function handleSync () {
-        const did = state.user.value?.did
-        if (!did) return
-        const db = getBootstrappedDb() ?? getLocalDb(did)
-        if (!db) return
-        try {
-            await runSyncCycle(db)
-        } catch {
-            // runSyncCycle surfaces failures via the syncError signal.
-        }
-    }
-
     async function handleContentChange (ev:Event) {
         const target = ev.target as HTMLInputElement
         const checked = target.checked
@@ -535,26 +521,6 @@ export const SettingsRoute:FunctionComponent<{
                 <p class="bootstrap-error">
                     ${dbError.message}
                 </p>
-            `}
-            ${syncSubscriptions.value && !inProgress && !dbError && html`
-                <div class="sync-local-data">
-                    <button
-                        class="btn-sync"
-                        onClick=${handleSync}
-                        disabled=${syncStatus.value === 'syncing' ||
-                            undefined}
-                    >
-                        ${syncStatus.value === 'syncing' ?
-                            'Syncing...' :
-                            'Sync'}
-                    </button>
-                    <p class="sync-desc">
-                        Pull updates from the server.
-                    </p>
-                </div>
-                ${syncError.value && html`
-                    <p class="bootstrap-error">${syncError.value}</p>
-                `}
             `}
         </section>
 

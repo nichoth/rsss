@@ -81,6 +81,9 @@ export const Header:FunctionComponent<{
                 >
                     About
                 </a>
+
+                <a href="/settings" class="header-links${
+                    route.value === '/settings' ? ' active' : ''}">Settings</a>
             </nav>
 
             <div class="header header-right desktop-nav">
