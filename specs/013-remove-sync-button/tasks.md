@@ -67,7 +67,7 @@ US1 acceptance scenarios AS-1, AS-2.)
 
 ### Implementation for User Story 1
 
-- [ ] T001 [US1] Remove the `<div class="sync-local-data">…</div>`
+- [X] T001 [US1] Remove the `<div class="sync-local-data">…</div>`
   JSX block (currently lines 540-554) and the immediately-following
   `${syncError.value && html`<p class="bootstrap-error">…</p>`}`
   fragment (currently lines 555-557) from
@@ -75,11 +75,11 @@ US1 acceptance scenarios AS-1, AS-2.)
   Storage `<section class="local-first-section">` and its two
   toggles untouched. (FR-001, FR-002, FR-003)
 
-- [ ] T002 [US1] Remove the `handleSync` async function (currently
+- [X] T002 [US1] Remove the `handleSync` async function (currently
   lines 376-386) from `src/client/routes/settings.ts`. After T001
   it has no remaining caller. (FR-001 follow-up)
 
-- [ ] T003 [US1] Remove the now-dead imports from
+- [X] T003 [US1] Remove the now-dead imports from
   `src/client/routes/settings.ts`:
   `import { runSyncCycle } from '../db/sync-cycle.js'` (line 41)
   and `import { syncStatus, syncError } from
@@ -89,7 +89,7 @@ US1 acceptance scenarios AS-1, AS-2.)
   `sync-status.ts`, or the `<sync-status>` component — those remain
   in use by `State.sync()` and the global indicator (research R3).
 
-- [ ] T004 [US1] Remove the nested `& .sync-local-data { … }` rule
+- [X] T004 [US1] Remove the nested `& .sync-local-data { … }` rule
   (currently lines ~110-122, including its inner `& .sync-desc`)
   inside `.local-first-section` in
   `src/client/routes/settings.css`. Leave every other rule in that
@@ -97,13 +97,13 @@ US1 acceptance scenarios AS-1, AS-2.)
   surfacing — do NOT remove it). (FR-001, plan §"CSS unrelated to
   the current task MUST NOT be modified")
 
-- [ ] T005 [US1] Remove the top-level `.btn-sync { … }` rule
+- [X] T005 [US1] Remove the top-level `.btn-sync { … }` rule
   (currently lines ~125-142) from
   `src/client/routes/settings.css`. Confirm via grep that no other
   selector or template still references `.btn-sync` before
   deleting. (FR-001)
 
-- [ ] T006 [US1] Run `npm run lint` and TypeScript build
+- [X] T006 [US1] Run `npm run lint` and TypeScript build
   (`npm run build` or the configured type-check) on the modified
   tree. Resolve any "declared but never read" / unused-import
   errors that surface — they should already be eliminated by T003,
@@ -133,7 +133,7 @@ acceptance scenarios AS-1, AS-2, AS-3.)
 > any of these surfaces, so the work here is to confirm — with the
 > running app — that nothing regressed.
 
-- [ ] T007 [US2] Run `npm test` on the modified tree to confirm
+- [X] T007 [US2] Run `npm test` on the modified tree to confirm
   existing test suites (notably `test/settings-route.ts`,
   `test/local-first-settings.ts`, `test/sync-cycle.ts`) still pass.
   Per research R4, no test edits are expected; if any test now
@@ -182,7 +182,7 @@ gone, neighboring controls are intact, and the console is clean.
 
 **Purpose**: Final verification gates before merging.
 
-- [ ] T013 Re-run `npm test && npm run lint` end-to-end and capture
+- [X] T013 Re-run `npm test && npm run lint` end-to-end and capture
   the green output. (Constitution "Local verification" gate.)
 
 - [ ] T014 Execute the remaining `quickstart.md` steps not already
@@ -192,7 +192,7 @@ gone, neighboring controls are intact, and the console is clean.
   toggle off), Step 8 (discoverability — a fresh user finds
   "Refresh feeds" within 10 seconds). (SC-001, SC-004)
 
-- [ ] T015 Final diff audit: confirm the change set is limited to
+- [X] T015 Final diff audit: confirm the change set is limited to
   `src/client/routes/settings.ts`, `src/client/routes/settings.css`,
   and `specs/013-remove-sync-button/`. No other files modified. No
   new files created in `src/`. (plan §"Structure Decision",
