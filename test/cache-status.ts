@@ -1,10 +1,16 @@
 import { test } from '@substrate-system/tapzero'
+import { batch, computed, signal } from '@preact/signals'
+import { html } from 'htm/preact/index.js'
+import { render } from 'preact'
 // @ts-expect-error -- no type declarations for .wasm imports
 import wasmUrl from '@sqlite.org/sqlite-wasm/sqlite3.wasm'
 import {
     openLocalDb,
     setTestMode
 } from '../src/client/db/sqlite-init.js'
+import { type AppState } from '../src/client/state.js'
+import { Header } from '../src/client/components/header.js'
+import { billingStatus } from '../src/client/billing-status.js'
 import { computeCacheStatus } from '../src/client/db/cache-status.js'
 import {
     feedPolicies,
@@ -12,11 +18,62 @@ import {
 } from '../src/client/db/feed-cache-policy.js'
 import {
     storeContent,
+    syncSubscriptions,
     defaultCacheMode
 } from '../src/client/local-first-settings.js'
 import { recordCachedImage } from '../src/client/db/cached-images.js'
+import {
+    cacheStatus,
+    resetCacheStatus,
+    type CacheStatusSnapshot
+} from '../src/client/cache-status-state.js'
 
 setTestMode(true, wasmUrl as string)
+
+const USER = {
+    did: 'did:plc:test123',
+    handle: 'alice.bsky.social'
+}
+
+function nextTask ():Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, 0))
+}
+
+function headerState (
+    route:string = '/'
+):AppState {
+    return {
+        route: signal(route),
+        user: signal(USER),
+        feedSyncStatus: signal('inactive'),
+        displayedFeedSyncStatus: computed(() => 'inactive'),
+        feedUpdateCounts: signal({}),
+        feedSyncError: signal(null),
+        feedUpdateStatus: computed(() => 'synced')
+    } as unknown as AppState
+}
+
+function resetHeaderCacheState ():void {
+    resetCacheStatus()
+    billingStatus.value = null
+    syncSubscriptions.value = false
+    storeContent.value = false
+}
+
+function setVisibleCacheState (snapshot:CacheStatusSnapshot):void {
+    batch(() => {
+        billingStatus.value = {
+            entitled: true,
+            planId: 'local-first',
+            status: 'active',
+            refreshedAt: Date.now(),
+            useLive: false
+        }
+        syncSubscriptions.value = true
+        storeContent.value = true
+        cacheStatus.value = snapshot
+    })
+}
 
 function seedFeed (db:Awaited<ReturnType<typeof openLocalDb>>):void {
     db.exec(`
@@ -56,6 +113,211 @@ function insertItem (
     })
 }
 
+test(
+    'cache status header hides when sync subscriptions are disabled',
+    async t => {
+        const root = document.createElement('div')
+        document.body.appendChild(root)
+
+        setVisibleCacheState({
+            totalCount: 2,
+            uncachedCount: 0,
+            itemsToCache: []
+        })
+
+        try {
+            render(html`<${Header} state=${headerState()} />`, root)
+            t.ok(
+                root.querySelector('.cache-status'),
+                'renders while sync subscriptions are enabled'
+            )
+
+            syncSubscriptions.value = false
+            await nextTask()
+
+            t.ok(
+                !root.querySelector('.cache-status'),
+                'hides after sync subscriptions are disabled'
+            )
+        } finally {
+            render(null, root)
+            root.remove()
+            resetHeaderCacheState()
+        }
+    }
+)
+
+test(
+    'cache status header hides when article caching is disabled',
+    async t => {
+        const root = document.createElement('div')
+        document.body.appendChild(root)
+
+        setVisibleCacheState({
+            totalCount: 2,
+            uncachedCount: 1,
+            itemsToCache: []
+        })
+
+        try {
+            render(html`<${Header} state=${headerState()} />`, root)
+            t.ok(
+                root.querySelector('.cache-status'),
+                'renders while article caching is enabled'
+            )
+
+            storeContent.value = false
+            await nextTask()
+
+            t.ok(
+                !root.querySelector('.cache-status'),
+                'hides after article caching is disabled'
+            )
+        } finally {
+            render(null, root)
+            root.remove()
+            resetHeaderCacheState()
+        }
+    }
+)
+
+test(
+    'cache status header shows neutral empty state for zero items',
+    t => {
+        const root = document.createElement('div')
+        document.body.appendChild(root)
+
+        setVisibleCacheState({
+            totalCount: 0,
+            uncachedCount: 0,
+            itemsToCache: []
+        })
+
+        try {
+            render(html`<${Header} state=${headerState()} />`, root)
+
+            const status = root.querySelector(
+                '.cache-status'
+            ) as HTMLElement|null
+            const dot = root.querySelector('.cache-status svg.dot')
+
+            t.equal(
+                status?.getAttribute('aria-label'),
+                'Cache status: no items yet',
+                'uses neutral accessible label'
+            )
+            t.equal(
+                root.querySelector('.cache-status-legend')?.textContent,
+                'No items yet',
+                'renders neutral legend'
+            )
+            t.ok(dot?.classList.contains('gray'), 'uses gray dot')
+            t.ok(
+                !root.querySelector('.cache-status-toggle'),
+                'neutral state is not interactive'
+            )
+        } finally {
+            render(null, root)
+            root.remove()
+            resetHeaderCacheState()
+        }
+    }
+)
+
+test(
+    'cache status header renders on settings and about routes',
+    t => {
+        const root = document.createElement('div')
+        document.body.appendChild(root)
+
+        setVisibleCacheState({
+            totalCount: 2,
+            uncachedCount: 0,
+            itemsToCache: []
+        })
+
+        try {
+            for (const route of ['/settings', '/about']) {
+                render(null, root)
+                render(
+                    html`<${Header} state=${headerState(route)} />`,
+                    root
+                )
+
+                t.ok(
+                    root.querySelector('.cache-status'),
+                    `renders cache status on ${route}`
+                )
+            }
+        } finally {
+            render(null, root)
+            root.remove()
+            resetHeaderCacheState()
+        }
+    }
+)
+
+test(
+    'cache status header preserves uncached and fully cached states',
+    t => {
+        const root = document.createElement('div')
+        document.body.appendChild(root)
+
+        const cases:Array<{
+            name:string
+            snapshot:CacheStatusSnapshot
+            legend:string
+            interactive:boolean
+        }> = [
+            {
+                name: 'uncached',
+                snapshot: {
+                    totalCount: 3,
+                    uncachedCount: 2,
+                    itemsToCache: []
+                },
+                legend: '2 uncached',
+                interactive: true
+            },
+            {
+                name: 'fully cached',
+                snapshot: {
+                    totalCount: 3,
+                    uncachedCount: 0,
+                    itemsToCache: []
+                },
+                legend: '100% cached',
+                interactive: false
+            }
+        ]
+
+        try {
+            for (const item of cases) {
+                render(null, root)
+                resetHeaderCacheState()
+                setVisibleCacheState(item.snapshot)
+
+                render(html`<${Header} state=${headerState()} />`, root)
+
+                t.equal(
+                    root.querySelector('.cache-status-legend')?.textContent,
+                    item.legend,
+                    `${item.name}: renders expected legend`
+                )
+                t.equal(
+                    Boolean(root.querySelector('.cache-status-toggle')),
+                    item.interactive,
+                    `${item.name}: interaction state is preserved`
+                )
+            }
+        } finally {
+            render(null, root)
+            root.remove()
+            resetHeaderCacheState()
+        }
+    }
+)
+
 test('computeCacheStatus: empty DB returns zero counts', async (t) => {
     _resetFeedPolicies()
     storeContent.value = true
@@ -73,7 +335,10 @@ test('computeCacheStatus: empty DB returns zero counts', async (t) => {
 })
 
 test(
-    'computeCacheStatus: text mode + storeContent=true: items with body are cached',
+    [
+        'computeCacheStatus: text mode + storeContent=true:',
+        'items with body are cached'
+    ].join(' '),
     async (t) => {
         _resetFeedPolicies()
         storeContent.value = true
@@ -103,7 +368,10 @@ test(
 )
 
 test(
-    'computeCacheStatus: text mode + storeContent=true: items with no body are uncached',
+    [
+        'computeCacheStatus: text mode + storeContent=true:',
+        'items with no body are uncached'
+    ].join(' '),
     async (t) => {
         _resetFeedPolicies()
         storeContent.value = true
@@ -140,7 +408,10 @@ test(
 )
 
 test(
-    'computeCacheStatus: storeContent=false: missing body does NOT count as uncached',
+    [
+        'computeCacheStatus: storeContent=false:',
+        'missing body does NOT count as uncached'
+    ].join(' '),
     async (t) => {
         _resetFeedPolicies()
         storeContent.value = false
@@ -170,7 +441,10 @@ test(
 )
 
 test(
-    'computeCacheStatus: text_images mode: items with uncached images are uncached',
+    [
+        'computeCacheStatus: text_images mode:',
+        'items with uncached images are uncached'
+    ].join(' '),
     async (t) => {
         _resetFeedPolicies()
         storeContent.value = true

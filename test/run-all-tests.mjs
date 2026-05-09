@@ -57,6 +57,7 @@ const commands = [
     ].join(' '),
     [
         'esbuild ./test/cache-status.ts --bundle',
+        '--loader:.css=text',
         '--loader:.wasm=dataurl',
         '| tapout'
     ].join(' '),

@@ -58,6 +58,31 @@
   `feedUpdateCounts`; treat legacy `feedUpdateStatus` as compatibility data,
   not the client state hydration source.
 
+## 2026-05-09 16:43 PDT - US-005
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added focused tests for the new header cache
+  visibility and empty-state rules in `test/cache-status.ts`.
+  - Covered disabled sync, disabled article caching, neutral empty state,
+    settings/about route visibility, and existing uncached/fully cached
+    states.
+  - Added a focused cache-status test runner so the file can bundle both
+    component CSS and SQLite WASM fixtures.
+- Files changed:
+  - `test/cache-status.ts`
+  - `test/run-cache-status.mjs`
+  - `test/run-all-tests.mjs`
+  - `package.json`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `test/cache-status.ts` now mixes SQLite cache-status coverage and
+    header cache-status component coverage, so its focused runner needs
+    both `.css=text` and `.wasm=dataurl` esbuild loaders.
+  - Existing header cache-status tests in `test/header-component.ts` are
+    broader integration coverage; `test/cache-status.ts` now owns the
+    focused regression cases requested by the cache-status PRD.
+---
+
 ## 2026-05-09 16:31 PDT - US-003
 Thread: https://ampcode.com/threads/unknown
 - What was implemented: Added the neutral header cache state for empty
