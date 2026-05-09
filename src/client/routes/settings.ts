@@ -407,10 +407,8 @@ export const SettingsRoute:FunctionComponent<{
             <h2>Subscription</h2>
             ${isEntitled ? html`
                 <p>
-                    You're on the${NBSP}
-                    <strong>${planLabel}</strong> plan. Your feeds and
-                    read state are stored on each device and sync
-                    automatically.
+                    You're on the <strong>${planLabel}</strong> plan.
+                    Your feeds can be stored on each device for offline reading.
                 </p>
                 <button
                     class="btn-manage"
@@ -530,7 +528,7 @@ export const SettingsRoute:FunctionComponent<{
                 Total storage used: ${formatBytes(totalStorageBytes.value)}
             </p>
             <p class="section-desc">
-                These defaults apply to feeds with no override.
+                These are the defaults. They can be overridden per-feed.
             </p>
             <div class="cache-setting">
                 <fieldset class="cache-mode-group">

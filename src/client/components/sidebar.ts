@@ -164,6 +164,8 @@ export const Sidebar:FunctionComponent<{
                             `/feed/${feedPath}`
                         const feedUnread = counts.value
                             .perFeed[String(feed.id)] ?? 0
+                        const pending = state.feedUpdateCounts
+                            .value[String(feed.id)] ?? 0
                         return html`
                             <div
                                 class="sidebar-item feed-item ${
@@ -178,7 +180,9 @@ export const Sidebar:FunctionComponent<{
                                     class="feed-select"
                                     href="/feed/${feedPath}"
                                 >
-                                    ${feed.title || feed.url}
+                                    ${pending > 0 ?
+                                        `(${pending}) ` :
+                                        ''}${feed.title || feed.url}
                                 </a>
 
                             <div class="item-controls">

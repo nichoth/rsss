@@ -12,7 +12,7 @@ import { ItemRow } from '../components/item-row.js'
 import { Sidebar } from '../components/sidebar.js'
 import { CacheSettings } from '../components/cache-settings.js'
 import Debug from '@substrate-system/debug'
-const debug = Debug('rsss:view')
+const debug = Debug('rsss:view:feed-reader')
 
 /**
  * This is the home route.
@@ -32,7 +32,7 @@ export const FeedReader:FunctionComponent<{
         pageSize,
     } = state
 
-    debug('state.feeds', state.feeds.value)
+    debug('rendering feed reader...', feeds)
 
     // Extract feed URL from splats (everything after /feed/)
     const feedUrl = useMemo(() => splats.join('/'), [splats.join('/')])
