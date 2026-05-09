@@ -14,6 +14,7 @@
     --color-warning-bg-hover: #fef3c7;
     --color-error: #dc2626;
     --color-placeholder: #dcdcdc;
+    --color-placeholder-highlight: #ececec;
     --color-success: #16a34a;
     --color-dot-border: var(--color-border);
     --color-dot-gray: var(--color-placeholder);

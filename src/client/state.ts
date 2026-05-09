@@ -199,6 +199,10 @@ export type AppState = {
     pageSize:Signal<number>,
     selectedFeedId:Signal<number|null>,
     isAuthenticated:Signal<boolean>,
+    // Flips true once after the first refreshAfterSync resolves and
+    // never flips back. Used to gate the initial-load skeleton; per-
+    // section *Loading flags drive subsequent refreshes.
+    initialLoadComplete:Signal<boolean>,
     cleanup:() => void
 }
 
@@ -263,6 +267,7 @@ export function State ():AppState {
         showStarredOnly: signal(false),
         pageSize: signal(DEFAULT_PAGE_SIZE),
         selectedFeedId: signal<number|null>(null),
+        initialLoadComplete: signal<boolean>(false),
         cleanup: () => {},
     }
 
@@ -523,22 +528,28 @@ State.refreshAfterSync = async function (
 ):Promise<void> {
     const route = state.route.value
 
-    await Promise.all([
-        State.loadFeeds(state),
-        State.loadFeedStatus(state),
-        State.loadItems(state),
-        State.loadCounts(state)
-    ])
+    try {
+        await Promise.all([
+            State.loadFeeds(state),
+            State.loadFeedStatus(state),
+            State.loadItems(state),
+            State.loadCounts(state)
+        ])
 
-    if (!isItemRoute(route)) return
+        if (!isItemRoute(route)) return
 
-    const item = await State.loadItemByRoute(state, route)
-    if (state.route.value !== route) return
+        const item = await State.loadItemByRoute(state, route)
+        if (state.route.value !== route) return
 
-    batch(() => {
-        state.routeItem.value = item
-        state.routeItemLoading.value = false
-    })
+        batch(() => {
+            state.routeItem.value = item
+            state.routeItemLoading.value = false
+        })
+    } finally {
+        if (!state.initialLoadComplete.value) {
+            state.initialLoadComplete.value = true
+        }
+    }
 }
 
 function buildItemOptions (state:AppState):{

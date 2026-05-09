@@ -2,9 +2,12 @@ import { html } from 'htm/preact'
 import { type FunctionComponent, render } from 'preact'
 import { useComputed } from '@preact/signals'
 import { State, type AppState } from './state.js'
+import { isItemRoute } from './routing.js'
 import Router from './routes/index.js'
 import { NotFound } from './not-found.js'
 import { Header } from './components/header.js'
+import { PageSkeleton } from './components/page-skeleton.js'
+import { ItemSkeleton } from './components/item-skeleton.js'
 import '@substrate-system/details-summary'
 import './style.css'
 // import Debug from '@substrate-system/debug'
@@ -38,27 +41,33 @@ if (import.meta.env.DEV || import.meta.env.MODE === 'staging') {
 export const App:FunctionComponent<{
     state:AppState
 }> = function App ({ state }) {
-    const authLoading = useComputed(() => state.authLoading.value)
+    const pageReady = useComputed(() => (
+        !state.authLoading.value &&
+        (state.user.value === null || state.initialLoadComplete.value)
+    ))
+
+    const route = useComputed(() => state.route.value)
 
     const match = useComputed(() => {
-        return router.match(state.route.value)
+        return router.match(route.value)
     })
 
     if (!match.value || !match.value.action) {
         return html`<${NotFound} />`
     }
 
-    // Loading state
-    if (authLoading.value) {
-        return html`
-            <div class="loading-screen">
-                <div class="loading-spinner"></div>
-                <p>Loading...</p>
-            </div>
-        `
+    if (!pageReady.value) {
+        if (isItemRoute(route.value)) {
+            return html`<${ItemSkeleton} state=${state} />`
+        }
+        if (route.value === '/' || route.value.startsWith('/feed/')) {
+            return html`<${PageSkeleton} state=${state} />`
+        }
+        // Other routes (login, about, settings, etc.) don't depend on
+        // feeds/items; render them normally even before pageReady.
     }
 
-    const ChildNode = match.value.action(match.value, state.route.value)
+    const ChildNode = match.value.action(match.value, route.value)
     const { params, splats } = match.value
     if (!ChildNode) return html`<${NotFound} />`
 
