@@ -1,7 +1,7 @@
 {
   "project": "RSSS",
-  "branchName": "ralph/cache-status-indicator-fixes",
-  "description": "Cache Status Indicator Fixes - Make the header cache indicator render on every authenticated route, hide when local-first sync or article caching is off, and show a neutral 'No items yet' state instead of a misleading green '100% cached' when there is nothing to cache. Eliminates the contradiction between the header indicator and the /settings cache section.",
+  "branchName": "ralph/lazy-blurhash-html",
+  "description": "Lazy Per-User BlurHash HTML - Generate per-user index.html on first request with first-page items and blurhash strings embedded as a JSON bootstrap, cached in KV keyed by a DO-tracked feed_version. Cache invalidates via version bumps when ingest writes new items or new blurhash data. Includes prior cache-indicator and blurhash-infrastructure work.",
   "userStories": [
     {
       "id": "US-001",
@@ -238,6 +238,207 @@
       ],
       "priority": 12,
       "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Add user_state.feed_version counter to per-user DO SQLite",
+      "description": "As a developer, I need a single-row counter table in each user's DO SQLite so the worker can detect when feed contents have changed and invalidate the cached HTML.",
+      "acceptanceCriteria": [
+        "Append `USER_STATE_SQL` export to `src/shared/schema.ts` after `DEAD_LETTER_OUTBOX_SQL`",
+        "`USER_STATE_SQL` defines `user_state` table with `id INTEGER PRIMARY KEY CHECK (id = 1)` and `feed_version INTEGER NOT NULL DEFAULT 0`",
+        "`USER_STATE_SQL` includes `INSERT OR IGNORE INTO user_state (id, feed_version) VALUES (1, 0)`",
+        "Import `USER_STATE_SQL` in `src/server/durable-objects/index.ts` alongside other schema imports",
+        "Call `this.sql.exec(USER_STATE_SQL)` in DO init block after `DEAD_LETTER_OUTBOX_SQL` exec",
+        "Schema applies cleanly on a fresh DO (no rows yet) and on an existing DO (table created idempotently)",
+        "Typecheck passes",
+        "Lint passes"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Add bumpFeedVersion and getFeedVersion DO helpers",
+      "description": "As a developer, I need private helpers on `UserDO` to read and atomically increment `feed_version` so write paths can bump the counter and the worker can read the current version.",
+      "acceptanceCriteria": [
+        "`bumpFeedVersion()` private method on `UserDO` runs `UPDATE user_state SET feed_version = feed_version + 1 WHERE id = 1 RETURNING feed_version` and returns the new value (or 0 on null)",
+        "`getFeedVersion()` private method on `UserDO` runs `SELECT feed_version FROM user_state WHERE id = 1` and returns the value (or 0 on null)",
+        "Both helpers are placed near other private helpers like `rowsWritten`",
+        "Both helpers use the existing `this.sql.exec(...).one()` pattern",
+        "Typecheck passes",
+        "Lint passes"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "Bump feed_version at the three write sites",
+      "description": "As a developer, I need each write site that changes the user's feed contents or blurhash data to bump `feed_version` so the cached HTML is invalidated.",
+      "acceptanceCriteria": [
+        "After the new-items insert loop in `src/server/durable-objects/index.ts` (~line 1602-1617): call `this.bumpFeedVersion()` once if `newItems.length > 0`",
+        "Inside `updateBlurhashFromCacheOrQueue` (~line 1791-1823): call `this.bumpFeedVersion()` after the `UPDATE items SET blurhash = COALESCE(...)` exec, before the existing `return`",
+        "Inside `POST /internal/blurhash/items/:id` handler (~line 617-649): call `this.bumpFeedVersion()` after the `UPDATE items SET blurhash = ?, ...` exec, before the 204 response",
+        "Bumps are unconditional within the `if (newItems.length > 0)` guard for the insert path",
+        "Typecheck passes",
+        "Lint passes"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "Add /internal/feed-version and /internal/lazy-html-data DO endpoints",
+      "description": "As a developer, I need two internal endpoints on the DO so the worker can read the current `feed_version` cheaply and fetch the version + first-page items in one round-trip on cache miss.",
+      "acceptanceCriteria": [
+        "`GET /internal/feed-version` returns `{ version: number }` JSON via `c.json()`, value from `this.getFeedVersion()`",
+        "`GET /internal/lazy-html-data` returns `{ version: number, items: Item[] }` JSON in a single response (no torn read)",
+        "`/internal/lazy-html-data` reads version via `getFeedVersion()` first, then queries items with the existing `ITEM_COLUMNS` constant and the same join shape used by the existing `/items` handler",
+        "Items query uses `ORDER BY items.pub_date DESC, items.id DESC LIMIT 50`",
+        "Both endpoints registered next to the existing `/internal/blurhash/items/:id` route in the DO Hono app",
+        "Typecheck passes",
+        "Lint passes"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-017",
+      "title": "Add lazy-html generator with safe JSON bootstrap injection",
+      "description": "As a developer, I need a pure HTML generator module with cache-key, JSON serializer, and shell-injection helpers, plus tests, so the lazy-html handler can be built on a fully unit-tested foundation.",
+      "acceptanceCriteria": [
+        "Create `src/server/lazy-html.ts` exporting `buildLazyHtmlCacheKey(did, version)`, `serializeInitialFeed(payload)`, `injectInitialFeed(html, payload)`, and `InitialFeedPayload` interface",
+        "`buildLazyHtmlCacheKey` returns `html:${did}:${version}` (deterministic, version-keyed)",
+        "`serializeInitialFeed` returns `JSON.stringify(payload).replace(/</g, '\\\\u003c')` so `</script>` cannot break out",
+        "`injectInitialFeed` inserts `<script id=\"initial-feed\" type=\"application/json\">{json}</script>` before `</head>`; returns input unchanged when `</head>` is absent",
+        "`InitialFeedPayload` has `version:number`, `items:Item[]`, `has_more:boolean`",
+        "Create `test/lazy-html.ts` with tapzero tests covering: cache-key determinism + version-keying, serialize round-trip via JSON.parse, `<` escaping prevents script-tag breakout, injectInitialFeed inserts a parseable bootstrap before `</head>`, idempotent when `</head>` missing",
+        "Add `test:lazy-html` script to `package.json` using `esbuild ./test/lazy-html.ts --bundle | tapout`",
+        "`npm run test:lazy-html` passes (5 tests)",
+        "Typecheck passes",
+        "Lint passes",
+        "Tests parse JSON out of the injected tag rather than asserting on raw HTML text shapes (per project test-brittleness guidance)"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-018",
+      "title": "Provision HTML_KV namespace binding in wrangler config",
+      "description": "As a developer, I need an `HTML_KV` Workers KV namespace bound to the worker so the lazy-html handler can cache rendered shells per (did, version).",
+      "acceptanceCriteria": [
+        "`HTML_KV` entry added to `kv_namespaces` array in `wrangler.jsonc` next to `BLURHASH_KV`",
+        "Both `id` and `preview_id` populated with values from `npx wrangler kv namespace create HTML_KV` and `--preview`",
+        "`worker-configuration.d.ts` regenerated via `npx wrangler types` (or hand-edited) so `Env` includes `HTML_KV: KVNamespace`",
+        "Typecheck passes",
+        "Lint passes"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-019",
+      "title": "Add lazy-html handler with KV+DO cache lookup",
+      "description": "As a developer, I need a handler module that reads the DO's current `feed_version`, looks up `HTML_KV` for a cached shell, and on miss fetches first-page data + the static shell, injects the bootstrap, writes to KV, and returns the body.",
+      "acceptanceCriteria": [
+        "Create `src/server/lazy-html-handler.ts` exporting `handleLazyHtmlRequest(input)` and `LazyHtmlInput` interface",
+        "`LazyHtmlInput` has `did`, `kv`, `doStub`, `assets`, `request` fields with appropriate types",
+        "Non-HTML / non-GET requests bypass to `assets.fetch(request)` (`accept` header check)",
+        "On HTML GET: fetch `/internal/feed-version` from `doStub`; on non-OK fall through to `assets.fetch`",
+        "Build cache key via `buildLazyHtmlCacheKey(did, version)`; on KV hit return body with `content-type: text/html;charset=utf-8` and skip the data endpoint and shell fetch",
+        "On KV miss: fetch `/internal/lazy-html-data`, fetch `/index.html` via `assets.fetch`, inject payload via `injectInitialFeed`, store in KV with 30-day `expirationTtl`, return body",
+        "Payload `has_more` set to `data.items.length >= 50`",
+        "Create `test/lazy-html-handler.ts` with tapzero tests covering: cache miss writes correct key + injects bootstrap, cache hit returns body verbatim and does NOT call data endpoint or put, version bump invalidates (new key written, data endpoint called), non-HTML accept bypasses lazy logic",
+        "Tests use minimal KV/DO/ASSETS stubs and assert on observable side-effects (KV calls, DO fetch list) rather than raw HTML text shape",
+        "Add `test:lazy-html-handler` script to `package.json`",
+        "`npm run test:lazy-html-handler` passes (4 tests)",
+        "Typecheck passes",
+        "Lint passes"
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-020",
+      "title": "Wire lazy-html handler into worker route table",
+      "description": "As a developer, I need the worker's catch-all route to consult the lazy-html handler for authenticated HTML GETs so signed-in users get the embedded bootstrap and anonymous users still get the bare static shell.",
+      "acceptanceCriteria": [
+        "Import `handleLazyHtmlRequest` at top of `src/server/index.ts`",
+        "Replace catch-all `app.all('*', ...)` (~lines 1465-1472) with logic that: returns `c.notFound()` if no `ASSETS`, reads `session?.did`, and if `did && c.env.HTML_KV && c.env.USER_DO` calls `handleLazyHtmlRequest` with `getUserDO(c.env, did)` as `doStub`",
+        "Anonymous requests still fall through to `c.env.ASSETS.fetch(c.req.raw)` (no DO call)",
+        "Reuse the existing helper for resolving the user DO stub (e.g. `getUserDO`) — confirm exact name/import",
+        "Non-HTML asset requests (`.js`, `.css`, `.png`) still served by ASSETS via the handler's internal `wantsHtml` guard",
+        "Smoke test: authenticated `curl -H 'cookie: session=...' -H 'accept: text/html' /` response contains `<script id=\"initial-feed\" type=\"application/json\">` with feed JSON",
+        "Smoke test: unauthenticated `curl -H 'accept: text/html' /` returns shell without the bootstrap script",
+        "Typecheck passes",
+        "Lint passes"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-021",
+      "title": "Consume window.__INITIAL_FEED__ on first paint in client state",
+      "description": "As a user, I want the first feed paint to render synchronously from the embedded bootstrap so blurhash placeholders appear before the JS bundle finishes its first /api/items round-trip.",
+      "acceptanceCriteria": [
+        "Create `src/client/initial-feed.ts` exporting `consumeInitialFeed()`, `readInitialFeedFromDom()`, `_resetConsumedForTests()`, and `InitialFeedPayload` interface (with `Window` augmentation for `__INITIAL_FEED__`)",
+        "`readInitialFeedFromDom` parses `#initial-feed` script `textContent` as JSON; returns null if missing or unparseable",
+        "`consumeInitialFeed` returns the global once (deleting it after read) then falls through to DOM; subsequent calls return null (module-level `consumed` flag)",
+        "Create `test/initial-feed.ts` with tapzero tests covering: DOM read parses payload, returns null when absent, global is read-and-cleared, falls through to DOM when global missing — using `_resetConsumedForTests()` between cases",
+        "Add `test:initial-feed` script to `package.json`",
+        "`npm run test:initial-feed` passes (4 tests)",
+        "In `src/client/state.ts` `State.loadItems` (~lines 1491-1515): call `consumeInitialFeed()` first; if it returns a payload with items, set `state.items`, `state.itemsTotal`, `state.itemsLoading=false` inside `batch()` from `@preact/signals` and return without the API call",
+        "Existing API-fetch path preserved as fallback (when bootstrap absent or empty)",
+        "`recomputeCacheStatus(state).catch(() => {})` still called on the bootstrap path",
+        "Lines stay within 80 columns",
+        "Use the existing TypeScript style (no space between colon and type annotation)",
+        "Typecheck passes",
+        "Lint passes",
+        "Verify in browser using dev-browser skill: throttle network, hard-reload `/` while signed in — blurhash placeholders for first-page items paint before the JS bundle loads"
+      ],
+      "priority": 21,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-022",
+      "title": "Register lazy-html and initial-feed test scripts in npm test",
+      "description": "As a developer, I need the three new test scripts wired into the all-tests runner so `npm test` covers them in CI and locally.",
+      "acceptanceCriteria": [
+        "`test/run-all-tests.mjs` lists `test:lazy-html`, `test:lazy-html-handler`, and `test:initial-feed` alongside the existing test scripts, in the same style/place",
+        "`npm test` runs all three new suites and they pass",
+        "Typecheck passes",
+        "Lint passes"
+      ],
+      "priority": 22,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-023",
+      "title": "End-to-end sanity verification of lazy-html cache pipeline",
+      "description": "As a developer, I want to verify the full pipeline (DO version bump → KV cache → client bootstrap consumption) works in dev so we can ship with confidence.",
+      "acceptanceCriteria": [
+        "After resetting local state and starting dev, the response body for `/` (signed in) contains a `<script id=\"initial-feed\" type=\"application/json\">` with at least one item carrying a non-empty `blurhash`",
+        "A second hard reload at the same `feed_version` does NOT log a hit on `/internal/lazy-html-data` (cache hit path)",
+        "After ingesting a new item with `og_image_url`, a new `HTML_KV` key `html:{did}:{newVersion}` is written on the next request (verified via `wrangler kv list`)",
+        "Anonymous reload of `/` returns the bare shell with no `id=\"initial-feed\"` script and no DO call",
+        "On Slow 3G throttling, blurhash placeholders for first-page items are visible before the JS bundle finishes loading",
+        "Typecheck passes",
+        "Lint passes",
+        "Verify in browser using dev-browser skill: walk through signed-in cache-miss, signed-in cache-hit, post-ingest invalidation, and anonymous fallthrough"
+      ],
+      "priority": 23,
+      "passes": false,
       "notes": ""
     }
   ]
