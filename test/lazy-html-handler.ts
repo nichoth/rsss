@@ -185,6 +185,21 @@ test('cache miss writes key and injects bootstrap payload', async t => {
         items: [item()],
         has_more: false
     }, 'injects parseable bootstrap')
+    const doc = new DOMParser().parseFromString(html, 'text/html')
+    const thumbnail = doc.querySelector(
+        '#root blur-hash.item-thumbnail'
+    )
+
+    t.equal(
+        thumbnail?.getAttribute('placeholder'),
+        'LEHV6nWB2yk8pyo0adR*.7kCMdnj',
+        'pre-renders a first-page blurhash placeholder before JS loads'
+    )
+    t.equal(
+        thumbnail?.getAttribute('src'),
+        'https://example.com/image.jpg',
+        'pre-rendered placeholder points at the OG image'
+    )
 })
 
 test('cache hit returns body and skips data endpoint and put', async t => {

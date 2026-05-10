@@ -122,6 +122,34 @@
 - New focused npm test scripts should be wired into
   `test/run-all-tests.mjs` and added to `test/run-all-coverage.mjs` so
   `npm test` cannot silently skip them later.
+- Lazy HTML bootstrap has two surfaces: the `#initial-feed` JSON script
+  feeds client state after the JS bundle runs, while the seeded `#root`
+  markup gives first-page thumbnails a paintable HTML surface before the
+  bundle finishes loading.
+
+## 2026-05-09 22:41 PDT - US-023
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Completed end-to-end lazy HTML pipeline sanity
+  coverage and first-paint bootstrap markup.
+  - Added handler coverage proving cache misses emit a pre-rendered
+    first-page `blur-hash.item-thumbnail` in `#root` alongside the
+    parseable `#initial-feed` JSON payload.
+  - Extended `injectInitialFeed()` to seed non-empty first-page payloads
+    into root markup while preserving cache-hit, anonymous, and non-HTML
+    bypass behavior.
+  - Marked US-023 passing in `specs/prd.json`.
+- Files changed:
+  - `src/server/lazy-html.ts`
+  - `test/lazy-html-handler.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Lazy HTML needs both JSON bootstrap data and server-rendered root
+    markup: JSON prevents an adapter fetch after bundle load, while root
+    markup provides the pre-bundle visual surface.
+  - Keep cache-hit tests strict: cached HTML should bypass the data
+    endpoint, shell fetch, and KV put entirely.
+---
 
 ## 2026-05-09 22:32 PDT - US-022
 Thread: https://ampcode.com/threads/unknown

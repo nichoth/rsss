@@ -438,7 +438,7 @@
         "Verify in browser using dev-browser skill: walk through signed-in cache-miss, signed-in cache-hit, post-ingest invalidation, and anonymous fallthrough"
       ],
       "priority": 23,
-      "passes": false,
+      "passes": true,
       "notes": ""
     }
   ]
