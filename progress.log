@@ -57,6 +57,37 @@
 - `State.loadFeeds` derives header feed sync status from canonical
   `feedUpdateCounts`; treat legacy `feedUpdateStatus` as compatibility data,
   not the client state hydration source.
+- Cloudflare deployment infrastructure is covered by
+  `test/deploy-config.mjs`. When `wrangler.jsonc` bindings change, update
+  that static test and rerun `npx wrangler types` so
+  `worker-configuration.d.ts` stays in sync.
+
+## 2026-05-09 18:23 PDT - US-007
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Provisioned BlurHash KV and queue infrastructure in
+  Wrangler configuration.
+  - Added the `BLURHASH_KV` namespace binding.
+  - Created the remote and preview `BLURHASH_KV` namespaces with Wrangler.
+  - Added `BLURHASH_QUEUE` as a producer for `blurhash-jobs`.
+  - Added the `blurhash-jobs` consumer with batch size 10, timeout 30,
+    retry count 3, and `blurhash-dlq` as the dead-letter queue.
+  - Regenerated `worker-configuration.d.ts` with `npx wrangler types`.
+  - Added static deploy-config coverage for the new bindings.
+- Files changed:
+  - `wrangler.jsonc`
+  - `worker-configuration.d.ts`
+  - `src/server/index.ts`
+  - `src/server/durable-objects/index.ts`
+  - `test/deploy-config.mjs`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Queue and KV infrastructure should be guarded in
+    `test/deploy-config.mjs` because these bindings are easy to regress
+    without exercising runtime code.
+  - `wrangler types` now emits project runtime types into
+    `worker-configuration.d.ts` and should be rerun after binding changes.
+---
 
 ## 2026-05-09 18:19 PDT - US-006
 Thread: https://ampcode.com/threads/unknown

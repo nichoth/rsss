@@ -26,6 +26,8 @@ import { fetchFullArticle } from '../article-fetch.js'
 export interface Env {
     USER:DurableObjectNamespace<UserDO>
     SESSIONS:KVNamespace
+    BLURHASH_KV:KVNamespace
+    BLURHASH_QUEUE:Queue
     ASSETS:Fetcher
     AUTUMN_SECRET_KEY?:string
     AUTUMN_DISABLED?:string

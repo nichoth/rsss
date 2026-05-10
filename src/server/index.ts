@@ -36,6 +36,8 @@ export { UserDO }
 export interface Env {
     USER_DO:DurableObjectNamespace<UserDO>;
     SESSIONS:KVNamespace;
+    BLURHASH_KV:KVNamespace;
+    BLURHASH_QUEUE:Queue;
     ASSETS:Fetcher;
     SESSION_SECRET:string;
     OAUTH_CLIENT_ID?:string;
