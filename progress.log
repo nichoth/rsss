@@ -1,5 +1,10 @@
 ## Codebase Patterns
 
+- Lazy HTML bootstrap data comes from internal Durable Object endpoints:
+  `/internal/feed-version` reads only `user_state.feed_version`, while
+  `/internal/lazy-html-data` reads that version first and then returns the
+  first 50 `ITEM_SYNC_COLUMNS` item rows ordered by
+  `items.pub_date DESC, items.id DESC`.
 - Feed version reads and increments live on `UserDO` private helpers near
   `rowsWritten`. Use `getFeedVersion()` for the current `user_state`
   counter and `bumpFeedVersion()` for atomic invalidation via
@@ -96,6 +101,29 @@
 - Feed HTML cache invalidation is version-based. Any Durable Object write
   that changes feed-list contents or denormalized item image metadata should
   call `bumpFeedVersion()` exactly once for that logical write path.
+
+## 2026-05-09 21:08 PDT - US-016
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added internal Durable Object endpoints for the
+  lazy per-user HTML pipeline.
+  - `GET /internal/feed-version` returns the current `feed_version`.
+  - `GET /internal/lazy-html-data` returns the current version plus the
+    first 50 joined item rows in deterministic feed-list order.
+  - Added focused handler coverage for response shape, read ordering,
+    selected image metadata columns, join shape, ordering, and limit.
+- Files changed:
+  - `src/server/durable-objects/index.ts`
+  - `test/do-handlers.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Lazy HTML handlers should consume DO data through the internal
+    feed-version and lazy-html-data endpoints instead of duplicating DO SQL
+    in the worker.
+  - `test/do-handlers.ts` can assert SQL query shape through the harness'
+    recorded query strings when endpoint behavior depends on exact ordering
+    or selected columns.
+---
 
 ## 2026-05-09 21:02 PDT - US-015
 Thread: https://ampcode.com/threads/unknown

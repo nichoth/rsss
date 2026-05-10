@@ -651,6 +651,21 @@ export class UserDO extends DurableObject<Env> {
             return new Response(null, { status: 204 })
         })
 
+        app.get('/internal/feed-version', (c) => {
+            return c.json({ version: this.getFeedVersion() })
+        })
+
+        app.get('/internal/lazy-html-data', (c) => {
+            const version = this.getFeedVersion()
+            const items = this.sql.exec(
+                `SELECT ${ITEM_SYNC_COLUMNS} ` +
+                'FROM items JOIN feeds ON items.feed_id = feeds.id ' +
+                'ORDER BY items.pub_date DESC, items.id DESC LIMIT 50'
+            ).toArray()
+
+            return c.json({ version, items })
+        })
+
         // Server-sent events stream. Broadcasts state-change
         // notifications (e.g. feed-updated) to all open clients
         // for this user.
