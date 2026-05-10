@@ -119,6 +119,31 @@
 - Cookie-sensitive worker route tests must run in Node, not browser tapout,
   because browser fetch strips `Cookie` request headers before Hono's
   session middleware can read them.
+- New focused npm test scripts should be wired into
+  `test/run-all-tests.mjs` and added to `test/run-all-coverage.mjs` so
+  `npm test` cannot silently skip them later.
+
+## 2026-05-09 22:32 PDT - US-022
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Registered the lazy HTML and initial-feed suites in
+  the full test runner.
+  - Added run-all coverage assertions for `test:lazy-html`,
+    `test:lazy-html-handler`, and `test:initial-feed`.
+  - Wired those three npm scripts into `test/run-all-tests.mjs` near the
+    existing lazy HTML routing suite.
+  - Marked US-022 passing in `specs/prd.json`.
+- Files changed:
+  - `test/run-all-coverage.mjs`
+  - `test/run-all-tests.mjs`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Browser tapout suites share a fixed local port and must run serially;
+    parallel verification can fail with `EADDRINUSE` even when the suites
+    pass individually.
+  - Runner coverage belongs in `test/run-all-coverage.mjs` whenever new
+    npm test scripts are intended to be included in `npm test`.
+---
 
 ## 2026-05-09 22:27 PDT - US-021
 Thread: https://ampcode.com/threads/unknown
