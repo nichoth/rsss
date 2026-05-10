@@ -107,6 +107,35 @@
 - New Cloudflare KV bindings should have static config coverage for the
   binding name plus concrete `id` and `preview_id` fields, then regenerate
   `worker-configuration.d.ts` with `npx wrangler types`.
+- Lazy HTML handler tests should assert observable cache orchestration:
+  feed-version reads, versioned KV keys, data endpoint skips on cache hits,
+  `/index.html` shell fetches on misses, and parsed bootstrap JSON.
+
+## 2026-05-09 21:47 PDT - US-019
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added the lazy HTML request handler.
+  - Created `handleLazyHtmlRequest()` with HTML GET detection, DO
+    feed-version reads, versioned `HTML_KV` lookup, cache-hit return, and
+    cache-miss shell generation through `injectInitialFeed()`.
+  - Cache misses now fetch `/internal/lazy-html-data`, load `/index.html`
+    from ASSETS, inject `{ version, items, has_more }`, write the generated
+    shell to KV with a 30-day TTL, and return HTML.
+  - Added focused browser tests for miss, hit, version invalidation, and
+    non-HTML asset bypass behavior.
+  - Added the `test:lazy-html-handler` npm script via a short runner.
+- Files changed:
+  - `src/server/lazy-html-handler.ts`
+  - `test/lazy-html-handler.ts`
+  - `test/run-lazy-html-handler.mjs`
+  - `package.json`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Keep lazy HTML routing orchestration observable in tests through KV
+    calls, DO fetch paths, and ASSETS fetches rather than raw HTML shapes.
+  - Use a small Node runner when a new package script would otherwise exceed
+    the project line-length agreement.
+---
 
 ## 2026-05-09 21:26 PDT - US-018
 Thread: https://ampcode.com/threads/unknown
