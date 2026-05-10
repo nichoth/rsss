@@ -116,5 +116,17 @@ export const DEAD_LETTER_OUTBOX_SQL = `
     );
 `
 
+/**
+ * Server-only table tracking per-user counters used by the lazy
+ * per-user HTML cache. Single-row table (id = 1).
+ */
+export const USER_STATE_SQL = `
+    CREATE TABLE IF NOT EXISTS user_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        feed_version INTEGER NOT NULL DEFAULT 0
+    );
+    INSERT OR IGNORE INTO user_state (id, feed_version) VALUES (1, 0);
+`
+
 /** Full schema: tables + indexes + triggers. Suitable for fresh databases. */
 export const SCHEMA_SQL = TABLES_SQL + INDEXES_SQL + TRIGGERS_SQL

@@ -470,6 +470,13 @@ test('fetchFeed stores og image for newly inserted items', async t => {
                 return { toArray: () => [] }
             }
 
+            if (query.includes('UPDATE user_state SET feed_version')) {
+                return {
+                    toArray: () => [],
+                    one: () => ({ feed_version: 1 })
+                }
+            }
+
             throw new Error(`Unexpected SQL: ${query}`)
         }
     }
@@ -601,6 +608,13 @@ test('fetchFeed stores article og:image in og_image_url', async t => {
                 return { toArray: () => [] }
             }
 
+            if (query.includes('UPDATE user_state SET feed_version')) {
+                return {
+                    toArray: () => [],
+                    one: () => ({ feed_version: 1 })
+                }
+            }
+
             throw new Error(`Unexpected SQL: ${query}`)
         }
     }
@@ -705,6 +719,7 @@ test('fetchFeed writes cached blurhash metadata without queueing',
             height:unknown
             id:unknown
         } = null
+        let feedVersionBumps = 0
 
         userDo.env = {
             BLURHASH_KV: {
@@ -764,6 +779,14 @@ test('fetchFeed writes cached blurhash metadata without queueing',
                     return { toArray: () => [] }
                 }
 
+                if (query.includes('UPDATE user_state SET feed_version')) {
+                    feedVersionBumps++
+                    return {
+                        toArray: () => [],
+                        one: () => ({ feed_version: feedVersionBumps })
+                    }
+                }
+
                 if (query.includes('SELECT feeds.id FROM feeds')) {
                     return { toArray: () => [] }
                 }
@@ -773,6 +796,13 @@ test('fetchFeed writes cached blurhash metadata without queueing',
                     query.includes('GROUP BY feeds.id')
                 ) {
                     return { toArray: () => [] }
+                }
+
+                if (query.includes('UPDATE user_state SET feed_version')) {
+                    return {
+                        toArray: () => [],
+                        one: () => ({ feed_version: 1 })
+                    }
                 }
 
                 throw new Error(`Unexpected SQL: ${query}`)
@@ -841,6 +871,11 @@ test('fetchFeed writes cached blurhash metadata without queueing',
             },
             'cached blurhash metadata is denormalized to the item row'
         )
+        t.equal(
+            feedVersionBumps,
+            2,
+            'new item insert and cached blurhash update each bump version'
+        )
     })
 
 test('fetchFeed enqueues blurhash job on cache miss', async t => {
@@ -888,6 +923,7 @@ test('fetchFeed enqueues blurhash job on cache miss', async t => {
     let kvReads = 0
     let queuedMessage:unknown = null
     let blurhashUpdates = 0
+    let feedVersionBumps = 0
 
     userDo.ctx = {
         id: {
@@ -949,6 +985,14 @@ test('fetchFeed enqueues blurhash job on cache miss', async t => {
                 return { toArray: () => [] }
             }
 
+            if (query.includes('UPDATE user_state SET feed_version')) {
+                feedVersionBumps++
+                return {
+                    toArray: () => [],
+                    one: () => ({ feed_version: feedVersionBumps })
+                }
+            }
+
             if (query.includes('SELECT feeds.id FROM feeds')) {
                 return { toArray: () => [] }
             }
@@ -958,6 +1002,13 @@ test('fetchFeed enqueues blurhash job on cache miss', async t => {
                 query.includes('GROUP BY feeds.id')
             ) {
                 return { toArray: () => [] }
+            }
+
+            if (query.includes('UPDATE user_state SET feed_version')) {
+                return {
+                    toArray: () => [],
+                    one: () => ({ feed_version: 1 })
+                }
             }
 
             throw new Error(`Unexpected SQL: ${query}`)
@@ -1008,6 +1059,7 @@ test('fetchFeed enqueues blurhash job on cache miss', async t => {
 
     t.equal(kvReads, 1, 'one KV read is made before enqueue')
     t.equal(blurhashUpdates, 0, 'cache miss does not write blurhash')
+    t.equal(feedVersionBumps, 1, 'new item insert bumps version once')
     t.deepEqual(
         queuedMessage,
         {
@@ -1082,6 +1134,13 @@ test('fetchFeed caps concurrent og image requests at four', async t => {
                 query.includes('GROUP BY feeds.id')
             ) {
                 return { toArray: () => [] }
+            }
+
+            if (query.includes('UPDATE user_state SET feed_version')) {
+                return {
+                    toArray: () => [],
+                    one: () => ({ feed_version: 1 })
+                }
             }
 
             throw new Error(`Unexpected SQL: ${query}`)
@@ -1232,6 +1291,13 @@ test('fetchFeed silently handles og failures, uses parser image', async t => {
                 return { toArray: () => [] }
             }
 
+            if (query.includes('UPDATE user_state SET feed_version')) {
+                return {
+                    toArray: () => [],
+                    one: () => ({ feed_version: 1 })
+                }
+            }
+
             throw new Error(`Unexpected SQL: ${query}`)
         }
     }
@@ -1364,6 +1430,13 @@ test('fetchFeed records non-duplicate item insert failures', async t => {
                 return { toArray: () => [] }
             }
 
+            if (query.includes('UPDATE user_state SET feed_version')) {
+                return {
+                    toArray: () => [],
+                    one: () => ({ feed_version: 1 })
+                }
+            }
+
             throw new Error(`Unexpected SQL: ${query}`)
         }
     }
@@ -1475,6 +1548,13 @@ test('fetchFeed stays quiet when article URL exceeds redirect budget',
                     query.includes('GROUP BY feeds.id')
                 ) {
                     return { toArray: () => [] }
+                }
+
+                if (query.includes('UPDATE user_state SET feed_version')) {
+                    return {
+                        toArray: () => [],
+                        one: () => ({ feed_version: 1 })
+                    }
                 }
 
                 throw new Error(`Unexpected SQL: ${query}`)
@@ -1608,6 +1688,13 @@ test('fetchFeed resolves og image after multi-hop article redirects',
                     query.includes('GROUP BY feeds.id')
                 ) {
                     return { toArray: () => [] }
+                }
+
+                if (query.includes('UPDATE user_state SET feed_version')) {
+                    return {
+                        toArray: () => [],
+                        one: () => ({ feed_version: 1 })
+                    }
                 }
 
                 throw new Error(`Unexpected SQL: ${query}`)
@@ -1752,6 +1839,13 @@ test('fetchFeed falls back to feed image when article redirects loop',
                     return { toArray: () => [] }
                 }
 
+                if (query.includes('UPDATE user_state SET feed_version')) {
+                    return {
+                        toArray: () => [],
+                        one: () => ({ feed_version: 1 })
+                    }
+                }
+
                 throw new Error(`Unexpected SQL: ${query}`)
             }
         }
@@ -1881,6 +1975,13 @@ test('fetchFeed leaves thumbnail null when article loops and feed has none',
                     return { toArray: () => [] }
                 }
 
+                if (query.includes('UPDATE user_state SET feed_version')) {
+                    return {
+                        toArray: () => [],
+                        one: () => ({ feed_version: 1 })
+                    }
+                }
+
                 throw new Error(`Unexpected SQL: ${query}`)
             }
         }
@@ -1994,6 +2095,13 @@ test('fetchFeed loudly reports feed-XML redirect overflow', async t => {
                 query.includes('GROUP BY feeds.id')
             ) {
                 return { toArray: () => [] }
+            }
+
+            if (query.includes('UPDATE user_state SET feed_version')) {
+                return {
+                    toArray: () => [],
+                    one: () => ({ feed_version: 1 })
+                }
             }
 
             throw new Error(`Unexpected SQL: ${query}`)

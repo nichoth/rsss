@@ -7,6 +7,7 @@ import {
     INDEXES_SQL,
     TRIGGERS_SQL,
     DEAD_LETTER_OUTBOX_SQL,
+    USER_STATE_SQL,
     ALL_FULL_CONTENT_STATUSES,
     FETCH_FULL_MIN_INTERVAL_MS
 } from '../../shared/schema.js'
@@ -424,6 +425,7 @@ export class UserDO extends DurableObject<Env> {
         this.sql.exec(INDEXES_SQL)
         this.sql.exec(TRIGGERS_SQL)
         this.sql.exec(DEAD_LETTER_OUTBOX_SQL)
+        this.sql.exec(USER_STATE_SQL)
     }
 
     /**
@@ -644,8 +646,24 @@ export class UserDO extends DurableObject<Env> {
                 body.image_height,
                 id
             )
+            this.bumpFeedVersion()
 
             return new Response(null, { status: 204 })
+        })
+
+        app.get('/internal/feed-version', (c) => {
+            return c.json({ version: this.getFeedVersion() })
+        })
+
+        app.get('/internal/lazy-html-data', (c) => {
+            const version = this.getFeedVersion()
+            const items = this.sql.exec(
+                `SELECT ${ITEM_SYNC_COLUMNS} ` +
+                'FROM items JOIN feeds ON items.feed_id = feeds.id ' +
+                'ORDER BY items.pub_date DESC, items.id DESC LIMIT 50'
+            ).toArray()
+
+            return c.json({ version, items })
         })
 
         // Server-sent events stream. Broadcasts state-change
@@ -1640,6 +1658,8 @@ export class UserDO extends DurableObject<Env> {
             await this.updateNewItemThumbnails(newItems)
 
             if (newItems.length > 0) {
+                this.bumpFeedVersion()
+
                 // Send canonical pending count for the touched feed so
                 // the client is a passive renderer of state. Re-broadcast
                 // even when the feed was already in the unsynced set
@@ -1719,6 +1739,24 @@ export class UserDO extends DurableObject<Env> {
         const rowsWritten = (result as { rowsWritten?:unknown }).rowsWritten
 
         return typeof rowsWritten === 'number' ? rowsWritten : 0
+    }
+
+    private bumpFeedVersion ():number {
+        const row = this.sql.exec(`
+            UPDATE user_state SET feed_version = feed_version + 1
+            WHERE id = 1
+            RETURNING feed_version
+        `).one() as { feed_version:number } | null
+
+        return row?.feed_version ?? 0
+    }
+
+    private getFeedVersion ():number {
+        const row = this.sql.exec(`
+            SELECT feed_version FROM user_state WHERE id = 1
+        `).one() as { feed_version:number } | null
+
+        return row?.feed_version ?? 0
     }
 
     private async updateNewItemThumbnails (
@@ -1812,6 +1850,7 @@ export class UserDO extends DurableObject<Env> {
                 entry.image_height,
                 itemId
             )
+            this.bumpFeedVersion()
             return
         }
 

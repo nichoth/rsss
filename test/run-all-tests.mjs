@@ -91,6 +91,10 @@ const commands = [
         '--platform=node --format=esm',
         '| node --input-type=module | tap-spec'
     ].join(' '),
+    'npm run test:lazy-html',
+    'npm run test:lazy-html-handler',
+    'node test/run-lazy-html-routing.mjs',
+    'npm run test:initial-feed',
     [
         'esbuild ./test/index.ts --bundle',
         '--alias:cloudflare:workers=./test/cloudflare-workers-stub.ts',
