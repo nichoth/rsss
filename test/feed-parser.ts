@@ -54,6 +54,17 @@ function nextTask ():Promise<void> {
     return new Promise(resolve => setTimeout(resolve, 0))
 }
 
+async function blurhashKeyFor (imageUrl:string):Promise<string> {
+    const encoded = new TextEncoder().encode(imageUrl)
+    const digest = await crypto.subtle.digest('SHA-256', encoded)
+    const bytes = Array.from(new Uint8Array(digest))
+    const hex = bytes.map(byte => {
+        return byte.toString(16).padStart(2, '0')
+    }).join('')
+
+    return `blurhash:${hex.slice(0, 32)}`
+}
+
 function itemXml (index:number, content = 'body'):string {
     return `
         <item>
@@ -645,6 +656,337 @@ test('fetchFeed stores article og:image in og_image_url', async t => {
             id: 43
         },
         'new item og_image_url is set from article metadata'
+    )
+})
+
+test('fetchFeed writes cached blurhash metadata without queueing',
+    async t => {
+        const imageUrl = 'https://cdn.example.com/parser.jpg'
+        const expectedKey = await blurhashKeyFor(imageUrl)
+        const userDo = Object.create(UserDO.prototype) as {
+            env:{
+                BLURHASH_KV:{
+                    get:(key:string) => Promise<string|null>
+                }
+                BLURHASH_QUEUE:{
+                    send:(message:unknown) => Promise<void>
+                }
+            }
+            sql:{
+                exec:(query:string, ...params:unknown[]) => {
+                    toArray:() => unknown[]
+                    one?:() => unknown
+                    rowsWritten?:number
+                }
+            }
+            fetchFeed:(feed:{
+                id:number
+                url:string
+                title:string|null
+                description:string|null
+                site_url:string|null
+                last_fetched:string|null
+                last_error:string|null
+                last_status:number|null
+                created_at:string
+                updated_at:string
+            }) => Promise<void>
+        }
+        const originalFetch = globalThis.fetch
+        let kvReads = 0
+        let itemImageUpdate:null | {
+            thumbnail:unknown
+            ogImage:unknown
+            id:unknown
+        } = null
+        let blurhashUpdate:null | {
+            blurhash:unknown
+            width:unknown
+            height:unknown
+            id:unknown
+        } = null
+
+        userDo.env = {
+            BLURHASH_KV: {
+                async get (key:string) {
+                    kvReads++
+                    t.equal(key, expectedKey, 'KV key hashes image URL')
+
+                    return JSON.stringify({
+                        blurhash: 'LEHV6nWB2yk8pyo0adR*.7kCMdnj',
+                        image_width: 1200,
+                        image_height: 630
+                    })
+                }
+            },
+            BLURHASH_QUEUE: {
+                async send () {
+                    throw new Error('KV hit should not enqueue')
+                }
+            }
+        }
+        userDo.sql = {
+            exec (query:string, ...params:unknown[]) {
+                if (query.includes('UPDATE feeds SET') &&
+                    query.includes('last_error = NULL')) {
+                    return { toArray: () => [] }
+                }
+
+                if (query.includes('INSERT OR IGNORE INTO items')) {
+                    return { rowsWritten: 1, toArray: () => [] }
+                }
+
+                if (query.includes('SELECT id FROM items')) {
+                    return {
+                        toArray: () => [],
+                        one: () => ({ id: 44 })
+                    }
+                }
+
+                if (query.includes('UPDATE items SET') &&
+                    query.includes('thumbnail_url')) {
+                    itemImageUpdate = {
+                        thumbnail: params[0],
+                        ogImage: params[1],
+                        id: params[2]
+                    }
+                    return { toArray: () => [] }
+                }
+
+                if (query.includes('UPDATE items SET') &&
+                    query.includes('blurhash = COALESCE')) {
+                    blurhashUpdate = {
+                        blurhash: params[0],
+                        width: params[1],
+                        height: params[2],
+                        id: params[3]
+                    }
+                    return { toArray: () => [] }
+                }
+
+                if (query.includes('SELECT feeds.id FROM feeds')) {
+                    return { toArray: () => [] }
+                }
+
+                if (
+                    query.includes('COUNT(items.id)') &&
+                    query.includes('GROUP BY feeds.id')
+                ) {
+                    return { toArray: () => [] }
+                }
+
+                throw new Error(`Unexpected SQL: ${query}`)
+            }
+        }
+
+        globalThis.fetch = async (url) => {
+            const urlText = String(url)
+
+            if (urlText.startsWith('https://cloudflare-dns.com/')) {
+                return new Response(JSON.stringify({
+                    Answer: [{ data: '93.184.216.34' }]
+                }))
+            }
+
+            return new Response(`
+                <rss version="2.0"
+                    xmlns:media="http://search.yahoo.com/mrss/">
+                    <channel>
+                        <title>Example RSS</title>
+                        <link>https://example.com/</link>
+                        <item>
+                            <guid>item-1</guid>
+                            <title>Item 1</title>
+                            <media:thumbnail url="${imageUrl}" />
+                        </item>
+                    </channel>
+                </rss>
+            `)
+        }
+
+        try {
+            await userDo.fetchFeed({
+                id: 5,
+                url: 'https://example.com/feed.xml',
+                title: null,
+                description: null,
+                site_url: null,
+                last_fetched: null,
+                last_error: null,
+                last_status: null,
+                created_at: '2026-04-27 00:00:00',
+                updated_at: '2026-04-27 00:00:00'
+            })
+        } finally {
+            globalThis.fetch = originalFetch
+        }
+
+        t.equal(kvReads, 1, 'one KV read is made for the new image')
+        t.deepEqual(
+            itemImageUpdate,
+            {
+                thumbnail: imageUrl,
+                ogImage: imageUrl,
+                id: 44
+            },
+            'image columns are still written'
+        )
+        t.deepEqual(
+            blurhashUpdate,
+            {
+                blurhash: 'LEHV6nWB2yk8pyo0adR*.7kCMdnj',
+                width: 1200,
+                height: 630,
+                id: 44
+            },
+            'cached blurhash metadata is denormalized to the item row'
+        )
+    })
+
+test('fetchFeed enqueues blurhash job on cache miss', async t => {
+    const imageUrl = 'https://cdn.example.com/miss.jpg'
+    const userDo = Object.create(UserDO.prototype) as {
+        env:{
+            BLURHASH_KV:{
+                get:(key:string) => Promise<string|null>
+            }
+            BLURHASH_QUEUE:{
+                send:(message:unknown) => Promise<void>
+            }
+        }
+        sql:{
+            exec:(query:string, ...params:unknown[]) => {
+                toArray:() => unknown[]
+                one?:() => unknown
+                rowsWritten?:number
+            }
+        }
+        fetchFeed:(feed:{
+            id:number
+            url:string
+            title:string|null
+            description:string|null
+            site_url:string|null
+            last_fetched:string|null
+            last_error:string|null
+            last_status:number|null
+            created_at:string
+            updated_at:string
+        }) => Promise<void>
+    }
+    const originalFetch = globalThis.fetch
+    let kvReads = 0
+    let queuedMessage:unknown = null
+    let blurhashUpdates = 0
+
+    userDo.env = {
+        BLURHASH_KV: {
+            async get () {
+                kvReads++
+                return null
+            }
+        },
+        BLURHASH_QUEUE: {
+            async send (message:unknown) {
+                queuedMessage = message
+            }
+        }
+    }
+    userDo.sql = {
+        exec (query:string) {
+            if (query.includes('UPDATE feeds SET') &&
+                query.includes('last_error = NULL')) {
+                return { toArray: () => [] }
+            }
+
+            if (query.includes('INSERT OR IGNORE INTO items')) {
+                return { rowsWritten: 1, toArray: () => [] }
+            }
+
+            if (query.includes('SELECT id FROM items')) {
+                return {
+                    toArray: () => [],
+                    one: () => ({ id: 45 })
+                }
+            }
+
+            if (query.includes('UPDATE items SET') &&
+                query.includes('thumbnail_url')) {
+                return { toArray: () => [] }
+            }
+
+            if (query.includes('UPDATE items SET') &&
+                query.includes('blurhash = COALESCE')) {
+                blurhashUpdates++
+                return { toArray: () => [] }
+            }
+
+            if (query.includes('SELECT feeds.id FROM feeds')) {
+                return { toArray: () => [] }
+            }
+
+            if (
+                query.includes('COUNT(items.id)') &&
+                query.includes('GROUP BY feeds.id')
+            ) {
+                return { toArray: () => [] }
+            }
+
+            throw new Error(`Unexpected SQL: ${query}`)
+        }
+    }
+
+    globalThis.fetch = async (url) => {
+        const urlText = String(url)
+
+        if (urlText.startsWith('https://cloudflare-dns.com/')) {
+            return new Response(JSON.stringify({
+                Answer: [{ data: '93.184.216.34' }]
+            }))
+        }
+
+        return new Response(`
+            <rss version="2.0"
+                xmlns:media="http://search.yahoo.com/mrss/">
+                <channel>
+                    <title>Example RSS</title>
+                    <link>https://example.com/</link>
+                    <item>
+                        <guid>item-1</guid>
+                        <title>Item 1</title>
+                        <media:thumbnail url="${imageUrl}" />
+                    </item>
+                </channel>
+            </rss>
+        `)
+    }
+
+    try {
+        await userDo.fetchFeed({
+            id: 5,
+            url: 'https://example.com/feed.xml',
+            title: null,
+            description: null,
+            site_url: null,
+            last_fetched: null,
+            last_error: null,
+            last_status: null,
+            created_at: '2026-04-27 00:00:00',
+            updated_at: '2026-04-27 00:00:00'
+        })
+    } finally {
+        globalThis.fetch = originalFetch
+    }
+
+    t.equal(kvReads, 1, 'one KV read is made before enqueue')
+    t.equal(blurhashUpdates, 0, 'cache miss does not write blurhash')
+    t.deepEqual(
+        queuedMessage,
+        {
+            imageUrl,
+            itemId: 45
+        },
+        'cache miss enqueues the image job'
     )
 })
 

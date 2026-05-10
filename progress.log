@@ -65,6 +65,33 @@
   `test/deploy-config.mjs`. When `wrangler.jsonc` bindings change, update
   that static test and rerun `npx wrangler types` so
   `worker-configuration.d.ts` stays in sync.
+- BlurHash ingest KV values should be JSON metadata objects with
+  `blurhash`, `image_width`, and `image_height`. Poller KV hits need all
+  three fields so they can denormalize image placeholders without queueing.
+
+## 2026-05-09 18:37 PDT - US-009
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added BlurHash cache lookup and queue dispatch to
+  feed ingestion for newly resolved item images.
+  - Derived KV keys as `blurhash:<sha256(imageUrl).slice(0, 32)>`.
+  - On valid KV metadata hits, wrote `blurhash`, `image_width`, and
+    `image_height` directly to the item row.
+  - On cache misses, enqueued `{ imageUrl, itemId }` on `BLURHASH_QUEUE`
+    after preserving existing thumbnail and OG image writes.
+  - Added focused feed parser coverage for hit and miss paths.
+- Files changed:
+  - `src/server/durable-objects/index.ts`
+  - `test/feed-parser.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - BlurHash cache entries must include dimensions, not only the hash,
+    because both the poller hit path and future queue consumer hit path
+    need to write complete image metadata to item rows.
+  - `Object.create(UserDO.prototype)` tests should stub `env` only when
+    they exercise Cloudflare bindings; production code should guard binding
+    access in those isolated prototype tests.
+---
 
 ## 2026-05-09 18:31 PDT - US-008
 Thread: https://ampcode.com/threads/unknown

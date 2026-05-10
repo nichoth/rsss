@@ -78,6 +78,17 @@ interface NewFeedItem {
     imageUrl:string | null
 }
 
+interface BlurhashCacheEntry {
+    blurhash:string
+    image_width:number
+    image_height:number
+}
+
+interface BlurhashJob {
+    imageUrl:string
+    itemId:number
+}
+
 const FEED_XML_PARSER = new XMLParser({
     attributeNamePrefix: '@_',
     cdataPropName: '#cdata',
@@ -128,6 +139,45 @@ const ITEM_SYNC_COLUMNS = `
 
 function errorMessage (err:unknown):string {
     return err instanceof Error ? err.message : String(err)
+}
+
+async function blurhashCacheKey (imageUrl:string):Promise<string> {
+    const encoded = new TextEncoder().encode(imageUrl)
+    const digest = await crypto.subtle.digest('SHA-256', encoded)
+    const bytes = Array.from(new Uint8Array(digest))
+    const hex = bytes.map(byte => {
+        return byte.toString(16).padStart(2, '0')
+    }).join('')
+
+    return `blurhash:${hex.slice(0, 32)}`
+}
+
+function isBlurhashCacheEntry (
+    value:unknown
+):value is BlurhashCacheEntry {
+    if (!value || typeof value !== 'object') return false
+
+    const entry = value as Partial<BlurhashCacheEntry>
+
+    return typeof entry.blurhash === 'string' &&
+        typeof entry.image_width === 'number' &&
+        typeof entry.image_height === 'number' &&
+        Number.isFinite(entry.image_width) &&
+        Number.isFinite(entry.image_height)
+}
+
+function parseBlurhashCacheEntry (
+    value:string | null
+):BlurhashCacheEntry | null {
+    if (!value) return null
+
+    try {
+        const parsed = JSON.parse(value) as unknown
+
+        return isBlurhashCacheEntry(parsed) ? parsed : null
+    } catch {
+        return null
+    }
 }
 
 function isDuplicateInsertError (err:unknown):boolean {
@@ -1743,9 +1793,43 @@ export class UserDO extends DurableObject<Env> {
                 imageUrl,
                 item.id
             )
+            await this.updateBlurhashFromCacheOrQueue(item.id, imageUrl)
         } catch (err) {
             console.error('Error updating item image:', err)
         }
+    }
+
+    private async updateBlurhashFromCacheOrQueue (
+        itemId:number,
+        imageUrl:string
+    ):Promise<void> {
+        const env:Env|undefined = this.env
+
+        if (!env?.BLURHASH_KV || !env.BLURHASH_QUEUE) return
+
+        const key = await blurhashCacheKey(imageUrl)
+        const cached = await env.BLURHASH_KV.get(key)
+        const entry = parseBlurhashCacheEntry(cached)
+
+        if (entry) {
+            this.sql.exec(
+                `UPDATE items SET
+                    blurhash = COALESCE(blurhash, ?),
+                    image_width = COALESCE(image_width, ?),
+                    image_height = COALESCE(image_height, ?)
+                WHERE id = ?`,
+                entry.blurhash,
+                entry.image_width,
+                entry.image_height,
+                itemId
+            )
+            return
+        }
+
+        await env.BLURHASH_QUEUE.send({
+            imageUrl,
+            itemId
+        } satisfies BlurhashJob)
     }
 
     private async resolveNewItemImage (
