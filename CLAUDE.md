@@ -21,6 +21,7 @@ Auto-generated from all feature plans. Last updated: 2026-05-10
 - TypeScript (browser, ES2022 lib via Vite for + Vite 7 + lightningcss (CSS pipeline), (015-fix-fouc-on-refresh)
 - N/A. No SQLite schema change, no DO schema change, no (015-fix-fouc-on-refresh)
 - TypeScript (browser, ES2022 lib via Vite for the + Vite 7 + `@cloudflare/vite-plugin` (build (016-fix-dev-server-fouc)
+- N/A. Client signals only; no DO SQLite changes, no local (016-fix-dev-server-fouc)
 
 - TypeScript (Cloudflare Workers runtime, ES2022 lib) + `hono`, `@cloudflare/workers-types`, `fast-xml-parser` (001-fix-og-image-redirects)
 
@@ -41,9 +42,9 @@ npm test && npm run lint
 TypeScript (Cloudflare Workers runtime, ES2022 lib): Follow standard conventions
 
 ## Recent Changes
+- 016-fix-dev-server-fouc: Added TypeScript (browser, ES2022 lib via Vite for + Preact + `@preact/signals`, `htm/preact`,
 - 016-fix-dev-server-fouc: Added TypeScript (browser, ES2022 lib via Vite for the + Vite 7 + `@cloudflare/vite-plugin` (build
 - 015-fix-fouc-on-refresh: Added TypeScript (browser, ES2022 lib via Vite for + Vite 7 + lightningcss (CSS pipeline),
-- 014-sidebar-pending-count: Added TypeScript (browser, ES2022 lib via Vite for the + Preact + `@preact/signals`, `htm/preact`
 
 
 <!-- MANUAL ADDITIONS START -->
