@@ -172,9 +172,9 @@ test('cache miss writes key and injects bootstrap payload', async t => {
     const html = await response.text()
 
     t.equal(response.status, 200, 'returns an HTML response')
-    t.equal(kv.gets[0], 'html:did:plc:abc:3', 'checks versioned key')
+    t.equal(kv.gets[0], 'html:v2:did:plc:abc:3', 'checks versioned key')
     t.equal(kv.puts.length, 1, 'stores rendered HTML on miss')
-    t.equal(kv.puts[0].key, 'html:did:plc:abc:3', 'writes miss key')
+    t.equal(kv.puts[0].key, 'html:v2:did:plc:abc:3', 'writes miss key')
     t.equal(kv.puts[0].options?.expirationTtl, 2592000, 'uses 30 day ttl')
     t.deepEqual(doStub.paths, [
         '/internal/feed-version',
@@ -207,7 +207,7 @@ test('cache hit returns body and skips data endpoint and put', async t => {
         '<!doctype html><html><head></head>' +
         '<body>cached</body></html>'
     )
-    const kv = new KvStub(new Map([['html:did:plc:abc:5', cached]]))
+    const kv = new KvStub(new Map([['html:v2:did:plc:abc:5', cached]]))
     const doStub = new DoStub(5, [item()])
     const assets = new AssetsStub()
     const response = await handleLazyHtmlRequest(input({
@@ -225,7 +225,7 @@ test('cache hit returns body and skips data endpoint and put', async t => {
 })
 
 test('version bump invalidates cache by writing the new key', async t => {
-    const kv = new KvStub(new Map([['html:did:plc:abc:5', 'old']]))
+    const kv = new KvStub(new Map([['html:v2:did:plc:abc:5', 'old']]))
     const doStub = new DoStub(6, [item(2)])
     const response = await handleLazyHtmlRequest(input({
         kv,
@@ -234,8 +234,8 @@ test('version bump invalidates cache by writing the new key', async t => {
     }))
 
     t.ok((await response.text()).includes('initial-feed'), 'returns injected')
-    t.deepEqual(kv.gets, ['html:did:plc:abc:6'], 'checks new key only')
-    t.equal(kv.puts[0].key, 'html:did:plc:abc:6', 'writes new key')
+    t.deepEqual(kv.gets, ['html:v2:did:plc:abc:6'], 'checks new key only')
+    t.equal(kv.puts[0].key, 'html:v2:did:plc:abc:6', 'writes new key')
     t.deepEqual(doStub.paths, [
         '/internal/feed-version',
         '/internal/lazy-html-data'

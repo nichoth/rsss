@@ -168,8 +168,8 @@ test('worker injects initial feed for authenticated HTML', async (t) => {
         '/internal/feed-version',
         '/internal/lazy-html-data'
     ])
-    t.deepEqual(htmlKv.gets, ['html:did:plc:reader:9'])
-    t.deepEqual(htmlKv.puts, ['html:did:plc:reader:9'])
+    t.deepEqual(htmlKv.gets, ['html:v2:did:plc:reader:9'])
+    t.deepEqual(htmlKv.puts, ['html:v2:did:plc:reader:9'])
 })
 
 test('worker serves anonymous HTML shell without lazy DO calls', async (t) => {

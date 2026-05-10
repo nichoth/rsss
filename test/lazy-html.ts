@@ -50,13 +50,23 @@ function bootstrapJson (html:string):string {
 test('buildLazyHtmlCacheKey is deterministic and version-keyed', t => {
     t.equal(
         buildLazyHtmlCacheKey('did:plc:abc', 3),
-        'html:did:plc:abc:3',
+        'html:v2:did:plc:abc:3',
         'cache key includes DID and version'
     )
     t.equal(
         buildLazyHtmlCacheKey('did:plc:abc', 4),
-        'html:did:plc:abc:4',
+        'html:v2:did:plc:abc:4',
         'new versions get distinct keys'
+    )
+})
+
+test('buildLazyHtmlCacheKey is prefixed with the v2 schema marker', t => {
+    const key = buildLazyHtmlCacheKey('did:plc:test', 7)
+
+    t.equal(
+        key.startsWith('html:v2:'),
+        true,
+        'cache key starts with html:v2:'
     )
 })
 

@@ -10,7 +10,7 @@ export function buildLazyHtmlCacheKey (
     did:string,
     version:number
 ):string {
-    return `html:${did}:${version}`
+    return `html:v2:${did}:${version}`
 }
 
 export function serializeInitialFeed (

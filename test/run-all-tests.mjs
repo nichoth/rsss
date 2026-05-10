@@ -14,6 +14,7 @@ const commands = [
     'node test/local-first-opfs-persistence-static.mjs',
     'node test/local-first-docs.mjs',
     'node test/vite-build-inputs.mjs',
+    'node test/shell-html.mjs',
     'node test/vite-isolation-headers.mjs',
     'node test/isolation-headers-static.mjs',
     'node test/run-all-coverage.mjs',

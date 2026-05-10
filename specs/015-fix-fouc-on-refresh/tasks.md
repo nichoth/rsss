@@ -94,7 +94,7 @@ section A.2–A.5).
 > without the `v2:` segment) and MUST pass after the implementation
 > tasks (T005, T006).**
 
-- [ ] T002 [P] [US1] Create
+- [X] T002 [P] [US1] Create
   `/Users/nick/code/rsss/test/shell-html.mjs` — a plain node script
   matching the pattern of
   `/Users/nick/code/rsss/test/vite-build-inputs.mjs` (uses
@@ -109,7 +109,7 @@ section A.2–A.5).
   contract recorded at
   `/Users/nick/code/rsss/specs/015-fix-fouc-on-refresh/contracts/README.md`.
 
-- [ ] T003 [P] [US1] Wire the new test into the project's runner.
+- [X] T003 [P] [US1] Wire the new test into the project's runner.
   Edit `/Users/nick/code/rsss/test/run-all-tests.mjs` to add
   `'node test/shell-html.mjs'` to the `commands` array (group it
   with the other static `node test/*.mjs` checks near the top of
@@ -117,7 +117,7 @@ section A.2–A.5).
   No `package.json` script alias is required — `test/run-all-tests.mjs`
   is invoked by `npm test` directly.
 
-- [ ] T004 [P] [US1] Extend
+- [X] T004 [P] [US1] Extend
   `/Users/nick/code/rsss/test/lazy-html.ts` with one new tapzero
   test: import `buildLazyHtmlCacheKey` from
   `'../src/server/lazy-html.js'`, call it with a representative
@@ -130,7 +130,7 @@ section A.2–A.5).
 
 ### Implementation for User Story 1
 
-- [ ] T005 [US1] Edit `/Users/nick/code/rsss/index.html`. Add a
+- [X] T005 [US1] Edit `/Users/nick/code/rsss/index.html`. Add a
   single new child of `<head>`:
   `<link rel="stylesheet" href="/src/client/style.css">`. Place
   it **before** the existing
@@ -143,7 +143,7 @@ section A.2–A.5).
   `/Users/nick/code/rsss/specs/015-fix-fouc-on-refresh/research.md`
   Decision 1, point 4).
 
-- [ ] T006 [US1] Edit `/Users/nick/code/rsss/src/server/lazy-html.ts`.
+- [X] T006 [US1] Edit `/Users/nick/code/rsss/src/server/lazy-html.ts`.
   In `buildLazyHtmlCacheKey` change the returned string from
   `` `html:${did}:${version}` `` to
   `` `html:v2:${did}:${version}` ``. This is a single-line edit
@@ -154,7 +154,7 @@ section A.2–A.5).
 
 ### Verification for User Story 1
 
-- [ ] T007 [US1] From
+- [X] T007 [US1] From
   `/Users/nick/code/rsss/`, run `npm test`. The new
   `test/shell-html.mjs` runs as part of the static-checks group and
   must pass; the extended `test/lazy-html.ts` runs as part of the
@@ -235,10 +235,10 @@ verified.
 and Edge Cases that span both stories. These run after the two
 story phases are complete.
 
-- [ ] T011 [P] Run `npm run lint` from `/Users/nick/code/rsss/` and
+- [X] T011 [P] Run `npm run lint` from `/Users/nick/code/rsss/` and
   confirm it passes.
 
-- [ ] T012 [P] Run `npm run typecheck` from `/Users/nick/code/rsss/`
+- [X] T012 [P] Run `npm run typecheck` from `/Users/nick/code/rsss/`
   and confirm it passes.
 
 - [ ] T013 Manually verify SC-002 (TTFCP regression ≤10%) per
