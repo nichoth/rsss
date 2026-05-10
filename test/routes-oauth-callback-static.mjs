@@ -10,14 +10,22 @@ const callbackRoute = routes.match(
     /router\.addRoute\('\/oauth\/callback', \(\) => \{[\s\S]*?\n    \}\)/
 )?.[0] ?? ''
 
-assert.match(
+// The OAuth handshake is dispatched at boot from `State()` so the App
+// shell can short-circuit to the loader before any route action runs.
+// Calling `handleOAuthCallback` from the route action would
+// reintroduce the login-form flash this feature exists to fix.
+assert.doesNotMatch(
     callbackRoute,
-    /\/\/.*handleOAuthCallback.*async[\s\S]*\/\/.*network/,
-    'OAuth callback route comment explains async network work'
+    /handleOAuthCallback/,
+    'OAuth callback route action must not call handleOAuthCallback ' +
+        '(boot-dispatched in state.ts; see specs/017-fix-oauth-callback-flash)'
 )
 
+// The fallback `LoginPage` return is intentional and depends on the
+// App shell short-circuiting to `<OAuthCallbackLoader/>` while
+// `state.oauthInFlight` is true. Lock this contract in.
 assert.match(
     callbackRoute,
-    /\/\/.*LoginPage[\s\S]*\/\/.*route/,
-    'OAuth callback route comment explains route change after LoginPage'
+    /return LoginPage/,
+    'OAuth callback route action returns LoginPage as fallback'
 )

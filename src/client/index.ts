@@ -8,6 +8,7 @@ import { NotFound } from './not-found.js'
 import { Header } from './components/header.js'
 import { PageSkeleton } from './components/page-skeleton.js'
 import { ItemSkeleton } from './components/item-skeleton.js'
+import { OAuthCallbackLoader } from './components/oauth-loader.js'
 import '@substrate-system/details-summary'
 import './style.css'
 // import Debug from '@substrate-system/debug'
@@ -54,6 +55,10 @@ export const App:FunctionComponent<{
 
     if (!match.value || !match.value.action) {
         return html`<${NotFound} />`
+    }
+
+    if (state.oauthInFlight.value) {
+        return html`<${OAuthCallbackLoader} />`
     }
 
     if (!pageReady.value) {
