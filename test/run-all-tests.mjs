@@ -66,18 +66,21 @@ const commands = [
     [
         'esbuild ./test/session-record.ts --bundle --platform=node',
         '--format=esm',
+        '--external:./src/server/blurhash-runtime.js',
         '--alias:cloudflare:workers=./test/cloudflare-workers-stub.ts',
         '| node --input-type=module | tap-spec'
     ].join(' '),
     [
         'esbuild ./test/logout.ts --bundle --platform=node',
         '--format=esm',
+        '--external:./src/server/blurhash-runtime.js',
         '--alias:cloudflare:workers=./test/cloudflare-workers-stub.ts',
         '| node --input-type=module | tap-spec'
     ].join(' '),
     [
         'esbuild ./test/account-deletion.ts --bundle --platform=node',
         '--format=esm',
+        '--external:./src/server/blurhash-runtime.js',
         '--alias:cloudflare:workers=./test/cloudflare-workers-stub.ts',
         '| node --input-type=module | tap-spec'
     ].join(' '),
@@ -93,6 +96,7 @@ const commands = [
         '| node --input-type=module | tap-spec'
     ].join(' '),
     'npm run test:lazy-html',
+    'npm run test:server-import-shape',
     'npm run test:lazy-html-handler',
     'node test/run-lazy-html-routing.mjs',
     'npm run test:initial-feed',

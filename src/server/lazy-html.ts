@@ -6,6 +6,12 @@ export interface InitialFeedPayload {
     has_more:boolean
 }
 
+export function shouldSkipLazyHtml (
+    args:{ dev:boolean }
+):boolean {
+    return args.dev
+}
+
 export function buildLazyHtmlCacheKey (
     did:string,
     version:number

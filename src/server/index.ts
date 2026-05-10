@@ -30,6 +30,7 @@ import {
 } from './email.js'
 import { handleBlurhashQueueBatch } from './blurhash-consumer.js'
 import { handleLazyHtmlRequest } from './lazy-html-handler.js'
+import { shouldSkipLazyHtml } from './lazy-html.js'
 import type { Context, Next } from 'hono'
 import type * as BlurhashRuntime from './blurhash-runtime.js'
 
@@ -1470,6 +1471,10 @@ app.all('*', (c) => {
         return c.notFound()
     }
 
+    if (shouldSkipLazyHtml({ dev: import.meta.env.DEV })) {
+        return c.env.ASSETS.fetch(c.req.raw)
+    }
+
     const session = c.get('session')
     const did = session?.did
 
@@ -1486,12 +1491,10 @@ app.all('*', (c) => {
     return c.env.ASSETS.fetch(c.req.raw)
 })
 
-const blurhashRuntimeModule = './blurhash-runtime.js'
-
 const worker = Object.assign(app, {
     async queue (batch:MessageBatch<unknown>, env:Env):Promise<void> {
         const runtime = await import(
-            blurhashRuntimeModule
+            './blurhash-runtime.js'
         ) as typeof BlurhashRuntime
         await handleBlurhashQueueBatch(
             batch,

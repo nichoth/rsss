@@ -5,6 +5,7 @@ const esbuild = spawn('esbuild', [
     '--bundle',
     '--platform=node',
     '--format=esm',
+    '--external:./src/server/blurhash-runtime.js',
     '--alias:cloudflare:workers=./test/cloudflare-workers-stub.ts'
 ], {
     stdio: ['ignore', 'pipe', 'inherit']

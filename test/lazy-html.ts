@@ -3,6 +3,7 @@ import {
     buildLazyHtmlCacheKey,
     injectInitialFeed,
     serializeInitialFeed,
+    shouldSkipLazyHtml,
     type InitialFeedPayload
 } from '../src/server/lazy-html.js'
 
@@ -120,5 +121,21 @@ test('injectInitialFeed returns input unchanged without head close', t => {
         injectInitialFeed(html, payload()),
         html,
         'HTML without </head> is not modified'
+    )
+})
+
+test('shouldSkipLazyHtml returns true in dev mode', t => {
+    t.equal(
+        shouldSkipLazyHtml({ dev: true }),
+        true,
+        'returns true when dev is true'
+    )
+})
+
+test('shouldSkipLazyHtml returns false in production mode', t => {
+    t.equal(
+        shouldSkipLazyHtml({ dev: false }),
+        false,
+        'returns false when dev is false'
     )
 })
