@@ -110,6 +110,37 @@
 - Lazy HTML handler tests should assert observable cache orchestration:
   feed-version reads, versioned KV keys, data endpoint skips on cache hits,
   `/index.html` shell fetches on misses, and parsed bootstrap JSON.
+- Cookie-sensitive worker route tests must run in Node, not browser tapout,
+  because browser fetch strips `Cookie` request headers before Hono's
+  session middleware can read them.
+
+## 2026-05-09 22:17 PDT - US-020
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Wired the lazy HTML handler into the worker
+  catch-all route.
+  - Authenticated requests with a verified `session.did`, `HTML_KV`, and
+    `USER_DO` now route through `handleLazyHtmlRequest()` using
+    `getUserDO(c.env, did)`.
+  - Anonymous requests still fall through to `ASSETS.fetch()` with no
+    Durable Object call.
+  - Non-HTML authenticated assets still use the handler's internal HTML
+    guard and are served by ASSETS.
+  - Added focused Node coverage for authenticated HTML bootstrap,
+    anonymous shell fallback, and authenticated asset fallback.
+- Files changed:
+  - `src/server/index.ts`
+  - `test/lazy-html-routing.ts`
+  - `test/run-lazy-html-routing.mjs`
+  - `test/run-all-tests.mjs`
+  - `package.json`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Cookie-sensitive worker route tests should use a Node runner; browser
+    tapout cannot reliably send synthetic `Cookie` headers.
+  - Lazy HTML worker routing should keep anonymous and asset fallbacks
+    observable by asserting DO/KV call counts, not only response bodies.
+---
 
 ## 2026-05-09 21:47 PDT - US-019
 Thread: https://ampcode.com/threads/unknown

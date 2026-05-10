@@ -29,6 +29,7 @@ import {
     sendAccountDeletionScheduled
 } from './email.js'
 import { handleBlurhashQueueBatch } from './blurhash-consumer.js'
+import { handleLazyHtmlRequest } from './lazy-html-handler.js'
 import type { Context, Next } from 'hono'
 import type * as BlurhashRuntime from './blurhash-runtime.js'
 
@@ -39,6 +40,7 @@ export interface Env {
     USER_DO:DurableObjectNamespace<UserDO>;
     SESSIONS:KVNamespace;
     BLURHASH_KV:KVNamespace;
+    HTML_KV?:KVNamespace;
     BLURHASH_QUEUE:Queue;
     ASSETS:Fetcher;
     SESSION_SECRET:string;
@@ -1466,6 +1468,19 @@ app.all('*', (c) => {
     if (!c.env?.ASSETS) {
         // In dev mode, let Vite handle static assets
         return c.notFound()
+    }
+
+    const session = c.get('session')
+    const did = session?.did
+
+    if (did && c.env.HTML_KV && c.env.USER_DO) {
+        return handleLazyHtmlRequest({
+            did,
+            kv: c.env.HTML_KV,
+            doStub: getUserDO(c.env, did),
+            assets: c.env.ASSETS,
+            request: c.req.raw
+        })
     }
 
     return c.env.ASSETS.fetch(c.req.raw)
