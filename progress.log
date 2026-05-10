@@ -104,6 +104,30 @@
 - Lazy HTML bootstrap helpers live in `src/server/lazy-html.ts`. Tests for
   injected bootstrap data should parse the `#initial-feed` script JSON
   instead of comparing raw HTML string shapes.
+- New Cloudflare KV bindings should have static config coverage for the
+  binding name plus concrete `id` and `preview_id` fields, then regenerate
+  `worker-configuration.d.ts` with `npx wrangler types`.
+
+## 2026-05-09 21:26 PDT - US-018
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Provisioned the `HTML_KV` namespace binding.
+  - Created the production and preview `HTML_KV` namespaces with Wrangler.
+  - Added `HTML_KV` next to `BLURHASH_KV` in `wrangler.jsonc`.
+  - Regenerated `worker-configuration.d.ts` so `Env` includes
+    `HTML_KV: KVNamespace`.
+  - Extended `test/deploy-config.mjs` to assert the binding and both ids.
+- Files changed:
+  - `wrangler.jsonc`
+  - `worker-configuration.d.ts`
+  - `test/deploy-config.mjs`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Wrangler OAuth token refresh can fail transiently; `npx wrangler whoami`
+    can refresh and verify auth before retrying namespace commands.
+  - Keep KV namespace config tests focused on static deploy contract checks:
+    binding name, production id, and preview id.
+---
 
 ## 2026-05-09 21:15 PDT - US-017
 Thread: https://ampcode.com/threads/unknown

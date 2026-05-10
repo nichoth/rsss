@@ -50,6 +50,11 @@
 			"binding": "BLURHASH_KV",
 			"id": "f1ffa380aea548aebc5c83fb19ca8de7",
 			"preview_id": "7361bc827bd143aa82a5770bfc3e3a25"
+		},
+		{
+			"binding": "HTML_KV",
+			"id": "8576d34d4e0a46d8bd2567339eeeed8f",
+			"preview_id": "3051be85a6614268b5497717ff74e596"
 		}
 	],
 

@@ -27,6 +27,24 @@ assert.match(
 )
 
 assert.match(
+    wrangler,
+    /"binding"\s*:\s*"HTML_KV"/,
+    'HTML_KV must be declared as a KV namespace binding'
+)
+
+assert.match(
+    wrangler,
+    /"binding"\s*:\s*"HTML_KV"[\s\S]*?"id"\s*:\s*"[^"]+"/,
+    'HTML_KV must declare a production namespace id'
+)
+
+assert.match(
+    wrangler,
+    /"binding"\s*:\s*"HTML_KV"[\s\S]*?"preview_id"\s*:\s*"[^"]+"/,
+    'HTML_KV must declare a preview namespace id'
+)
+
+assert.match(
     queuesBlock,
     /"binding"\s*:\s*"BLURHASH_QUEUE"[\s\S]*?"queue"\s*:\s*"blurhash-jobs"/,
     'blurhash-jobs must be bound as the producer queue'
