@@ -1,6 +1,30 @@
 import { test } from '@substrate-system/tapzero'
 import { UserDO } from '../src/server/durable-objects/index.js'
 
+const pollerStorage = new Map<string, unknown>()
+
+;(UserDO.prototype as unknown as {
+    ctx:{
+        storage:{
+            get:<T>(key:string) => Promise<T|undefined>
+            put:(key:string, value:unknown) => Promise<void>
+            delete:(key:string) => Promise<void>
+        }
+    }
+}).ctx = {
+    storage: {
+        async get<T> (key:string) {
+            return pollerStorage.get(key) as T|undefined
+        },
+        async put (key:string, value:unknown) {
+            pollerStorage.set(key, value)
+        },
+        async delete (key:string) {
+            pollerStorage.delete(key)
+        }
+    }
+}
+
 interface ParsedFeed {
     title:string|null
     description:string|null
@@ -390,9 +414,9 @@ test('fetchFeed stores og image for newly inserted items', async t => {
         }) => Promise<void>
     }
     const originalFetch = globalThis.fetch
-    let articleFetches = 0
-    let thumbnailUpdate:null | {
+    let itemImageUpdate:null | {
         thumbnail:unknown
+        ogImage:unknown
         id:unknown
     } = null
 
@@ -414,10 +438,12 @@ test('fetchFeed stores og image for newly inserted items', async t => {
                 }
             }
 
-            if (query.includes('UPDATE items SET thumbnail_url = ?')) {
-                thumbnailUpdate = {
+            if (query.includes('UPDATE items SET') &&
+                query.includes('og_image_url')) {
+                itemImageUpdate = {
                     thumbnail: params[0],
-                    id: params[1]
+                    ogImage: params[1],
+                    id: params[2]
                 }
                 return { toArray: () => [] }
             }
@@ -447,12 +473,7 @@ test('fetchFeed stores og image for newly inserted items', async t => {
         }
 
         if (urlText === 'https://example.com/post/1') {
-            articleFetches++
-            return new Response(
-                '<head><meta property="og:image" ' +
-                    'content="https://cdn.example.com/og.jpg"></head>',
-                { headers: { 'content-type': 'text/html' } }
-            )
+            throw new Error('feed image should avoid article fetch')
         }
 
         return new Response(`
@@ -490,14 +511,140 @@ test('fetchFeed stores og image for newly inserted items', async t => {
         globalThis.fetch = originalFetch
     }
 
-    t.equal(articleFetches, 1, 'article URL is fetched for og:image')
     t.deepEqual(
-        thumbnailUpdate,
+        itemImageUpdate,
         {
-            thumbnail: 'https://cdn.example.com/og.jpg',
+            thumbnail: 'https://cdn.example.com/parser.jpg',
+            ogImage: 'https://cdn.example.com/parser.jpg',
             id: 42
         },
-        'new item thumbnail_url is set from og:image'
+        'new item image columns prefer the feed image'
+    )
+})
+
+test('fetchFeed stores article og:image in og_image_url', async t => {
+    const userDo = Object.create(UserDO.prototype) as {
+        sql:{
+            exec:(query:string, ...params:unknown[]) => {
+                toArray:() => unknown[]
+                one?:() => unknown
+                rowsWritten?:number
+            }
+        }
+        fetchFeed:(feed:{
+            id:number
+            url:string
+            title:string|null
+            description:string|null
+            site_url:string|null
+            last_fetched:string|null
+            last_error:string|null
+            last_status:number|null
+            created_at:string
+            updated_at:string
+        }) => Promise<void>
+    }
+    const originalFetch = globalThis.fetch
+    let itemImageUpdate:null | {
+        thumbnail:unknown
+        ogImage:unknown
+        id:unknown
+    } = null
+
+    userDo.sql = {
+        exec (query:string, ...params:unknown[]) {
+            if (query.includes('UPDATE feeds SET') &&
+                query.includes('last_error = NULL')) {
+                return { toArray: () => [] }
+            }
+
+            if (query.includes('INSERT OR IGNORE INTO items')) {
+                return { rowsWritten: 1, toArray: () => [] }
+            }
+
+            if (query.includes('SELECT id FROM items')) {
+                return {
+                    toArray: () => [],
+                    one: () => ({ id: 43 })
+                }
+            }
+
+            if (query.includes('UPDATE items SET') &&
+                query.includes('og_image_url')) {
+                itemImageUpdate = {
+                    thumbnail: params[0],
+                    ogImage: params[1],
+                    id: params[2]
+                }
+                return { toArray: () => [] }
+            }
+
+            if (query.includes('SELECT feeds.id FROM feeds')) {
+                return { toArray: () => [] }
+            }
+
+            if (
+                query.includes('COUNT(items.id)') &&
+                query.includes('GROUP BY feeds.id')
+            ) {
+                return { toArray: () => [] }
+            }
+
+            throw new Error(`Unexpected SQL: ${query}`)
+        }
+    }
+
+    globalThis.fetch = async (url) => {
+        const urlText = String(url)
+
+        if (urlText.startsWith('https://cloudflare-dns.com/')) {
+            return new Response(JSON.stringify({
+                Answer: [{ data: '93.184.216.34' }]
+            }))
+        }
+
+        if (urlText === 'https://example.com/post/1') {
+            return new Response(
+                '<head><meta name="og:image" ' +
+                    'content="https://cdn.example.com/og.jpg"></head>',
+                { headers: { 'content-type': 'text/html' } }
+            )
+        }
+
+        return new Response(rssFeed(`
+            <item>
+                <guid>item-1</guid>
+                <title>Item 1</title>
+                <link>https://example.com/post/1</link>
+            </item>
+        `))
+    }
+
+    try {
+        await userDo.fetchFeed({
+            id: 5,
+            url: 'https://example.com/feed.xml',
+            title: null,
+            description: null,
+            site_url: null,
+            last_fetched: null,
+            last_error: null,
+            last_status: null,
+            created_at: '2026-04-27 00:00:00',
+            updated_at: '2026-04-27 00:00:00'
+        })
+    } finally {
+        globalThis.fetch = originalFetch
+    }
+
+    t.deepEqual(
+        itemImageUpdate,
+        {
+            thumbnail: 'https://cdn.example.com/og.jpg',
+            ogImage: 'https://cdn.example.com/og.jpg',
+            id: 43
+        },
+        'new item og_image_url is set from article metadata'
     )
 })
 
@@ -549,7 +696,8 @@ test('fetchFeed caps concurrent og image requests at four', async t => {
                 }
             }
 
-            if (query.includes('UPDATE items SET thumbnail_url = ?')) {
+            if (query.includes('UPDATE items SET') &&
+                query.includes('og_image_url')) {
                 thumbnailUpdates++
                 return { toArray: () => [] }
             }
@@ -683,10 +831,11 @@ test('fetchFeed silently handles og failures, uses parser image', async t => {
                 }
             }
 
-            if (query.includes('UPDATE items SET thumbnail_url = ?')) {
+            if (query.includes('UPDATE items SET') &&
+                query.includes('og_image_url')) {
                 thumbnailUpdate = {
                     thumbnail: params[0],
-                    id: params[1]
+                    id: params[2]
                 }
                 return { toArray: () => [] }
             }
@@ -941,7 +1090,8 @@ test('fetchFeed stays quiet when article URL exceeds redirect budget',
                     }
                 }
 
-                if (query.includes('UPDATE items SET thumbnail_url = ?')) {
+                if (query.includes('UPDATE items SET') &&
+                    query.includes('og_image_url')) {
                     return { toArray: () => [] }
                 }
 
@@ -1069,10 +1219,11 @@ test('fetchFeed resolves og image after multi-hop article redirects',
                     }
                 }
 
-                if (query.includes('UPDATE items SET thumbnail_url = ?')) {
+                if (query.includes('UPDATE items SET') &&
+                    query.includes('og_image_url')) {
                     thumbnailUpdate = {
                         thumbnail: params[0],
-                        id: params[1]
+                        id: params[2]
                     }
                     return { toArray: () => [] }
                 }
@@ -1210,10 +1361,11 @@ test('fetchFeed falls back to feed image when article redirects loop',
                     }
                 }
 
-                if (query.includes('UPDATE items SET thumbnail_url = ?')) {
+                if (query.includes('UPDATE items SET') &&
+                    query.includes('og_image_url')) {
                     thumbnailUpdate = {
                         thumbnail: params[0],
-                        id: params[1]
+                        id: params[2]
                     }
                     return { toArray: () => [] }
                 }
@@ -1341,7 +1493,8 @@ test('fetchFeed leaves thumbnail null when article loops and feed has none',
                     }
                 }
 
-                if (query.includes('UPDATE items SET thumbnail_url = ?')) {
+                if (query.includes('UPDATE items SET') &&
+                    query.includes('og_image_url')) {
                     thumbnailUpdates++
                     return { toArray: () => [] }
                 }

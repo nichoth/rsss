@@ -1703,7 +1703,7 @@ export class UserDO extends DurableObject<Env> {
                 nextItemIndex++
                 if (!item) return
 
-                await this.updateNewItemThumbnail(
+                await this.updateNewItemImage(
                     item,
                     deadline,
                     controller.signal
@@ -1716,41 +1716,45 @@ export class UserDO extends DurableObject<Env> {
 
         for (const result of results) {
             if (result.status === 'rejected') {
-                console.error('Error updating item thumbnail:', result.reason)
+                console.error('Error updating item image:', result.reason)
             }
         }
     }
 
-    private async updateNewItemThumbnail (
+    private async updateNewItemImage (
         item:NewFeedItem,
         deadline:number,
         signal:AbortSignal
     ):Promise<void> {
         try {
-            const thumbnailUrl = await this.resolveNewItemThumbnail(
+            const imageUrl = await this.resolveNewItemImage(
                 item,
                 deadline,
                 signal
             )
-            if (!thumbnailUrl) return
+            if (!imageUrl) return
 
             this.sql.exec(
-                `UPDATE items SET thumbnail_url = ?
-                WHERE id = ? AND thumbnail_url IS NULL`,
-                thumbnailUrl,
+                `UPDATE items SET
+                    thumbnail_url = COALESCE(thumbnail_url, ?),
+                    og_image_url = COALESCE(og_image_url, ?)
+                WHERE id = ?`,
+                imageUrl,
+                imageUrl,
                 item.id
             )
         } catch (err) {
-            console.error('Error updating item thumbnail:', err)
+            console.error('Error updating item image:', err)
         }
     }
 
-    private async resolveNewItemThumbnail (
+    private async resolveNewItemImage (
         item:NewFeedItem,
         deadline:number,
         signal:AbortSignal
     ):Promise<string | null> {
-        if (!item.link) return item.imageUrl
+        if (item.imageUrl) return item.imageUrl
+        if (!item.link) return null
 
         const ogImage = await this.fetchOgImageBeforeDeadline(
             item.link,
@@ -1758,7 +1762,7 @@ export class UserDO extends DurableObject<Env> {
             signal
         )
 
-        return ogImage || item.imageUrl
+        return ogImage
     }
 
     private async fetchOgImageBeforeDeadline (

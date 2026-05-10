@@ -1,5 +1,9 @@
 ## Codebase Patterns
 
+- New feed item image enrichment is centralized in
+  `UserDO.updateNewItemThumbnails`: feed-provided image hints are preferred
+  over article fetches, and the resolved image should update both
+  `thumbnail_url` and `og_image_url` together.
 - Cache status header visibility is gated by both local-first settings:
   `syncSubscriptions` and `storeContent`. Component tests that expect the
   indicator to render must opt both signals in, alongside an entitled user
@@ -61,6 +65,33 @@
   `test/deploy-config.mjs`. When `wrangler.jsonc` bindings change, update
   that static test and rerun `npx wrangler types` so
   `worker-configuration.d.ts` stays in sync.
+
+## 2026-05-09 18:31 PDT - US-008
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Extracted and persisted OG image URLs during new
+  feed item ingestion.
+  - New item enrichment now prefers feed-provided media image hints and
+    skips article fetching when those hints exist.
+  - Article metadata fallback stores `og_image_url` and preserves the
+    existing thumbnail behavior.
+  - `fetchOgImage` now accepts `name="og:image"` in addition to the
+    existing property and Twitter image forms.
+  - Updated focused feed parser/enrichment tests for the new two-column
+    image update behavior.
+- Files changed:
+  - `src/server/durable-objects/index.ts`
+  - `src/server/feed-fetch.ts`
+  - `test/feed-parser.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Feed image enrichment should keep thumbnail and OG image columns in
+    sync until a later story splits thumbnail rendering from BlurHash image
+    metadata.
+  - `test/feed-parser.ts` uses `Object.create(UserDO.prototype)`, so tests
+    that call `fetchFeed` need a lightweight `ctx.storage` stub for poller
+    state reads and writes.
+---
 
 ## 2026-05-09 18:23 PDT - US-007
 Thread: https://ampcode.com/threads/unknown
