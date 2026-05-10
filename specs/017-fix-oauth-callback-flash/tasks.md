@@ -32,7 +32,7 @@ the template, with the bulk of work under US1.
 **Purpose**: No project initialization is needed for this feature
 (bug fix to an existing SPA). Confirm baseline only.
 
-- [ ] T001 Confirm baseline build is green: run `npm run lint` and
+- [X] T001 Confirm baseline build is green: run `npm run lint` and
       `npx tsc --noEmit` from repo root and verify both pass before
       making any changes (creates a known-good comparison point for
       the post-fix verification in Phase 4).
@@ -46,7 +46,7 @@ subsequent task reads. All US1 tasks depend on this existing.
 
 **CRITICAL**: No US1 task can begin until T002 lands.
 
-- [ ] T002 Add `oauthInFlight:Signal<boolean>` to the `AppState`
+- [X] T002 Add `oauthInFlight:Signal<boolean>` to the `AppState`
       class in `src/client/state.ts`. Declare the field, initialize
       it inside the `State()` constructor *synchronously* from
       `window.location` using the predicate from
@@ -81,7 +81,7 @@ SC-001/SC-002.
 
 ### Implementation for User Story 1
 
-- [ ] T003 [P] [US1] Create the new neutral loader component at
+- [X] T003 [P] [US1] Create the new neutral loader component at
       `src/client/components/oauth-loader.ts`. Export an
       `OAuthCallbackLoader` Preact component using `htm/preact`
       (match the style of the existing components in
@@ -92,14 +92,14 @@ SC-001/SC-002.
       text. Import this component's CSS from the sibling
       `oauth-loader.css` file (created in T004).
 
-- [ ] T004 [P] [US1] Create
+- [X] T004 [P] [US1] Create
       `src/client/components/oauth-loader.css` containing minimal
       styling for the loader. Use only existing CSS variables from
       `src/client/_variables.css` (no new colour or size tokens).
       No font sizes below 1rem (per global CLAUDE.md). Centre the
       spinner + label vertically and horizontally in the viewport.
 
-- [ ] T005 [US1] In `src/client/state.ts`, modify the boot path so
+- [X] T005 [US1] In `src/client/state.ts`, modify the boot path so
       that when `oauthInFlight` was set to `true` in T002, the
       constructor (or its boot helper) `await`s the existing
       `checkAuth()`. Then, per `data-model.md` Lifecycle rows 3-4:
@@ -112,7 +112,7 @@ SC-001/SC-002.
       Use `import { batch } from '@preact/signals'` per global
       style. Depends on T002.
 
-- [ ] T006 [US1] In `src/client/state.ts`, modify
+- [X] T006 [US1] In `src/client/state.ts`, modify
       `State.handleOAuthCallback(state)` to clear stale auth state
       at entry and clear `oauthInFlight` in `finally`. Specifically:
       - At the very top of the function body, run:
@@ -139,7 +139,7 @@ SC-001/SC-002.
       failure stay where they are). Depends on T002. Same file as
       T005, so cannot run in parallel with T005.
 
-- [ ] T007 [US1] In `src/client/index.ts`, add the App shell short-
+- [X] T007 [US1] In `src/client/index.ts`, add the App shell short-
       circuit. Before the existing `if (!pageReady.value) { ... }`
       block (around lines 55-68 per `research.md`), insert:
       ```ts
@@ -154,7 +154,7 @@ SC-001/SC-002.
       flag is true). Depends on T002 (signal exists), T003/T004
       (component exists).
 
-- [ ] T008 [US1] In `src/client/routes/index.ts`, simplify the
+- [X] T008 [US1] In `src/client/routes/index.ts`, simplify the
       `/oauth/callback` route action. Per `research.md` Decision 3,
       the handshake is now boot-dispatched in `state.ts`, so the
       route action no longer needs to call `handleOAuthCallback`.
@@ -184,11 +184,11 @@ check once before moving on.
 **Purpose**: Verification, quality gates, and recording the manual
 verification result per the constitution.
 
-- [ ] T009 Run `npm run lint` from repo root and fix any lint errors
+- [X] T009 Run `npm run lint` from repo root and fix any lint errors
       introduced by T002-T008. Lint settings MUST NOT be changed
       (per global CLAUDE.md).
 
-- [ ] T010 Run `npx tsc --noEmit` from repo root and resolve any
+- [X] T010 Run `npx tsc --noEmit` from repo root and resolve any
       type errors introduced by T002-T008.
 
 - [ ] T011 Execute the full `quickstart.md` script:

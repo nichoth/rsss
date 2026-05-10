@@ -103,6 +103,21 @@ function isBrowserOnline ():boolean {
     )
 }
 
+/**
+ * Detect whether the page was loaded from an OAuth-callback URL.
+ * Used at boot to set `state.oauthInFlight` synchronously so the App
+ * shell can short-circuit to the loader before any other render.
+ */
+function isOAuthCallbackUrl ():boolean {
+    if (window.location.pathname === '/oauth/callback') return true
+    const params = new URLSearchParams(window.location.search)
+    return (
+        params.has('code') &&
+        params.has('state') &&
+        params.has('iss')
+    )
+}
+
 async function fillMissingRouteBody (
     did:string|undefined,
     itemRoute:string,
@@ -183,6 +198,12 @@ export type AppState = {
     user:Signal<User|null>,
     authLoading:Signal<boolean>,
     authError:Signal<string|null>,
+    // True from app boot until `handleOAuthCallback` resolves (or the
+    // already-authed short-circuit completes), iff the page was loaded
+    // from an OAuth-callback URL. Used by the App shell to render the
+    // neutral `<OAuthCallbackLoader/>` instead of `LoginPage` during
+    // the handshake window.
+    oauthInFlight:Signal<boolean>,
     feeds:Signal<Feed[]>,
     feedsLoading:Signal<boolean>,
     // Manual "Refresh Feeds" lifecycle. Held true from click until the
@@ -249,6 +270,7 @@ export function State ():AppState {
         user: signal<User|null>(null),
         authLoading: signal(true),
         authError: signal<string|null>(null),
+        oauthInFlight: signal<boolean>(isOAuthCallbackUrl()),
         isAuthenticated: computed(
             () => state.user.value !== null
         ),
@@ -538,7 +560,18 @@ export function State ():AppState {
         State.closeEventStream()
     }
 
-    State.checkAuth(state)
+    ;(async () => {
+        await State.checkAuth(state)
+        if (!state.oauthInFlight.value) return
+        if (state.isAuthenticated.value) {
+            batch(() => {
+                state.oauthInFlight.value = false
+                state._setRoute('/')
+            })
+            return
+        }
+        State.handleOAuthCallback(state)
+    })()
 
     return state
 }
@@ -825,31 +858,34 @@ const api = ky.create({
 State.handleOAuthCallback = async function (
     state:AppState
 ):Promise<void> {
-    const params = new URLSearchParams(
-        window.location.search
-    )
-
-    const code = params.get('code')
-    const nonce = params.get('state')
-    const iss = params.get('iss')
-    const error = params.get('error')
-    const errorDescription = params.get('error_description')
-
-    if (error) {
-        state.authError.value = errorDescription || error
-        state._setRoute('/login')
-        return
-    }
-
-    if (!code || !nonce || !iss) {
-        state.authError.value = 'Missing OAuth parameters'
-        state._setRoute('/login')
-        return
-    }
-
-    state.authLoading.value = true
+    batch(() => {
+        state.authError.value = null
+        state.authLoading.value = true
+    })
 
     try {
+        const params = new URLSearchParams(
+            window.location.search
+        )
+
+        const code = params.get('code')
+        const nonce = params.get('state')
+        const iss = params.get('iss')
+        const error = params.get('error')
+        const errorDescription = params.get('error_description')
+
+        if (error) {
+            state.authError.value = errorDescription || error
+            state._setRoute('/login')
+            return
+        }
+
+        if (!code || !nonce || !iss) {
+            state.authError.value = 'Missing OAuth parameters'
+            state._setRoute('/login')
+            return
+        }
+
         const res = await api.post('auth/callback', {
             json: { code, state: nonce, iss }
         })
@@ -876,7 +912,10 @@ State.handleOAuthCallback = async function (
             'Authentication failed'
         state._setRoute('/login')
     } finally {
-        state.authLoading.value = false
+        batch(() => {
+            state.authLoading.value = false
+            state.oauthInFlight.value = false
+        })
     }
 }
 

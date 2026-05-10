@@ -3,7 +3,7 @@ import { LoginPage } from './login.js'
 import { FeedReader } from './feed-reader.js'
 import { ItemReader } from './item-reader.js'
 import { AboutRoute } from './about.js'
-import { State, type AppState } from '../state.js'
+import { type AppState } from '../state.js'
 import { SettingsRoute } from './settings.js'
 import { SignupPage } from './signup.js'
 import { PaymentSuccessPage } from './payment-success.js'
@@ -71,18 +71,16 @@ export default function _Router (state:AppState):InstanceType<typeof Router> {
     })
 
     router.addRoute('/oauth/callback', () => {
-        // If already authenticated, skip the callback
-        // and go home -- the OAuth state in KV is likely
-        // expired or already consumed.
+        // The handshake is dispatched at boot from `State()` so the
+        // App shell can short-circuit to `<OAuthCallbackLoader/>`
+        // before any route action runs. The `LoginPage` returned here
+        // is a fallback for the post-handshake failure path; while
+        // `state.oauthInFlight` is true the App shell prevents it
+        // from rendering.
         if (state.isAuthenticated.value) {
             state._setRoute('/')
             return FeedReader
         }
-
-        // handleOAuthCallback is async; once this route initially returns
-        // LoginPage, its network request may finish OAuth and change the
-        // active route.
-        State.handleOAuthCallback(state)
         return LoginPage
     })
 
