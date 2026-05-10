@@ -101,6 +101,34 @@
 - Feed HTML cache invalidation is version-based. Any Durable Object write
   that changes feed-list contents or denormalized item image metadata should
   call `bumpFeedVersion()` exactly once for that logical write path.
+- Lazy HTML bootstrap helpers live in `src/server/lazy-html.ts`. Tests for
+  injected bootstrap data should parse the `#initial-feed` script JSON
+  instead of comparing raw HTML string shapes.
+
+## 2026-05-09 21:15 PDT - US-017
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added the pure lazy HTML helper foundation.
+  - `buildLazyHtmlCacheKey()` now builds deterministic
+    `html:{did}:{version}` KV keys.
+  - `serializeInitialFeed()` stringifies the bootstrap payload while
+    escaping `<` so script-tag breakout strings remain inert.
+  - `injectInitialFeed()` inserts a parseable `#initial-feed` JSON script
+    before `</head>` and leaves shells without `</head>` unchanged.
+  - Added the focused `test:lazy-html` script and coverage for cache keys,
+    JSON round-tripping, escaping, injection, and no-head fallback.
+- Files changed:
+  - `src/server/lazy-html.ts`
+  - `test/lazy-html.ts`
+  - `package.json`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Keep lazy HTML shell helpers pure and unit-tested before wiring them
+    into worker routing or KV/DO side effects.
+  - Browser tests can use `DOMParser` to extract the injected
+    `#initial-feed` script and assert on parsed JSON, avoiding brittle raw
+    HTML comparisons.
+---
 
 ## 2026-05-09 21:08 PDT - US-016
 Thread: https://ampcode.com/threads/unknown

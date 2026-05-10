@@ -325,7 +325,7 @@
         "Tests parse JSON out of the injected tag rather than asserting on raw HTML text shapes (per project test-brittleness guidance)"
       ],
       "priority": 17,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
