@@ -100,6 +100,145 @@
       "priority": 5,
       "passes": true,
       "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Add og_image_url, blurhash, image_width, image_height columns to feed_items",
+      "description": "As a developer, I need columns on `feed_items` to denormalize the OG image URL, its BlurHash, and its intrinsic dimensions so the render path is a single SELECT with no per-item KV lookup.",
+      "acceptanceCriteria": [
+        "Migration adds `og_image_url TEXT NULL` to `feed_items`",
+        "Migration adds `blurhash TEXT NULL` to `feed_items`",
+        "Migration adds `image_width INTEGER NULL` to `feed_items`",
+        "Migration adds `image_height INTEGER NULL` to `feed_items`",
+        "No index added on the new columns (read with the row, never filtered on)",
+        "Migration applies cleanly on a fresh DB (no existing rows)",
+        "Migration applies cleanly on an existing DB with rows (existing rows take NULL defaults)",
+        "Typecheck passes",
+        "Lint passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Provision BLURHASH_KV namespace and blurhash-jobs queue infrastructure",
+      "description": "As a developer, I need the KV namespace and queue (with DLQ) declared in wrangler configuration so the producer (poller) and consumer workers can bind to them.",
+      "acceptanceCriteria": [
+        "`BLURHASH_KV` KV namespace declared in `wrangler.toml` (or equivalent)",
+        "`BLURHASH_KV` bound for both poller and consumer workers",
+        "`blurhash-jobs` queue declared as a producer binding for the poller",
+        "`blurhash-jobs` queue declared as a consumer binding with `max_batch_size = 10`, `max_batch_timeout = 30`, `max_retries = 3`",
+        "`blurhash-dlq` declared as the `dead_letter_queue` for `blurhash-jobs`",
+        "`wrangler types` (or project equivalent) regenerated and types compile",
+        "Typecheck passes",
+        "Lint passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Extract og:image in feed poller and persist og_image_url",
+      "description": "As a developer, I need the existing feed poller to extract the og:image meta tag from each new item's article URL and write it to `og_image_url`, so subsequent stages have a URL to hash.",
+      "acceptanceCriteria": [
+        "When the poller ingests a new item, it fetches the article URL and parses `<meta property=\"og:image\">`",
+        "Falls back to `<meta name=\"og:image\">` if the property form is absent",
+        "If the feed payload itself carries an image (e.g. `media:thumbnail`, `enclosure`), prefer that to avoid an extra round trip",
+        "The extracted absolute URL is stored in `og_image_url` on the item row",
+        "If the article fetch fails, times out, or no og:image is found, `og_image_url` stays NULL and the item still ingests successfully",
+        "Fetch uses the same redirect-handling and User-Agent conventions already used by `001-fix-og-image-redirects` (do not regress that fix)",
+        "Typecheck passes",
+        "Lint passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Check BLURHASH_KV in poller; write directly on hit, enqueue on miss",
+      "description": "As a developer, I want the poller to read `BLURHASH_KV` for each new item's image URL so that, if another user's poll has already produced a hash for that URL, we can write the hash straight to D1 and skip the queue entirely.",
+      "acceptanceCriteria": [
+        "KV key derived as `blurhash:<sha256(og_image_url).slice(0, 32)>`",
+        "On KV hit: write `blurhash`, `image_width`, `image_height` to the item row in D1; do NOT enqueue",
+        "On KV miss: insert the item with `blurhash = NULL` and enqueue `{ imageUrl, itemId }` onto `blurhash-jobs`",
+        "If the item has no `og_image_url`, no KV read and no enqueue happens",
+        "Hot-path KV read is exactly one round trip per new item",
+        "Typecheck passes",
+        "Lint passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Implement blurhash-jobs consumer happy path (fetch, decode, encode, write)",
+      "description": "As a developer, I need a queue consumer worker that takes a job, safely fetches the image, decodes and resizes it with @cf-wasm/photon, encodes a BlurHash, captures intrinsic dimensions, and writes the result to KV and D1.",
+      "acceptanceCriteria": [
+        "Consumer registered for the `blurhash-jobs` queue using the bindings from US-007",
+        "On batch receive, for each job: re-check `BLURHASH_KV` first (another worker may have hashed it); on hit, write hash + dimensions to D1 and ack without re-encoding",
+        "Image fetch uses `AbortController` with a 10 second timeout",
+        "Image fetch uses a browser-like User-Agent header",
+        "Reject images with `Content-Length` greater than 5 MB before reading the body",
+        "Backstop check rejects images whose actual received bytes exceed 5 MB",
+        "Decode → resize to 32×32 (nearest-neighbor) with Photon → encode with `blurhash` at 4×4 components",
+        "Capture `image_width` and `image_height` from the original decoded image (before resize)",
+        "Photon image instance's `.free()` is called in a `finally` block",
+        "Write hash to `BLURHASH_KV` with 90-day TTL",
+        "Write `blurhash`, `image_width`, `image_height` to the item's row in D1",
+        "Successful jobs ack the message",
+        "Typecheck passes",
+        "Lint passes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Implement blurhash-jobs consumer failure-mode policy",
+      "description": "As a developer, I need the consumer to map each failure mode to the correct retry/skip/DLQ outcome per the table in `DOCS/PRD-blurhash.md` §7.5, so transient errors retry and permanent errors stop wasting CPU.",
+      "acceptanceCriteria": [
+        "4xx fetch response → permanent skip; ack the message; item row stays NULL",
+        "Decode failure (Photon throws on the bytes) → permanent skip; ack the message; item row stays NULL",
+        "Oversized image (Content-Length or actual bytes > 5 MB) → permanent skip; ack the message; item row stays NULL",
+        "5xx fetch response → throw to trigger retry",
+        "Fetch timeout (AbortController fires) → throw to trigger retry",
+        "KV write failure → throw to trigger retry",
+        "D1 write failure → throw to trigger retry",
+        "Photon crash mid-encode (other than decode-rejection) → throw to trigger retry",
+        "After the queue's `max_retries = 3` exhausts, the message lands in `blurhash-dlq` (verified by config, not behavior change)",
+        "Permanent-skip cases never enter the retry path",
+        "Typecheck passes",
+        "Lint passes"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Render <blur-hash> in SSR with graceful fallback",
+      "description": "As a reader, when I open my feed list I want to see a blurred preview of each article's image immediately, and when the encoder hasn't caught up yet I still want a sensible fallback (no broken UI).",
+      "acceptanceCriteria": [
+        "For items where `blurhash`, `og_image_url`, `image_width`, and `image_height` are all present: SSR emits `<blur-hash placeholder=\"…\" src=\"…\" width=\"…\" height=\"…\" alt=\"…\">`",
+        "For items with `og_image_url` but missing `blurhash`/dimensions: SSR emits a plain `<img src loading=\"lazy\" alt>`",
+        "For items with no `og_image_url`: no image element rendered",
+        "Fallback `<img>` uses the same intrinsic rendering box (e.g. CSS `aspect-ratio`) as the `<blur-hash>` element so layout does not flicker when the encoder catches up",
+        "No new client-side fetch is introduced for the placeholder — the hash is in the initial HTML",
+        "No layout shift or flash of blank space on items that have a hash, on a throttled-network reload",
+        "Lines stay within 80 columns",
+        "Do not change unrelated CSS",
+        "Typecheck passes",
+        "Lint passes",
+        "Verify in browser using dev-browser skill: load the feed list, throttle the network, confirm placeholders paint immediately and crossfade to real images, and confirm fallback `<img>` renders for items missing a hash"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": ""
     }
   ]
 }
