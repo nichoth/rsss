@@ -25,6 +25,8 @@ function makeFeed (id:number, title:string, url:string):Feed {
         description: null,
         site_url: null,
         last_fetched: null,
+        last_error: null,
+        last_status: null,
         created_at: '2026-05-01T00:00:00Z',
         updated_at: '2026-05-01T00:00:00Z'
     }

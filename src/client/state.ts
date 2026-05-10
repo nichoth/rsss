@@ -1866,6 +1866,22 @@ State.refreshFeed = async function (
 }
 
 /**
+ * Re-attempt the initial fetch of a feed that failed to resolve.
+ *
+ * Distinct from refreshFeed: this is for feeds with last_fetched === null
+ * (initial resolve never succeeded). It does not touch refreshInProgress
+ * or feedUpdateCounts — those track manual refresh of already-resolved
+ * feeds. The SSE feed-updated round-trip clears the failed state by
+ * reloading the row.
+ */
+State.retryResolveFeed = async function (
+    _state:AppState,
+    feedId:string
+):Promise<void> {
+    await api.post(`feeds/${feedId}/refresh`)
+}
+
+/**
  * Clear selected item and navigate back to list
  */
 State.clearSelectedItem = function (state:AppState):void {

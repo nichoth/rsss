@@ -57,6 +57,8 @@ function makeFeed (overrides:Partial<Feed> = {}):Feed {
         description: null,
         site_url: null,
         last_fetched: null,
+        last_error: null,
+        last_status: null,
         created_at: '2025-01-01',
         updated_at: '2025-01-01',
         ...overrides

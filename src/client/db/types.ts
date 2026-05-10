@@ -13,6 +13,8 @@ export interface Feed {
     description:string|null
     site_url:string|null
     last_fetched:string|null
+    last_error:string|null
+    last_status:number|null
     created_at:string
     updated_at:string
 }

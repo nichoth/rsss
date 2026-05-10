@@ -47,6 +47,8 @@ function createMockAdapter ():DbAdapter & {
                 description: null,
                 site_url: null,
                 last_fetched: null,
+                last_error: null,
+                last_status: null,
                 created_at: now,
                 updated_at: now
             }

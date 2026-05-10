@@ -163,24 +163,65 @@ export const Sidebar:FunctionComponent<{
                             .perFeed[String(feed.id)] ?? 0
                         const pending = (state
                             .feedUpdateCounts.value[String(feed.id)] ?? 0)
+                        const isResolving = (
+                            feed.last_fetched === null && !feed.last_error
+                        )
+                        const hasFailed = (
+                            feed.last_fetched === null && !!feed.last_error
+                        )
+                        const stateClass = hasFailed ?
+                            ' failed' :
+                            isResolving ? ' resolving' : ''
                         return html`
                             <div class="sidebar-item feed-item ${
                                     isActive ? 'active' : ''
-                                }"
+                                }${stateClass}"
                                 key=${feed.id}
                             >
                                 <span class="badge feed-unread-count">
                                     ${feedUnread}
                                 </span>
                                 ${pending > 0 ? `(${pending}) ` : ''}
+                                ${isResolving && html`
+                                    <span
+                                        class="feed-spinner"
+                                        aria-label="Resolving feed"
+                                        role="status"
+                                    ></span>
+                                `}
                                 <a
                                     class="feed-select"
                                     href="/feed/${feedPath}"
                                 >
                                     ${feed.title || feed.url}
                                 </a>
+                                ${hasFailed && html`
+                                    <span class="feed-failed-label">
+                                        Failed to fetch
+                                    </span>
+                                `}
 
                             <div class="item-controls">
+                                ${hasFailed && html`
+                                    <tool-tip
+                                        content="Retry fetching feed"
+                                        delay="500"
+                                    >
+                                        <button
+                                            type="button"
+                                            class="btn-retry"
+                                            onClick=${() => (
+                                                State.retryResolveFeed(
+                                                    state,
+                                                    String(feed.id)
+                                                )
+                                            )}
+                                            aria-label="Retry fetching feed"
+                                        >
+                                            ↻
+                                        </button>
+                                    </tool-tip>
+                                `}
                                 <tool-tip
                                     content="Delete feed"
                                     delay="500"
