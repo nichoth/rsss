@@ -1723,6 +1723,24 @@ export class UserDO extends DurableObject<Env> {
         return typeof rowsWritten === 'number' ? rowsWritten : 0
     }
 
+    private bumpFeedVersion ():number {
+        const row = this.sql.exec(`
+            UPDATE user_state SET feed_version = feed_version + 1
+            WHERE id = 1
+            RETURNING feed_version
+        `).one() as { feed_version:number } | null
+
+        return row?.feed_version ?? 0
+    }
+
+    private getFeedVersion ():number {
+        const row = this.sql.exec(`
+            SELECT feed_version FROM user_state WHERE id = 1
+        `).one() as { feed_version:number } | null
+
+        return row?.feed_version ?? 0
+    }
+
     private async updateNewItemThumbnails (
         items:NewFeedItem[]
     ):Promise<void> {

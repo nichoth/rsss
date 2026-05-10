@@ -235,6 +235,48 @@ test('UserDO applies user state schema after dead letter outbox', async t => {
     )
 })
 
+test('UserDO reads and bumps feed version through user_state', t => {
+    const statements:{ query:string, params:unknown[] }[] = []
+    const userDo = Object.create(UserDO.prototype) as {
+        sql:{
+            exec:(query:string, ...params:unknown[]) => QueryResult
+        }
+        getFeedVersion:() => number
+        bumpFeedVersion:() => number
+    }
+
+    userDo.sql = {
+        exec (query:string, ...params:unknown[]):QueryResult {
+            statements.push({ query, params })
+
+            if (query.includes('SELECT feed_version FROM user_state')) {
+                return result([{ feed_version: 4 }])
+            }
+
+            if (query.includes('UPDATE user_state SET')) {
+                return result([{ feed_version: 5 }])
+            }
+
+            return result()
+        }
+    }
+
+    t.equal(
+        userDo.getFeedVersion(),
+        4,
+        'getFeedVersion returns the stored counter'
+    )
+    t.equal(
+        userDo.bumpFeedVersion(),
+        5,
+        'bumpFeedVersion returns the incremented counter'
+    )
+    t.ok(
+        statements[1].query.includes('RETURNING feed_version'),
+        'bumpFeedVersion reads the new value atomically'
+    )
+})
+
 test('UserDO migrates missing item image metadata columns', async t => {
     const setup = createConstructorContext(5)
     const originalExec = setup.ctx.storage.sql.exec.bind(

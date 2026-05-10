@@ -1,5 +1,9 @@
 ## Codebase Patterns
 
+- Feed version reads and increments live on `UserDO` private helpers near
+  `rowsWritten`. Use `getFeedVersion()` for the current `user_state`
+  counter and `bumpFeedVersion()` for atomic invalidation via
+  `UPDATE user_state SET feed_version = feed_version + 1 ... RETURNING`.
 - When adding Durable Object schema migrations, bump
   `USER_DO_MIGRATION_VERSION` and update `test/do-migrations.ts` so local
   DOs already stamped with the previous current version still rerun the new
@@ -89,6 +93,26 @@
   applied idempotently in `UserDO.initDatabase()` after the shared indexes,
   triggers, and auxiliary outbox tables, without bumping
   `USER_DO_MIGRATION_VERSION` when it does not ALTER existing tables.
+
+## 2026-05-09 20:56 PDT - US-014
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added Durable Object feed version helper methods.
+  - `getFeedVersion()` reads the single-row `user_state.feed_version`
+    counter and falls back to `0` when no row is returned.
+  - `bumpFeedVersion()` atomically increments `feed_version` with
+    `RETURNING feed_version` and falls back to `0` when no row is returned.
+  - Added focused DO helper coverage in the migration test file.
+- Files changed:
+  - `src/server/durable-objects/index.ts`
+  - `test/do-migrations.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Feed version invalidation should use the `UserDO` helper methods rather
+    than duplicating SQL at write sites.
+  - `test/do-migrations.ts` can exercise private DO helpers through
+    `Object.create(UserDO.prototype)` with a lightweight `sql.exec` stub.
+---
 
 ## 2026-05-09 19:30 PDT - US-012
 Thread: https://ampcode.com/threads/unknown
