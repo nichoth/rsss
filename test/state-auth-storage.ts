@@ -22,7 +22,10 @@ import {
     setLocalTabBlocked
 } from '../src/client/db/tab-coordination.js'
 import { isLocalFirstActive } from '../src/client/db/sync-status.js'
-import { syncSubscriptions } from '../src/client/local-first-settings.js'
+import {
+    syncSubscriptions,
+    storeContent
+} from '../src/client/local-first-settings.js'
 import { billingStatus } from '../src/client/billing-status.js'
 import { State, type AppState } from '../src/client/state.js'
 import { remoteAdapter } from '../src/client/db/remote-adapter.js'
@@ -528,6 +531,42 @@ test('State exposes feed sync status as the single source of truth',
         )
 
         state.cleanup()
+    })
+
+test('State() loads persisted local-first settings on init',
+    t => {
+        const LS_KEY = 'rsss.localFirst'
+        const previous = localStorage.getItem(LS_KEY)
+        localStorage.setItem(LS_KEY, JSON.stringify({
+            syncSubscriptions: true,
+            storeContent: true
+        }))
+        // Simulate fresh app load: signals at their module defaults.
+        syncSubscriptions.value = false
+        storeContent.value = false
+
+        const state = State()
+        try {
+            t.equal(
+                syncSubscriptions.value,
+                true,
+                'syncSubscriptions hydrated from localStorage'
+            )
+            t.equal(
+                storeContent.value,
+                true,
+                'storeContent hydrated from localStorage'
+            )
+        } finally {
+            state.cleanup()
+            syncSubscriptions.value = false
+            storeContent.value = false
+            if (previous === null) {
+                localStorage.removeItem(LS_KEY)
+            } else {
+                localStorage.setItem(LS_KEY, previous)
+            }
+        }
     })
 
 test('refreshFeeds marks feed sync as syncing while request is in flight',

@@ -35,7 +35,8 @@ import {
 } from './db/remote-adapter.js'
 import {
     storeContent,
-    defaultCacheMode
+    defaultCacheMode,
+    loadLocalFirstSettings
 } from './local-first-settings.js'
 import {
     getOutboxCount,
@@ -232,6 +233,11 @@ function clearFeedUpdateCounts (
 }
 
 export function State ():AppState {
+    // Hydrate localStorage-backed settings before any reactive code runs,
+    // so header gates that read syncSubscriptions / storeContent reflect
+    // the user's persisted choices on every route, not just /settings.
+    loadLocalFirstSettings()
+
     const onRoute = Route()
 
     const state = {
