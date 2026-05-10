@@ -237,7 +237,7 @@
         "Verify in browser using dev-browser skill: load the feed list, throttle the network, confirm placeholders paint immediately and crossfade to real images, and confirm fallback `<img>` renders for items missing a hash"
       ],
       "priority": 12,
-      "passes": false,
+      "passes": true,
       "notes": ""
     }
   ]

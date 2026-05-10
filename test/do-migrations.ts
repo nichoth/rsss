@@ -73,7 +73,7 @@ function createConstructorContext (storedVersion:number | null) {
 
 test('UserDO skips migration introspection when version is current',
     async t => {
-        const currentMigrationVersion = 5
+        const currentMigrationVersion = 6
         const setup = createConstructorContext(currentMigrationVersion)
 
         const userDo = new UserDO(setup.ctx, {} as never)
@@ -118,7 +118,7 @@ test('UserDO reruns migrations when stored version is stale', async t => {
     )
     t.deepEqual(
         setup.writes,
-        [{ migration_v: 5 }],
+        [{ migration_v: 6 }],
         'current migration version is persisted'
     )
 })
@@ -185,7 +185,7 @@ test('image metadata columns do not have dedicated indexes', t => {
 })
 
 test('UserDO migrates missing item image metadata columns', async t => {
-    const setup = createConstructorContext(4)
+    const setup = createConstructorContext(5)
     const originalExec = setup.ctx.storage.sql.exec.bind(
         setup.ctx.storage.sql
     )

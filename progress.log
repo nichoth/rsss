@@ -1,5 +1,13 @@
 ## Codebase Patterns
 
+- When adding Durable Object schema migrations, bump
+  `USER_DO_MIGRATION_VERSION` and update `test/do-migrations.ts` so local
+  DOs already stamped with the previous current version still rerun the new
+  column checks.
+- Feed item image rendering is driven by `og_image_url`. Render
+  `<blur-hash>` only when `blurhash`, `image_width`, and `image_height` are
+  all present; otherwise fall back to a plain lazy `<img>`. Do not render
+  legacy `thumbnail_url` as the feed-list image.
 - New feed item image enrichment is centralized in
   `UserDO.updateNewItemThumbnails`: feed-provided image hints are preferred
   over article fetches, and the resolved image should update both
@@ -77,6 +85,38 @@
   image fetches, oversize images, and decode failures in this path; KV
   writes, DO writes, fetch 5xx/timeouts, and encode crashes should throw so
   Cloudflare retries and eventually DLQs according to queue config.
+
+## 2026-05-09 19:30 PDT - US-012
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Rendered feed-list item images from denormalized
+  BlurHash metadata.
+  - `ItemRow` now uses `og_image_url` as the render source.
+  - Rows with complete `blurhash`, `image_width`, and `image_height`
+    metadata render a `<blur-hash>` placeholder element.
+  - Rows with an OG image but incomplete hash metadata fall back to a plain
+    lazy `<img>`.
+  - Rows without `og_image_url` render no image element, even if legacy
+    `thumbnail_url` is present.
+  - Imported the BlurHash web-component CSS into the global client CSS.
+  - Bumped the Durable Object migration version to rerun the existing image
+    metadata column migration on DOs already marked at version 5.
+- Files changed:
+  - `src/client/components/item-row.ts`
+  - `src/client/style.css`
+  - `src/server/durable-objects/index.ts`
+  - `test/item-row.ts`
+  - `test/do-migrations.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `@substrate-system/blur-hash` requires a non-empty `alt`, so feed item
+    images use the item title, falling back to "Article image".
+  - Browser component coverage for `ItemRow` can assert the exact custom
+    element attributes without needing authenticated app state.
+  - Local dev exposed stale Durable Object state at migration version 5; new
+    DO schema migrations must bump `USER_DO_MIGRATION_VERSION`, not only add
+    an idempotent migration function.
+---
 
 ## 2026-05-09 19:17 PDT - US-011
 Thread: https://ampcode.com/threads/unknown

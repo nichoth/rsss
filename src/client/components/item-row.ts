@@ -1,6 +1,7 @@
 import { type FunctionComponent } from 'preact'
 import { useCallback, useEffect, useState } from 'preact/hooks'
 import { html } from 'htm/preact'
+import { BlurHash } from '@substrate-system/blur-hash'
 import { decodeEntities, formatDate, stripHtml } from '../util.js'
 import { MailOpened } from './mail-opened.js'
 import '@substrate-system/tool-tip'
@@ -15,6 +16,13 @@ import '@substrate-system/icons/css'
 import { define } from '@substrate-system/icons/new-tab'
 import { MailSpark } from './mail-spark.js'
 define()
+BlurHash.define()
+
+function isValidImageSize (value:number|null|undefined):value is number {
+    return typeof value === 'number' &&
+        Number.isFinite(value) &&
+        value > 0
+}
 
 export const ItemRow:FunctionComponent<{
     item:Item
@@ -23,14 +31,24 @@ export const ItemRow:FunctionComponent<{
     const isUnread = !item.is_read
     const isStarred = !!item.is_starred
     const [hiddenThumbnail, setHiddenThumbnail] = useState(false)
-    const thumbnailUrl = item.thumbnail_url?.trim()
-    const showThumbnail = Boolean(
-        thumbnailUrl && !hiddenThumbnail
+    const imageUrl = item.og_image_url?.trim()
+    const imageWidth = item.image_width
+    const imageHeight = item.image_height
+    const hasBlurHash = Boolean(
+        item.blurhash &&
+        isValidImageSize(imageWidth) &&
+        isValidImageSize(imageHeight)
     )
+    const showThumbnail = Boolean(
+        imageUrl && !hiddenThumbnail
+    )
+    const imageAlt = item.title ?
+        decodeEntities(item.title + '') :
+        'Article image'
 
     useEffect(() => {
         setHiddenThumbnail(false)
-    }, [thumbnailUrl])
+    }, [imageUrl])
 
     const toggleRead = useCallback((ev:MouseEvent) => {
         ev.preventDefault()
@@ -62,15 +80,30 @@ export const ItemRow:FunctionComponent<{
                 href=${route}
             >
                 ${showThumbnail && html`
-                    <img
-                        class="item-thumbnail"
-                        src=${thumbnailUrl}
-                        loading="lazy"
-                        decoding="async"
-                        referrerpolicy="no-referrer"
-                        alt=""
-                        onError=${handleThumbnailError}
-                    />
+                    ${hasBlurHash ?
+                        html`
+                            <blur-hash
+                                class="item-thumbnail"
+                                placeholder=${item.blurhash}
+                                src=${imageUrl}
+                                width=${imageWidth}
+                                height=${imageHeight}
+                                alt=${imageAlt}
+                                loading="lazy"
+                            ></blur-hash>
+                        ` :
+                        html`
+                            <img
+                                class="item-thumbnail"
+                                src=${imageUrl}
+                                loading="lazy"
+                                decoding="async"
+                                referrerpolicy="no-referrer"
+                                alt=${imageAlt}
+                                onError=${handleThumbnailError}
+                            />
+                        `
+                    }
                 `}
                 <div class="item-main">
                     <h3 class="item-title">
