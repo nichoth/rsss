@@ -269,3 +269,5 @@ their feeds).
 This happens lazily too. We only generate a new HTML page at the time when a
 request comes in for the given user, then we can serve the same HTML to that
 user for repeated requests.
+
+![Screenshot of 500 error](image.png)
