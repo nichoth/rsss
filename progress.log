@@ -1,5 +1,11 @@
 ## Codebase Patterns
 
+- First-page client bootstrap data is consumed through
+  `src/client/initial-feed.ts`. `consumeInitialFeed()` is single-use:
+  it reads and clears `window.__INITIAL_FEED__` first, then falls back to
+  the `#initial-feed` JSON script. `State.loadItems` should only skip the
+  adapter fetch when that payload contains items; empty or missing payloads
+  continue through the normal API/local adapter path.
 - Lazy HTML bootstrap data comes from internal Durable Object endpoints:
   `/internal/feed-version` reads only `user_state.feed_version`, while
   `/internal/lazy-html-data` reads that version first and then returns the
@@ -113,6 +119,33 @@
 - Cookie-sensitive worker route tests must run in Node, not browser tapout,
   because browser fetch strips `Cookie` request headers before Hono's
   session middleware can read them.
+
+## 2026-05-09 22:27 PDT - US-021
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added first-paint initial-feed consumption.
+  - Created `src/client/initial-feed.ts` with DOM bootstrap parsing,
+    global `window.__INITIAL_FEED__` consumption, single-use guarding, and
+    a test reset hook.
+  - Wired `State.loadItems` to populate first-page items synchronously from
+    a non-empty bootstrap payload, clear loading state in a `batch()`, and
+    skip the adapter/API request on that path.
+  - Added focused `test:initial-feed` coverage for DOM parsing, invalid or
+    absent scripts, global read-and-clear behavior, DOM fallback, and the
+    `State.loadItems` no-fetch fast path.
+- Files changed:
+  - `src/client/initial-feed.ts`
+  - `src/client/state.ts`
+  - `test/initial-feed.ts`
+  - `package.json`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `State.loadItems` can safely use the embedded first page before
+    adapter resolution, but should keep empty bootstraps on the existing
+    remote/local adapter fallback path.
+  - Initial-feed tests can run as a browser tapout bundle and still assert
+    the no-fetch state path by stubbing `globalThis.fetch`.
+---
 
 ## 2026-05-09 22:17 PDT - US-020
 Thread: https://ampcode.com/threads/unknown

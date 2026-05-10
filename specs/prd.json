@@ -406,7 +406,7 @@
         "Verify in browser using dev-browser skill: throttle network, hard-reload `/` while signed in — blurhash placeholders for first-page items paint before the JS bundle loads"
       ],
       "priority": 21,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

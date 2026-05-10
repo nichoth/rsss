@@ -31,6 +31,7 @@
     "test:lazy-html": "esbuild ./test/lazy-html.ts --bundle | tapout",
     "test:lazy-html-handler": "node test/run-lazy-html-handler.mjs",
     "test:lazy-html-routing": "node test/run-lazy-html-routing.mjs",
+    "test:initial-feed": "esbuild ./test/initial-feed.ts --bundle | tapout",
     "test:signup:server": "esbuild ./test/signup.ts --bundle --platform=node --format=esm --alias:cloudflare:workers=./test/cloudflare-workers-stub.ts | node --input-type=module | tap-spec",
     "test:signup:ui": "esbuild ./test/signup-ui.ts --bundle --loader:.css=text | tapout",
     "test:signup": "npm run test:signup:server && npm run test:signup:ui",
