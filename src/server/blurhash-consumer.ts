@@ -146,7 +146,12 @@ async function encodeBlurhashEntry (
         const bytes = await deps.fetchImage(request, BROWSER_USER_AGENT)
         if (!bytes) return null
 
-        original = deps.decodeImage(bytes)
+        try {
+            original = deps.decodeImage(bytes)
+        } catch (_err) {
+            return null
+        }
+
         const imageWidth = original.get_width()
         const imageHeight = original.get_height()
 
@@ -225,6 +230,8 @@ export async function fetchBlurhashImageBytes (
 ):Promise<Uint8Array|null> {
     const response = await fetcher(request)
     const contentLength = Number(response.headers.get('content-length') ?? 0)
+
+    if (response.status >= 400 && response.status < 500) return null
 
     if (!response.ok) {
         throw new Error(`BlurHash image fetch failed: ${response.status}`)

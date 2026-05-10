@@ -240,6 +240,149 @@ test('blurhash consumer encodes image on cache miss', async t => {
     t.equal(message.acked, true, 'successful encode is acked')
 })
 
+test('blurhash consumer acks permanent decode failures', async t => {
+    const requests:Request[] = []
+    const message = fakeMessage({
+        imageUrl: 'https://cdn.example.com/corrupt.jpg',
+        itemId: 44,
+        objectId: 'user-do-id'
+    })
+    const env = fakeUserDoEnv(requests)
+    let kvWrites = 0
+
+    env.BLURHASH_KV.put = async () => {
+        kvWrites++
+    }
+    const deps:BlurhashConsumerDeps = {
+        async fetchImage () {
+            return new Uint8Array([1, 2, 3])
+        },
+        decodeImage () {
+            throw new Error('unsupported image')
+        },
+        resizeImage () {
+            throw new Error('permanent decode failure must not resize')
+        },
+        encodePixels () {
+            throw new Error('permanent decode failure must not encode')
+        }
+    }
+
+    await handleBlurhashQueueBatch(fakeBatch([message]), env, deps)
+
+    t.equal(message.acked, true, 'permanent decode failure is acked')
+    t.equal(requests.length, 0, 'permanent decode failure skips DO write')
+    t.equal(kvWrites, 0, 'permanent decode failure skips KV write')
+})
+
+test('blurhash consumer retries transient failures', async t => {
+    const cases:Array<{
+        name:string
+        configure:(env:BlurhashConsumerEnv) => BlurhashConsumerDeps
+    }> = [
+        {
+            name: '5xx fetch',
+            configure () {
+                return {
+                    async fetchImage () {
+                        throw new Error('BlurHash image fetch failed: 503')
+                    },
+                    decodeImage () {
+                        throw new Error('5xx fetch must not decode')
+                    },
+                    resizeImage () {
+                        throw new Error('5xx fetch must not resize')
+                    },
+                    encodePixels () {
+                        throw new Error('5xx fetch must not encode')
+                    }
+                }
+            }
+        },
+        {
+            name: 'fetch timeout',
+            configure () {
+                return {
+                    async fetchImage () {
+                        throw new DOMException('timed out', 'AbortError')
+                    },
+                    decodeImage () {
+                        throw new Error('timeout must not decode')
+                    },
+                    resizeImage () {
+                        throw new Error('timeout must not resize')
+                    },
+                    encodePixels () {
+                        throw new Error('timeout must not encode')
+                    }
+                }
+            }
+        },
+        {
+            name: 'KV write failure',
+            configure (env) {
+                const deps = successfulEncodeDeps()
+
+                env.BLURHASH_KV.put = async () => {
+                    throw new Error('kv unavailable')
+                }
+
+                return deps
+            }
+        },
+        {
+            name: 'D1 write failure',
+            configure () {
+                return successfulEncodeDeps()
+            }
+        },
+        {
+            name: 'Photon crash mid-encode',
+            configure () {
+                const deps = successfulEncodeDeps()
+
+                deps.encodePixels = () => {
+                    throw new Error('wasm crashed')
+                }
+
+                return deps
+            }
+        }
+    ]
+
+    for (const testCase of cases) {
+        const requests:Request[] = []
+        const message = fakeMessage({
+            imageUrl: `https://cdn.example.com/${testCase.name}.jpg`,
+            itemId: 45,
+            objectId: 'user-do-id'
+        })
+        const env = fakeUserDoEnv(requests)
+
+        if (testCase.name === 'D1 write failure') {
+            env.USER_DO.get = () => ({
+                async fetch (request:Request) {
+                    requests.push(request)
+                    return new Response(null, { status: 500 })
+                }
+            })
+        }
+
+        try {
+            await handleBlurhashQueueBatch(
+                fakeBatch([message]),
+                env,
+                testCase.configure(env)
+            )
+            t.fail(`${testCase.name} should throw for queue retry`)
+        } catch (err) {
+            t.ok(err instanceof Error, `${testCase.name} throws`)
+        }
+
+        t.equal(message.acked, false, `${testCase.name} is not acked`)
+    }
+})
+
 test('fetchBlurhashImageBytes skips content-length over 5 MB', async t => {
     let bodyRead = false
 
@@ -262,6 +405,38 @@ test('fetchBlurhashImageBytes skips content-length over 5 MB', async t => {
     t.equal(bodyRead, false, 'oversized body is not read')
 })
 
+test('fetchBlurhashImageBytes skips image fetch 4xx responses', async t => {
+    let bodyRead = false
+
+    const bytes = await fetchBlurhashImageBytes(
+        new Request('https://cdn.example.com/missing.jpg'),
+        async () => ({
+            ok: false,
+            status: 404,
+            headers: new Headers(),
+            async arrayBuffer () {
+                bodyRead = true
+                return new ArrayBuffer(0)
+            }
+        } as Response)
+    )
+
+    t.equal(bytes, null, '4xx image fetch is permanently skipped')
+    t.equal(bodyRead, false, '4xx body is not read')
+})
+
+test('fetchBlurhashImageBytes retries image fetch 5xx responses', async t => {
+    try {
+        await fetchBlurhashImageBytes(
+            new Request('https://cdn.example.com/error.jpg'),
+            async () => new Response(null, { status: 503 })
+        )
+        t.fail('5xx image fetch should throw for retry')
+    } catch (err) {
+        t.ok(err instanceof Error, '5xx image fetch throws')
+    }
+})
+
 test('fetchBlurhashImageBytes skips actual bytes over 5 MB', async t => {
     const bytes = await fetchBlurhashImageBytes(
         new Request('https://cdn.example.com/huge.jpg'),
@@ -273,3 +448,23 @@ test('fetchBlurhashImageBytes skips actual bytes over 5 MB', async t => {
 
     t.equal(bytes, null, 'oversized response body is skipped')
 })
+
+function successfulEncodeDeps ():BlurhashConsumerDeps {
+    const originalImage = fakeImage(640, 480)
+    const resizedImage = fakeImage(32, 32)
+
+    return {
+        async fetchImage () {
+            return new Uint8Array([1, 2, 3])
+        },
+        decodeImage () {
+            return originalImage
+        },
+        resizeImage () {
+            return resizedImage
+        },
+        encodePixels () {
+            return 'LEHV6nWB2yk8pyo0adR*.7kCMdnj'
+        }
+    }
+}

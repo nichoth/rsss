@@ -72,6 +72,34 @@
   `objectId`, because `itemId` values are scoped to one user's Durable
   Object. Queue consumers should route writes through the DO's internal
   BlurHash endpoint instead of assuming a global item table.
+- BlurHash consumer permanent skips should return `null` from the encode
+  path so the queue message is acked without KV or DO writes. Keep 4xx
+  image fetches, oversize images, and decode failures in this path; KV
+  writes, DO writes, fetch 5xx/timeouts, and encode crashes should throw so
+  Cloudflare retries and eventually DLQs according to queue config.
+
+## 2026-05-09 19:17 PDT - US-011
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added the BlurHash queue consumer failure-mode
+  policy.
+  - 4xx image fetches now return a permanent skip without reading the body.
+  - Decode failures now ack the message and skip KV/DO writes.
+  - 5xx fetches, fetch timeouts, KV write failures, DO write failures, and
+    encode-time Photon crashes continue to throw for queue retry.
+  - Added focused consumer coverage for the permanent skip and retry paths.
+- Files changed:
+  - `src/server/blurhash-consumer.ts`
+  - `test/blurhash-consumer.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `encodeBlurhashEntry` uses `null` as the permanent-skip signal; callers
+    ack and do not write KV or item metadata when it returns `null`.
+  - Decode failures are classified at the `decodeImage` boundary. Failures
+    after a successful decode, such as `encodePixels`, are retryable.
+  - The DLQ behavior remains configuration-driven in `wrangler.jsonc` and is
+    covered by `test/deploy-config.mjs`, not by runtime queue tests.
+---
 
 ## 2026-05-09 19:12 PDT - US-010
 Thread: https://ampcode.com/threads/unknown
