@@ -801,7 +801,11 @@ test(
                 is_read: 0,
                 is_starred: 0,
                 created_at: '2026-01-01 00:00:00',
-                updated_at: '2026-01-05 00:00:00'
+                updated_at: '2026-01-05 00:00:00',
+                og_image_url: 'https://cdn.example.com/og.jpg',
+                blurhash: 'LEHV6nWB2yk8pyo0adR*.7kCMdnj',
+                image_width: 1200,
+                image_height: 630
             }
 
             await pushSync(db, makeFetch(409, { item: serverItem }))
@@ -809,10 +813,15 @@ test(
             const item = queryOne<{
                 title:string
                 thumbnail_url:string|null
+                og_image_url:string|null
+                blurhash:string|null
+                image_width:number|null
+                image_height:number|null
                 updated_at:string
             }>(
                 db,
-                `SELECT title, thumbnail_url, updated_at
+                `SELECT title, thumbnail_url, og_image_url, blurhash,
+                 image_width, image_height, updated_at
                  FROM items
                  WHERE id = ?`,
                 [itemId]
@@ -832,6 +841,18 @@ test(
                 'https://cdn.example.com/wrapped.jpg',
                 'server thumbnail_url upserted'
             )
+            t.equal(
+                item?.og_image_url,
+                'https://cdn.example.com/og.jpg',
+                'server og_image_url upserted'
+            )
+            t.equal(
+                item?.blurhash,
+                'LEHV6nWB2yk8pyo0adR*.7kCMdnj',
+                'server blurhash upserted'
+            )
+            t.equal(item?.image_width, 1200, 'server image_width upserted')
+            t.equal(item?.image_height, 630, 'server image_height upserted')
 
             const remaining = queryAll(db, 'SELECT * FROM outbox')
             t.equal(remaining.length, 0, 'outbox row removed after conflict')

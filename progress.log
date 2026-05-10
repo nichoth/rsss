@@ -58,6 +58,34 @@
   `feedUpdateCounts`; treat legacy `feedUpdateStatus` as compatibility data,
   not the client state hydration source.
 
+## 2026-05-09 18:19 PDT - US-006
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added nullable item image metadata columns for OG
+  image URL, BlurHash, and intrinsic dimensions.
+  - Added `og_image_url`, `blurhash`, `image_width`, and `image_height` to
+    the shared fresh SQLite schema without adding indexes.
+  - Added a guarded Durable Object migration for existing `items` tables.
+  - Projected the new item fields through `ITEM_COLUMNS` /
+    `ITEM_SYNC_COLUMNS`.
+  - Mirrored the fields through local pull-sync and push-sync item upserts.
+- Files changed:
+  - `src/shared/schema.ts`
+  - `src/server/durable-objects/index.ts`
+  - `src/client/db/pull-sync.ts`
+  - `src/client/db/push-sync.ts`
+  - `src/client/db/types.ts`
+  - `test/do-migrations.ts`
+  - `test/pull-sync.ts`
+  - `test/push-sync.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - The browser OPFS sync paths need both pull-sync and push-sync conflict
+    reconciliation updated when server item payload columns are added.
+  - Browser tapout tests use a fixed local port, so run pull-sync and
+    push-sync focused tests sequentially.
+---
+
 ## 2026-05-09 16:43 PDT - US-005
 Thread: https://ampcode.com/threads/unknown
 - What was implemented: Added focused tests for the new header cache

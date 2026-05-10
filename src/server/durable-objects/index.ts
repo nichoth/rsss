@@ -113,8 +113,9 @@ const FEED_SYNC_COLUMNS = `
 const ITEM_COLUMNS = `
     items.id, items.feed_id, items.guid, items.title, items.link,
     items.description, items.content, items.author, items.pub_date,
-    items.thumbnail_url, items.is_read, items.is_starred, items.created_at,
-    items.updated_at,
+    items.thumbnail_url, items.og_image_url, items.blurhash,
+    items.image_width, items.image_height, items.is_read,
+    items.is_starred, items.created_at, items.updated_at,
     items.full_content, items.full_content_fetched_at,
     items.full_content_status
 `
@@ -390,6 +391,7 @@ export class UserDO extends DurableObject<Env> {
             this.migrateAddUpdatedAt()
             this.migrateAddFeedFailureColumns()
             this.migrateAddItemThumbnail()
+            this.migrateAddItemImageMetadata()
             this.migrateAddLastPulledAt()
             this.migrateAddItemFullContent()
             await this.ctx.storage.put(MIGRATION_STATE_KEY, {
@@ -493,6 +495,27 @@ export class UserDO extends DurableObject<Env> {
             this.sql.exec(
                 'ALTER TABLE items ADD COLUMN full_content_status TEXT'
             )
+        }
+    }
+
+    private migrateAddItemImageMetadata () {
+        const cols = this.sql.exec('PRAGMA table_info(items)').toArray()
+        const has = (name:string) => cols.some(
+            (col:unknown) => (col as { name:string }).name === name
+        )
+        const columns = [
+            ['og_image_url', 'TEXT'],
+            ['blurhash', 'TEXT'],
+            ['image_width', 'INTEGER'],
+            ['image_height', 'INTEGER']
+        ]
+
+        for (const [name, type] of columns) {
+            if (!has(name)) {
+                this.sql.exec(
+                    `ALTER TABLE items ADD COLUMN ${name} ${type}`
+                )
+            }
         }
     }
 

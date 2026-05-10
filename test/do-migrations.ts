@@ -1,5 +1,6 @@
 import { test } from '@substrate-system/tapzero'
 import { UserDO } from '../src/server/durable-objects/index.js'
+import { INDEXES_SQL, TABLES_SQL } from '../src/shared/schema.js'
 
 interface QueryResult {
     toArray:() => unknown[]
@@ -38,7 +39,10 @@ function createConstructorContext (storedVersion:number | null) {
                     if (query.includes('PRAGMA table_info(items)')) {
                         return result([
                             { name: 'updated_at' },
-                            { name: 'thumbnail_url' }
+                            { name: 'thumbnail_url' },
+                            { name: 'full_content' },
+                            { name: 'full_content_fetched_at' },
+                            { name: 'full_content_status' }
                         ])
                     }
                     return result()
@@ -69,7 +73,7 @@ function createConstructorContext (storedVersion:number | null) {
 
 test('UserDO skips migration introspection when version is current',
     async t => {
-        const currentMigrationVersion = 4
+        const currentMigrationVersion = 5
         const setup = createConstructorContext(currentMigrationVersion)
 
         const userDo = new UserDO(setup.ctx, {} as never)
@@ -109,12 +113,12 @@ test('UserDO reruns migrations when stored version is stale', async t => {
     t.ok(userDo, 'Durable Object constructed successfully')
     t.equal(
         introspectionQueries.length,
-        5,
+        7,
         'stale migration version runs all column checks'
     )
     t.deepEqual(
         setup.writes,
-        [{ migration_v: 4 }],
+        [{ migration_v: 5 }],
         'current migration version is persisted'
     )
 })
@@ -145,4 +149,76 @@ test('UserDO migrates missing item thumbnail column', async t => {
         }),
         'missing thumbnail_url column is added'
     )
+})
+
+test('fresh item schema includes nullable image metadata columns', t => {
+    const expectedColumns = [
+        'og_image_url TEXT',
+        'blurhash TEXT',
+        'image_width INTEGER',
+        'image_height INTEGER'
+    ]
+
+    for (const column of expectedColumns) {
+        t.ok(
+            TABLES_SQL.includes(column),
+            `items table includes ${column}`
+        )
+    }
+})
+
+test('image metadata columns do not have dedicated indexes', t => {
+    const metadataColumns = [
+        'og_image_url',
+        'blurhash',
+        'image_width',
+        'image_height'
+    ]
+
+    for (const column of metadataColumns) {
+        t.equal(
+            INDEXES_SQL.includes(column),
+            false,
+            `${column} is not indexed`
+        )
+    }
+})
+
+test('UserDO migrates missing item image metadata columns', async t => {
+    const setup = createConstructorContext(4)
+    const originalExec = setup.ctx.storage.sql.exec.bind(
+        setup.ctx.storage.sql
+    )
+
+    setup.ctx.storage.sql.exec = ((query:string) => {
+        if (query.includes('PRAGMA table_info(items)')) {
+            return result([
+                { name: 'updated_at' },
+                { name: 'thumbnail_url' },
+                { name: 'full_content' },
+                { name: 'full_content_fetched_at' },
+                { name: 'full_content_status' }
+            ])
+        }
+
+        return originalExec(query)
+    }) as typeof setup.ctx.storage.sql.exec
+
+    const userDo = new UserDO(setup.ctx, {} as never)
+    await setup.ready()
+
+    const expectedMigrations = [
+        'ALTER TABLE items ADD COLUMN og_image_url TEXT',
+        'ALTER TABLE items ADD COLUMN blurhash TEXT',
+        'ALTER TABLE items ADD COLUMN image_width INTEGER',
+        'ALTER TABLE items ADD COLUMN image_height INTEGER'
+    ]
+
+    t.ok(userDo, 'Durable Object constructed successfully')
+    for (const migration of expectedMigrations) {
+        t.ok(
+            setup.statements.some(query => query.includes(migration)),
+            `${migration} is run for existing item tables`
+        )
+    }
 })
