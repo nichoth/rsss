@@ -93,6 +93,33 @@
   applied idempotently in `UserDO.initDatabase()` after the shared indexes,
   triggers, and auxiliary outbox tables, without bumping
   `USER_DO_MIGRATION_VERSION` when it does not ALTER existing tables.
+- Feed HTML cache invalidation is version-based. Any Durable Object write
+  that changes feed-list contents or denormalized item image metadata should
+  call `bumpFeedVersion()` exactly once for that logical write path.
+
+## 2026-05-09 21:02 PDT - US-015
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Wired feed-version invalidation into the three
+  feed-content write paths.
+  - New item ingestion now bumps `feed_version` once when inserted items
+    exist.
+  - BlurHash cache hits now bump `feed_version` after denormalizing image
+    metadata onto the item row.
+  - The internal BlurHash metadata endpoint now bumps `feed_version` after
+    writing queue-produced metadata.
+- Files changed:
+  - `src/server/durable-objects/index.ts`
+  - `test/do-handlers.ts`
+  - `test/feed-parser.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Feed parser tests commonly stub SQL with explicit query allow-lists;
+    successful new-item paths now need to allow the `user_state`
+    `feed_version` update.
+  - Tapout browser tests share a fixed local port, so run focused browser
+    suites sequentially.
+---
 
 ## 2026-05-09 20:56 PDT - US-014
 Thread: https://ampcode.com/threads/unknown

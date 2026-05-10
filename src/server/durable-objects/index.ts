@@ -646,6 +646,7 @@ export class UserDO extends DurableObject<Env> {
                 body.image_height,
                 id
             )
+            this.bumpFeedVersion()
 
             return new Response(null, { status: 204 })
         })
@@ -1642,6 +1643,8 @@ export class UserDO extends DurableObject<Env> {
             await this.updateNewItemThumbnails(newItems)
 
             if (newItems.length > 0) {
+                this.bumpFeedVersion()
+
                 // Send canonical pending count for the touched feed so
                 // the client is a passive renderer of state. Re-broadcast
                 // even when the feed was already in the unsynced set
@@ -1832,6 +1835,7 @@ export class UserDO extends DurableObject<Env> {
                 entry.image_height,
                 itemId
             )
+            this.bumpFeedVersion()
             return
         }
 

@@ -60,6 +60,7 @@ function createSql (options:{
     return {
         feeds,
         blurhashUpdates: [] as unknown[][],
+        feedVersionBumps: 0,
         setPendingCountRows (rows:PendingCountRow[]) {
             pendingCountRows = rows
         },
@@ -100,6 +101,11 @@ function createSql (options:{
                 query.includes('blurhash = ?')) {
                 this.blurhashUpdates.push(params)
                 return result([])
+            }
+
+            if (query.includes('UPDATE user_state SET feed_version')) {
+                this.feedVersionBumps++
+                return result([{ feed_version: this.feedVersionBumps }])
             }
 
             if (query.includes('pending_count')) {
@@ -245,6 +251,7 @@ test('UserDO internal blurhash handler writes image metadata', async t => {
         630,
         77
     ]], 'item row is updated with blurhash metadata')
+    t.equal(sql.feedVersionBumps, 1, 'blurhash metadata bumps version')
 })
 
 test('UserDO manual feed refresh is rate limited per feed', async t => {
