@@ -28,7 +28,9 @@ import {
     sendPaymentFailed,
     sendAccountDeletionScheduled
 } from './email.js'
+import { handleBlurhashQueueBatch } from './blurhash-consumer.js'
 import type { Context, Next } from 'hono'
+import type * as BlurhashRuntime from './blurhash-runtime.js'
 
 // Re-export the Durable Object class for Wrangler
 export { UserDO }
@@ -1469,4 +1471,19 @@ app.all('*', (c) => {
     return c.env.ASSETS.fetch(c.req.raw)
 })
 
-export default app
+const blurhashRuntimeModule = './blurhash-runtime.js'
+
+const worker = Object.assign(app, {
+    async queue (batch:MessageBatch<unknown>, env:Env):Promise<void> {
+        const runtime = await import(
+            blurhashRuntimeModule
+        ) as typeof BlurhashRuntime
+        await handleBlurhashQueueBatch(
+            batch,
+            env,
+            runtime.createBlurhashConsumerDeps()
+        )
+    }
+})
+
+export default worker

@@ -59,6 +59,7 @@ function createSql (options:{
 
     return {
         feeds,
+        blurhashUpdates: [] as unknown[][],
         setPendingCountRows (rows:PendingCountRow[]) {
             pendingCountRows = rows
         },
@@ -92,6 +93,12 @@ function createSql (options:{
             if (query.includes('DELETE FROM feeds WHERE id = ?')) {
                 const index = feeds.findIndex(feed => feed.id === params[0])
                 if (index >= 0) feeds.splice(index, 1)
+                return result([])
+            }
+
+            if (query.includes('UPDATE items SET') &&
+                query.includes('blurhash = ?')) {
+                this.blurhashUpdates.push(params)
                 return result([])
             }
 
@@ -217,6 +224,27 @@ test('UserDO feed handlers list create and refresh feeds', async t => {
     t.equal(refreshResponse.status, 200, 'refresh returns 200')
     t.equal(refreshBody.success, true, 'refresh reports success')
     t.deepEqual(refreshed, [3, 3], 'created feed is refreshed')
+})
+
+test('UserDO internal blurhash handler writes image metadata', async t => {
+    const { app, sql } = createDoHarness()
+
+    const response = await app.request('/internal/blurhash/items/77', {
+        method: 'POST',
+        body: JSON.stringify({
+            blurhash: 'LEHV6nWB2yk8pyo0adR*.7kCMdnj',
+            image_width: 1200,
+            image_height: 630
+        })
+    })
+
+    t.equal(response.status, 204, 'internal update returns 204')
+    t.deepEqual(sql.blurhashUpdates, [[
+        'LEHV6nWB2yk8pyo0adR*.7kCMdnj',
+        1200,
+        630,
+        77
+    ]], 'item row is updated with blurhash metadata')
 })
 
 test('UserDO manual feed refresh is rate limited per feed', async t => {

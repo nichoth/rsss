@@ -854,6 +854,16 @@ test('fetchFeed enqueues blurhash job on cache miss', async t => {
                 send:(message:unknown) => Promise<void>
             }
         }
+        ctx:{
+            id:{
+                toString:() => string
+            }
+            storage:{
+                get:<T>(key:string) => Promise<T|undefined>
+                put:(key:string, value:unknown) => Promise<void>
+                delete:(key:string) => Promise<void>
+            }
+        }
         sql:{
             exec:(query:string, ...params:unknown[]) => {
                 toArray:() => unknown[]
@@ -879,6 +889,24 @@ test('fetchFeed enqueues blurhash job on cache miss', async t => {
     let queuedMessage:unknown = null
     let blurhashUpdates = 0
 
+    userDo.ctx = {
+        id: {
+            toString () {
+                return 'user-do-id'
+            }
+        },
+        storage: {
+            async get<T> (key:string) {
+                return pollerStorage.get(key) as T|undefined
+            },
+            async put (key:string, value:unknown) {
+                pollerStorage.set(key, value)
+            },
+            async delete (key:string) {
+                pollerStorage.delete(key)
+            }
+        }
+    }
     userDo.env = {
         BLURHASH_KV: {
             async get () {
@@ -984,7 +1012,8 @@ test('fetchFeed enqueues blurhash job on cache miss', async t => {
         queuedMessage,
         {
             imageUrl,
-            itemId: 45
+            itemId: 45,
+            objectId: 'user-do-id'
         },
         'cache miss enqueues the image job'
     )

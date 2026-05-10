@@ -44,6 +44,7 @@ import './settings-route.js'
 import './feed-reader-cache-disclosure.js'
 import './sqlite-worker.js'
 import './local-first-opfs-persistence.js'
+import './blurhash-consumer.js'
 
 test('all done', () => {
     if (window) {

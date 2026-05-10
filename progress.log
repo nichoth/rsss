@@ -68,6 +68,49 @@
 - BlurHash ingest KV values should be JSON metadata objects with
   `blurhash`, `image_width`, and `image_height`. Poller KV hits need all
   three fields so they can denormalize image placeholders without queueing.
+- BlurHash queue jobs must carry the source Durable Object id as
+  `objectId`, because `itemId` values are scoped to one user's Durable
+  Object. Queue consumers should route writes through the DO's internal
+  BlurHash endpoint instead of assuming a global item table.
+
+## 2026-05-09 19:12 PDT - US-010
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added the BlurHash queue consumer happy path.
+  - Re-checks `BLURHASH_KV` before fetching or encoding.
+  - On cache hits, writes cached hash metadata back to the owning user DO.
+  - On misses, fetches image bytes with a browser-like User-Agent, 10 second
+    timeout signal, and 5 MB header/body size caps.
+  - Decodes with Photon, resizes to 32x32 nearest-neighbor, encodes BlurHash
+    with 4x4 components, frees Photon images, writes KV with a 90-day TTL,
+    writes item metadata to the DO, and acks successful messages.
+  - Added an internal DO endpoint for queue-driven item metadata updates.
+  - Queue producer messages now include `objectId` so the consumer can route
+    per-user item updates correctly.
+- Files changed:
+  - `src/server/blurhash.ts`
+  - `src/server/blurhash-consumer.ts`
+  - `src/server/blurhash-runtime.ts`
+  - `src/server/index.ts`
+  - `src/server/durable-objects/index.ts`
+  - `test/blurhash-consumer.ts`
+  - `test/do-handlers.ts`
+  - `test/feed-parser.ts`
+  - `test/index.ts`
+  - `package.json`
+  - `package-lock.json`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Queue messages cannot identify a row with `itemId` alone because item
+    ids are local to each user's Durable Object; include `objectId` and use
+    `env.USER_DO.idFromString(objectId)` in the consumer.
+  - Keep Photon and BlurHash encoder imports isolated in
+    `src/server/blurhash-runtime.ts`; tests can import the consumer module
+    without bundling WASM by injecting `BlurhashConsumerDeps`.
+  - Browser tapout tests cannot observe a `User-Agent` header on a `Request`,
+    so consumer tests assert the injected UA string while runtime code still
+    sends it through fetch.
+---
 
 ## 2026-05-09 18:37 PDT - US-009
 Thread: https://ampcode.com/threads/unknown

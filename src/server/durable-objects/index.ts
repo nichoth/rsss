@@ -22,6 +22,11 @@ import {
     validateFeedUrl
 } from '../feed-fetch.js'
 import { fetchFullArticle } from '../article-fetch.js'
+import {
+    blurhashCacheKey,
+    parseBlurhashCacheEntry,
+    type BlurhashJob
+} from '../blurhash.js'
 
 export interface Env {
     USER:DurableObjectNamespace<UserDO>
@@ -78,17 +83,6 @@ interface NewFeedItem {
     imageUrl:string | null
 }
 
-interface BlurhashCacheEntry {
-    blurhash:string
-    image_width:number
-    image_height:number
-}
-
-interface BlurhashJob {
-    imageUrl:string
-    itemId:number
-}
-
 const FEED_XML_PARSER = new XMLParser({
     attributeNamePrefix: '@_',
     cdataPropName: '#cdata',
@@ -139,45 +133,6 @@ const ITEM_SYNC_COLUMNS = `
 
 function errorMessage (err:unknown):string {
     return err instanceof Error ? err.message : String(err)
-}
-
-async function blurhashCacheKey (imageUrl:string):Promise<string> {
-    const encoded = new TextEncoder().encode(imageUrl)
-    const digest = await crypto.subtle.digest('SHA-256', encoded)
-    const bytes = Array.from(new Uint8Array(digest))
-    const hex = bytes.map(byte => {
-        return byte.toString(16).padStart(2, '0')
-    }).join('')
-
-    return `blurhash:${hex.slice(0, 32)}`
-}
-
-function isBlurhashCacheEntry (
-    value:unknown
-):value is BlurhashCacheEntry {
-    if (!value || typeof value !== 'object') return false
-
-    const entry = value as Partial<BlurhashCacheEntry>
-
-    return typeof entry.blurhash === 'string' &&
-        typeof entry.image_width === 'number' &&
-        typeof entry.image_height === 'number' &&
-        Number.isFinite(entry.image_width) &&
-        Number.isFinite(entry.image_height)
-}
-
-function parseBlurhashCacheEntry (
-    value:string | null
-):BlurhashCacheEntry | null {
-    if (!value) return null
-
-    try {
-        const parsed = JSON.parse(value) as unknown
-
-        return isBlurhashCacheEntry(parsed) ? parsed : null
-    } catch {
-        return null
-    }
 }
 
 function isDuplicateInsertError (err:unknown):boolean {
@@ -657,6 +612,40 @@ export class UserDO extends DurableObject<Env> {
         // Health check
         app.get('/health', (c) => {
             return c.json({ status: 'ok', service: 'do' })
+        })
+
+        app.post('/internal/blurhash/items/:id', async (c) => {
+            const id = Number(c.req.param('id'))
+            const body = await c.req.json<{
+                blurhash?:unknown
+                image_width?:unknown
+                image_height?:unknown
+            }>()
+
+            if (!Number.isInteger(id) || id < 1) {
+                return c.json({ error: 'Invalid item id' }, 400)
+            }
+            if (
+                typeof body.blurhash !== 'string' ||
+                typeof body.image_width !== 'number' ||
+                typeof body.image_height !== 'number'
+            ) {
+                return c.json({ error: 'Invalid blurhash metadata' }, 400)
+            }
+
+            this.sql.exec(
+                `UPDATE items SET
+                    blurhash = ?,
+                    image_width = ?,
+                    image_height = ?
+                WHERE id = ?`,
+                body.blurhash,
+                body.image_width,
+                body.image_height,
+                id
+            )
+
+            return new Response(null, { status: 204 })
         })
 
         // Server-sent events stream. Broadcasts state-change
@@ -1828,7 +1817,8 @@ export class UserDO extends DurableObject<Env> {
 
         await env.BLURHASH_QUEUE.send({
             imageUrl,
-            itemId
+            itemId,
+            objectId: this.ctx.id.toString()
         } satisfies BlurhashJob)
     }
 
