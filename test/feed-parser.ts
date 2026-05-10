@@ -1,6 +1,30 @@
 import { test } from '@substrate-system/tapzero'
 import { UserDO } from '../src/server/durable-objects/index.js'
 
+const pollerStorage = new Map<string, unknown>()
+
+;(UserDO.prototype as unknown as {
+    ctx:{
+        storage:{
+            get:<T>(key:string) => Promise<T|undefined>
+            put:(key:string, value:unknown) => Promise<void>
+            delete:(key:string) => Promise<void>
+        }
+    }
+}).ctx = {
+    storage: {
+        async get<T> (key:string) {
+            return pollerStorage.get(key) as T|undefined
+        },
+        async put (key:string, value:unknown) {
+            pollerStorage.set(key, value)
+        },
+        async delete (key:string) {
+            pollerStorage.delete(key)
+        }
+    }
+}
+
 interface ParsedFeed {
     title:string|null
     description:string|null
@@ -28,6 +52,17 @@ function parseFeed (xml:string):ParsedFeed {
 
 function nextTask ():Promise<void> {
     return new Promise(resolve => setTimeout(resolve, 0))
+}
+
+async function blurhashKeyFor (imageUrl:string):Promise<string> {
+    const encoded = new TextEncoder().encode(imageUrl)
+    const digest = await crypto.subtle.digest('SHA-256', encoded)
+    const bytes = Array.from(new Uint8Array(digest))
+    const hex = bytes.map(byte => {
+        return byte.toString(16).padStart(2, '0')
+    }).join('')
+
+    return `blurhash:${hex.slice(0, 32)}`
 }
 
 function itemXml (index:number, content = 'body'):string {
@@ -390,9 +425,9 @@ test('fetchFeed stores og image for newly inserted items', async t => {
         }) => Promise<void>
     }
     const originalFetch = globalThis.fetch
-    let articleFetches = 0
-    let thumbnailUpdate:null | {
+    let itemImageUpdate:null | {
         thumbnail:unknown
+        ogImage:unknown
         id:unknown
     } = null
 
@@ -414,10 +449,12 @@ test('fetchFeed stores og image for newly inserted items', async t => {
                 }
             }
 
-            if (query.includes('UPDATE items SET thumbnail_url = ?')) {
-                thumbnailUpdate = {
+            if (query.includes('UPDATE items SET') &&
+                query.includes('og_image_url')) {
+                itemImageUpdate = {
                     thumbnail: params[0],
-                    id: params[1]
+                    ogImage: params[1],
+                    id: params[2]
                 }
                 return { toArray: () => [] }
             }
@@ -431,6 +468,13 @@ test('fetchFeed stores og image for newly inserted items', async t => {
                 query.includes('GROUP BY feeds.id')
             ) {
                 return { toArray: () => [] }
+            }
+
+            if (query.includes('UPDATE user_state SET feed_version')) {
+                return {
+                    toArray: () => [],
+                    one: () => ({ feed_version: 1 })
+                }
             }
 
             throw new Error(`Unexpected SQL: ${query}`)
@@ -447,12 +491,7 @@ test('fetchFeed stores og image for newly inserted items', async t => {
         }
 
         if (urlText === 'https://example.com/post/1') {
-            articleFetches++
-            return new Response(
-                '<head><meta property="og:image" ' +
-                    'content="https://cdn.example.com/og.jpg"></head>',
-                { headers: { 'content-type': 'text/html' } }
-            )
+            throw new Error('feed image should avoid article fetch')
         }
 
         return new Response(`
@@ -490,14 +529,545 @@ test('fetchFeed stores og image for newly inserted items', async t => {
         globalThis.fetch = originalFetch
     }
 
-    t.equal(articleFetches, 1, 'article URL is fetched for og:image')
     t.deepEqual(
-        thumbnailUpdate,
+        itemImageUpdate,
         {
-            thumbnail: 'https://cdn.example.com/og.jpg',
+            thumbnail: 'https://cdn.example.com/parser.jpg',
+            ogImage: 'https://cdn.example.com/parser.jpg',
             id: 42
         },
-        'new item thumbnail_url is set from og:image'
+        'new item image columns prefer the feed image'
+    )
+})
+
+test('fetchFeed stores article og:image in og_image_url', async t => {
+    const userDo = Object.create(UserDO.prototype) as {
+        sql:{
+            exec:(query:string, ...params:unknown[]) => {
+                toArray:() => unknown[]
+                one?:() => unknown
+                rowsWritten?:number
+            }
+        }
+        fetchFeed:(feed:{
+            id:number
+            url:string
+            title:string|null
+            description:string|null
+            site_url:string|null
+            last_fetched:string|null
+            last_error:string|null
+            last_status:number|null
+            created_at:string
+            updated_at:string
+        }) => Promise<void>
+    }
+    const originalFetch = globalThis.fetch
+    let itemImageUpdate:null | {
+        thumbnail:unknown
+        ogImage:unknown
+        id:unknown
+    } = null
+
+    userDo.sql = {
+        exec (query:string, ...params:unknown[]) {
+            if (query.includes('UPDATE feeds SET') &&
+                query.includes('last_error = NULL')) {
+                return { toArray: () => [] }
+            }
+
+            if (query.includes('INSERT OR IGNORE INTO items')) {
+                return { rowsWritten: 1, toArray: () => [] }
+            }
+
+            if (query.includes('SELECT id FROM items')) {
+                return {
+                    toArray: () => [],
+                    one: () => ({ id: 43 })
+                }
+            }
+
+            if (query.includes('UPDATE items SET') &&
+                query.includes('og_image_url')) {
+                itemImageUpdate = {
+                    thumbnail: params[0],
+                    ogImage: params[1],
+                    id: params[2]
+                }
+                return { toArray: () => [] }
+            }
+
+            if (query.includes('SELECT feeds.id FROM feeds')) {
+                return { toArray: () => [] }
+            }
+
+            if (
+                query.includes('COUNT(items.id)') &&
+                query.includes('GROUP BY feeds.id')
+            ) {
+                return { toArray: () => [] }
+            }
+
+            if (query.includes('UPDATE user_state SET feed_version')) {
+                return {
+                    toArray: () => [],
+                    one: () => ({ feed_version: 1 })
+                }
+            }
+
+            throw new Error(`Unexpected SQL: ${query}`)
+        }
+    }
+
+    globalThis.fetch = async (url) => {
+        const urlText = String(url)
+
+        if (urlText.startsWith('https://cloudflare-dns.com/')) {
+            return new Response(JSON.stringify({
+                Answer: [{ data: '93.184.216.34' }]
+            }))
+        }
+
+        if (urlText === 'https://example.com/post/1') {
+            return new Response(
+                '<head><meta name="og:image" ' +
+                    'content="https://cdn.example.com/og.jpg"></head>',
+                { headers: { 'content-type': 'text/html' } }
+            )
+        }
+
+        return new Response(rssFeed(`
+            <item>
+                <guid>item-1</guid>
+                <title>Item 1</title>
+                <link>https://example.com/post/1</link>
+            </item>
+        `))
+    }
+
+    try {
+        await userDo.fetchFeed({
+            id: 5,
+            url: 'https://example.com/feed.xml',
+            title: null,
+            description: null,
+            site_url: null,
+            last_fetched: null,
+            last_error: null,
+            last_status: null,
+            created_at: '2026-04-27 00:00:00',
+            updated_at: '2026-04-27 00:00:00'
+        })
+    } finally {
+        globalThis.fetch = originalFetch
+    }
+
+    t.deepEqual(
+        itemImageUpdate,
+        {
+            thumbnail: 'https://cdn.example.com/og.jpg',
+            ogImage: 'https://cdn.example.com/og.jpg',
+            id: 43
+        },
+        'new item og_image_url is set from article metadata'
+    )
+})
+
+test('fetchFeed writes cached blurhash metadata without queueing',
+    async t => {
+        const imageUrl = 'https://cdn.example.com/parser.jpg'
+        const expectedKey = await blurhashKeyFor(imageUrl)
+        const userDo = Object.create(UserDO.prototype) as {
+            env:{
+                BLURHASH_KV:{
+                    get:(key:string) => Promise<string|null>
+                }
+                BLURHASH_QUEUE:{
+                    send:(message:unknown) => Promise<void>
+                }
+            }
+            sql:{
+                exec:(query:string, ...params:unknown[]) => {
+                    toArray:() => unknown[]
+                    one?:() => unknown
+                    rowsWritten?:number
+                }
+            }
+            fetchFeed:(feed:{
+                id:number
+                url:string
+                title:string|null
+                description:string|null
+                site_url:string|null
+                last_fetched:string|null
+                last_error:string|null
+                last_status:number|null
+                created_at:string
+                updated_at:string
+            }) => Promise<void>
+        }
+        const originalFetch = globalThis.fetch
+        let kvReads = 0
+        let itemImageUpdate:null | {
+            thumbnail:unknown
+            ogImage:unknown
+            id:unknown
+        } = null
+        let blurhashUpdate:null | {
+            blurhash:unknown
+            width:unknown
+            height:unknown
+            id:unknown
+        } = null
+        let feedVersionBumps = 0
+
+        userDo.env = {
+            BLURHASH_KV: {
+                async get (key:string) {
+                    kvReads++
+                    t.equal(key, expectedKey, 'KV key hashes image URL')
+
+                    return JSON.stringify({
+                        blurhash: 'LEHV6nWB2yk8pyo0adR*.7kCMdnj',
+                        image_width: 1200,
+                        image_height: 630
+                    })
+                }
+            },
+            BLURHASH_QUEUE: {
+                async send () {
+                    throw new Error('KV hit should not enqueue')
+                }
+            }
+        }
+        userDo.sql = {
+            exec (query:string, ...params:unknown[]) {
+                if (query.includes('UPDATE feeds SET') &&
+                    query.includes('last_error = NULL')) {
+                    return { toArray: () => [] }
+                }
+
+                if (query.includes('INSERT OR IGNORE INTO items')) {
+                    return { rowsWritten: 1, toArray: () => [] }
+                }
+
+                if (query.includes('SELECT id FROM items')) {
+                    return {
+                        toArray: () => [],
+                        one: () => ({ id: 44 })
+                    }
+                }
+
+                if (query.includes('UPDATE items SET') &&
+                    query.includes('thumbnail_url')) {
+                    itemImageUpdate = {
+                        thumbnail: params[0],
+                        ogImage: params[1],
+                        id: params[2]
+                    }
+                    return { toArray: () => [] }
+                }
+
+                if (query.includes('UPDATE items SET') &&
+                    query.includes('blurhash = COALESCE')) {
+                    blurhashUpdate = {
+                        blurhash: params[0],
+                        width: params[1],
+                        height: params[2],
+                        id: params[3]
+                    }
+                    return { toArray: () => [] }
+                }
+
+                if (query.includes('UPDATE user_state SET feed_version')) {
+                    feedVersionBumps++
+                    return {
+                        toArray: () => [],
+                        one: () => ({ feed_version: feedVersionBumps })
+                    }
+                }
+
+                if (query.includes('SELECT feeds.id FROM feeds')) {
+                    return { toArray: () => [] }
+                }
+
+                if (
+                    query.includes('COUNT(items.id)') &&
+                    query.includes('GROUP BY feeds.id')
+                ) {
+                    return { toArray: () => [] }
+                }
+
+                if (query.includes('UPDATE user_state SET feed_version')) {
+                    return {
+                        toArray: () => [],
+                        one: () => ({ feed_version: 1 })
+                    }
+                }
+
+                throw new Error(`Unexpected SQL: ${query}`)
+            }
+        }
+
+        globalThis.fetch = async (url) => {
+            const urlText = String(url)
+
+            if (urlText.startsWith('https://cloudflare-dns.com/')) {
+                return new Response(JSON.stringify({
+                    Answer: [{ data: '93.184.216.34' }]
+                }))
+            }
+
+            return new Response(`
+                <rss version="2.0"
+                    xmlns:media="http://search.yahoo.com/mrss/">
+                    <channel>
+                        <title>Example RSS</title>
+                        <link>https://example.com/</link>
+                        <item>
+                            <guid>item-1</guid>
+                            <title>Item 1</title>
+                            <media:thumbnail url="${imageUrl}" />
+                        </item>
+                    </channel>
+                </rss>
+            `)
+        }
+
+        try {
+            await userDo.fetchFeed({
+                id: 5,
+                url: 'https://example.com/feed.xml',
+                title: null,
+                description: null,
+                site_url: null,
+                last_fetched: null,
+                last_error: null,
+                last_status: null,
+                created_at: '2026-04-27 00:00:00',
+                updated_at: '2026-04-27 00:00:00'
+            })
+        } finally {
+            globalThis.fetch = originalFetch
+        }
+
+        t.equal(kvReads, 1, 'one KV read is made for the new image')
+        t.deepEqual(
+            itemImageUpdate,
+            {
+                thumbnail: imageUrl,
+                ogImage: imageUrl,
+                id: 44
+            },
+            'image columns are still written'
+        )
+        t.deepEqual(
+            blurhashUpdate,
+            {
+                blurhash: 'LEHV6nWB2yk8pyo0adR*.7kCMdnj',
+                width: 1200,
+                height: 630,
+                id: 44
+            },
+            'cached blurhash metadata is denormalized to the item row'
+        )
+        t.equal(
+            feedVersionBumps,
+            2,
+            'new item insert and cached blurhash update each bump version'
+        )
+    })
+
+test('fetchFeed enqueues blurhash job on cache miss', async t => {
+    const imageUrl = 'https://cdn.example.com/miss.jpg'
+    const userDo = Object.create(UserDO.prototype) as {
+        env:{
+            BLURHASH_KV:{
+                get:(key:string) => Promise<string|null>
+            }
+            BLURHASH_QUEUE:{
+                send:(message:unknown) => Promise<void>
+            }
+        }
+        ctx:{
+            id:{
+                toString:() => string
+            }
+            storage:{
+                get:<T>(key:string) => Promise<T|undefined>
+                put:(key:string, value:unknown) => Promise<void>
+                delete:(key:string) => Promise<void>
+            }
+        }
+        sql:{
+            exec:(query:string, ...params:unknown[]) => {
+                toArray:() => unknown[]
+                one?:() => unknown
+                rowsWritten?:number
+            }
+        }
+        fetchFeed:(feed:{
+            id:number
+            url:string
+            title:string|null
+            description:string|null
+            site_url:string|null
+            last_fetched:string|null
+            last_error:string|null
+            last_status:number|null
+            created_at:string
+            updated_at:string
+        }) => Promise<void>
+    }
+    const originalFetch = globalThis.fetch
+    let kvReads = 0
+    let queuedMessage:unknown = null
+    let blurhashUpdates = 0
+    let feedVersionBumps = 0
+
+    userDo.ctx = {
+        id: {
+            toString () {
+                return 'user-do-id'
+            }
+        },
+        storage: {
+            async get<T> (key:string) {
+                return pollerStorage.get(key) as T|undefined
+            },
+            async put (key:string, value:unknown) {
+                pollerStorage.set(key, value)
+            },
+            async delete (key:string) {
+                pollerStorage.delete(key)
+            }
+        }
+    }
+    userDo.env = {
+        BLURHASH_KV: {
+            async get () {
+                kvReads++
+                return null
+            }
+        },
+        BLURHASH_QUEUE: {
+            async send (message:unknown) {
+                queuedMessage = message
+            }
+        }
+    }
+    userDo.sql = {
+        exec (query:string) {
+            if (query.includes('UPDATE feeds SET') &&
+                query.includes('last_error = NULL')) {
+                return { toArray: () => [] }
+            }
+
+            if (query.includes('INSERT OR IGNORE INTO items')) {
+                return { rowsWritten: 1, toArray: () => [] }
+            }
+
+            if (query.includes('SELECT id FROM items')) {
+                return {
+                    toArray: () => [],
+                    one: () => ({ id: 45 })
+                }
+            }
+
+            if (query.includes('UPDATE items SET') &&
+                query.includes('thumbnail_url')) {
+                return { toArray: () => [] }
+            }
+
+            if (query.includes('UPDATE items SET') &&
+                query.includes('blurhash = COALESCE')) {
+                blurhashUpdates++
+                return { toArray: () => [] }
+            }
+
+            if (query.includes('UPDATE user_state SET feed_version')) {
+                feedVersionBumps++
+                return {
+                    toArray: () => [],
+                    one: () => ({ feed_version: feedVersionBumps })
+                }
+            }
+
+            if (query.includes('SELECT feeds.id FROM feeds')) {
+                return { toArray: () => [] }
+            }
+
+            if (
+                query.includes('COUNT(items.id)') &&
+                query.includes('GROUP BY feeds.id')
+            ) {
+                return { toArray: () => [] }
+            }
+
+            if (query.includes('UPDATE user_state SET feed_version')) {
+                return {
+                    toArray: () => [],
+                    one: () => ({ feed_version: 1 })
+                }
+            }
+
+            throw new Error(`Unexpected SQL: ${query}`)
+        }
+    }
+
+    globalThis.fetch = async (url) => {
+        const urlText = String(url)
+
+        if (urlText.startsWith('https://cloudflare-dns.com/')) {
+            return new Response(JSON.stringify({
+                Answer: [{ data: '93.184.216.34' }]
+            }))
+        }
+
+        return new Response(`
+            <rss version="2.0"
+                xmlns:media="http://search.yahoo.com/mrss/">
+                <channel>
+                    <title>Example RSS</title>
+                    <link>https://example.com/</link>
+                    <item>
+                        <guid>item-1</guid>
+                        <title>Item 1</title>
+                        <media:thumbnail url="${imageUrl}" />
+                    </item>
+                </channel>
+            </rss>
+        `)
+    }
+
+    try {
+        await userDo.fetchFeed({
+            id: 5,
+            url: 'https://example.com/feed.xml',
+            title: null,
+            description: null,
+            site_url: null,
+            last_fetched: null,
+            last_error: null,
+            last_status: null,
+            created_at: '2026-04-27 00:00:00',
+            updated_at: '2026-04-27 00:00:00'
+        })
+    } finally {
+        globalThis.fetch = originalFetch
+    }
+
+    t.equal(kvReads, 1, 'one KV read is made before enqueue')
+    t.equal(blurhashUpdates, 0, 'cache miss does not write blurhash')
+    t.equal(feedVersionBumps, 1, 'new item insert bumps version once')
+    t.deepEqual(
+        queuedMessage,
+        {
+            imageUrl,
+            itemId: 45,
+            objectId: 'user-do-id'
+        },
+        'cache miss enqueues the image job'
     )
 })
 
@@ -549,7 +1119,8 @@ test('fetchFeed caps concurrent og image requests at four', async t => {
                 }
             }
 
-            if (query.includes('UPDATE items SET thumbnail_url = ?')) {
+            if (query.includes('UPDATE items SET') &&
+                query.includes('og_image_url')) {
                 thumbnailUpdates++
                 return { toArray: () => [] }
             }
@@ -563,6 +1134,13 @@ test('fetchFeed caps concurrent og image requests at four', async t => {
                 query.includes('GROUP BY feeds.id')
             ) {
                 return { toArray: () => [] }
+            }
+
+            if (query.includes('UPDATE user_state SET feed_version')) {
+                return {
+                    toArray: () => [],
+                    one: () => ({ feed_version: 1 })
+                }
             }
 
             throw new Error(`Unexpected SQL: ${query}`)
@@ -683,10 +1261,11 @@ test('fetchFeed silently handles og failures, uses parser image', async t => {
                 }
             }
 
-            if (query.includes('UPDATE items SET thumbnail_url = ?')) {
+            if (query.includes('UPDATE items SET') &&
+                query.includes('og_image_url')) {
                 thumbnailUpdate = {
                     thumbnail: params[0],
-                    id: params[1]
+                    id: params[2]
                 }
                 return { toArray: () => [] }
             }
@@ -710,6 +1289,13 @@ test('fetchFeed silently handles og failures, uses parser image', async t => {
                 query.includes('GROUP BY feeds.id')
             ) {
                 return { toArray: () => [] }
+            }
+
+            if (query.includes('UPDATE user_state SET feed_version')) {
+                return {
+                    toArray: () => [],
+                    one: () => ({ feed_version: 1 })
+                }
             }
 
             throw new Error(`Unexpected SQL: ${query}`)
@@ -844,6 +1430,13 @@ test('fetchFeed records non-duplicate item insert failures', async t => {
                 return { toArray: () => [] }
             }
 
+            if (query.includes('UPDATE user_state SET feed_version')) {
+                return {
+                    toArray: () => [],
+                    one: () => ({ feed_version: 1 })
+                }
+            }
+
             throw new Error(`Unexpected SQL: ${query}`)
         }
     }
@@ -941,7 +1534,8 @@ test('fetchFeed stays quiet when article URL exceeds redirect budget',
                     }
                 }
 
-                if (query.includes('UPDATE items SET thumbnail_url = ?')) {
+                if (query.includes('UPDATE items SET') &&
+                    query.includes('og_image_url')) {
                     return { toArray: () => [] }
                 }
 
@@ -954,6 +1548,13 @@ test('fetchFeed stays quiet when article URL exceeds redirect budget',
                     query.includes('GROUP BY feeds.id')
                 ) {
                     return { toArray: () => [] }
+                }
+
+                if (query.includes('UPDATE user_state SET feed_version')) {
+                    return {
+                        toArray: () => [],
+                        one: () => ({ feed_version: 1 })
+                    }
                 }
 
                 throw new Error(`Unexpected SQL: ${query}`)
@@ -1069,10 +1670,11 @@ test('fetchFeed resolves og image after multi-hop article redirects',
                     }
                 }
 
-                if (query.includes('UPDATE items SET thumbnail_url = ?')) {
+                if (query.includes('UPDATE items SET') &&
+                    query.includes('og_image_url')) {
                     thumbnailUpdate = {
                         thumbnail: params[0],
-                        id: params[1]
+                        id: params[2]
                     }
                     return { toArray: () => [] }
                 }
@@ -1086,6 +1688,13 @@ test('fetchFeed resolves og image after multi-hop article redirects',
                     query.includes('GROUP BY feeds.id')
                 ) {
                     return { toArray: () => [] }
+                }
+
+                if (query.includes('UPDATE user_state SET feed_version')) {
+                    return {
+                        toArray: () => [],
+                        one: () => ({ feed_version: 1 })
+                    }
                 }
 
                 throw new Error(`Unexpected SQL: ${query}`)
@@ -1210,10 +1819,11 @@ test('fetchFeed falls back to feed image when article redirects loop',
                     }
                 }
 
-                if (query.includes('UPDATE items SET thumbnail_url = ?')) {
+                if (query.includes('UPDATE items SET') &&
+                    query.includes('og_image_url')) {
                     thumbnailUpdate = {
                         thumbnail: params[0],
-                        id: params[1]
+                        id: params[2]
                     }
                     return { toArray: () => [] }
                 }
@@ -1227,6 +1837,13 @@ test('fetchFeed falls back to feed image when article redirects loop',
                     query.includes('GROUP BY feeds.id')
                 ) {
                     return { toArray: () => [] }
+                }
+
+                if (query.includes('UPDATE user_state SET feed_version')) {
+                    return {
+                        toArray: () => [],
+                        one: () => ({ feed_version: 1 })
+                    }
                 }
 
                 throw new Error(`Unexpected SQL: ${query}`)
@@ -1341,7 +1958,8 @@ test('fetchFeed leaves thumbnail null when article loops and feed has none',
                     }
                 }
 
-                if (query.includes('UPDATE items SET thumbnail_url = ?')) {
+                if (query.includes('UPDATE items SET') &&
+                    query.includes('og_image_url')) {
                     thumbnailUpdates++
                     return { toArray: () => [] }
                 }
@@ -1355,6 +1973,13 @@ test('fetchFeed leaves thumbnail null when article loops and feed has none',
                     query.includes('GROUP BY feeds.id')
                 ) {
                     return { toArray: () => [] }
+                }
+
+                if (query.includes('UPDATE user_state SET feed_version')) {
+                    return {
+                        toArray: () => [],
+                        one: () => ({ feed_version: 1 })
+                    }
                 }
 
                 throw new Error(`Unexpected SQL: ${query}`)
@@ -1470,6 +2095,13 @@ test('fetchFeed loudly reports feed-XML redirect overflow', async t => {
                 query.includes('GROUP BY feeds.id')
             ) {
                 return { toArray: () => [] }
+            }
+
+            if (query.includes('UPDATE user_state SET feed_version')) {
+                return {
+                    toArray: () => [],
+                    one: () => ({ feed_version: 1 })
+                }
             }
 
             throw new Error(`Unexpected SQL: ${query}`)

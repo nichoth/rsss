@@ -28,6 +28,10 @@ export interface Item {
     author:string|null
     pub_date:string|null
     thumbnail_url:string|null
+    og_image_url?:string|null
+    blurhash?:string|null
+    image_width?:number|null
+    image_height?:number|null
     is_read:number
     is_starred:number
     created_at:string

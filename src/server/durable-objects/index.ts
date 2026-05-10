@@ -7,6 +7,7 @@ import {
     INDEXES_SQL,
     TRIGGERS_SQL,
     DEAD_LETTER_OUTBOX_SQL,
+    USER_STATE_SQL,
     ALL_FULL_CONTENT_STATUSES,
     FETCH_FULL_MIN_INTERVAL_MS
 } from '../../shared/schema.js'
@@ -22,10 +23,17 @@ import {
     validateFeedUrl
 } from '../feed-fetch.js'
 import { fetchFullArticle } from '../article-fetch.js'
+import {
+    blurhashCacheKey,
+    parseBlurhashCacheEntry,
+    type BlurhashJob
+} from '../blurhash.js'
 
 export interface Env {
     USER:DurableObjectNamespace<UserDO>
     SESSIONS:KVNamespace
+    BLURHASH_KV:KVNamespace
+    BLURHASH_QUEUE:Queue
     ASSETS:Fetcher
     AUTUMN_SECRET_KEY?:string
     AUTUMN_DISABLED?:string
@@ -96,7 +104,7 @@ const MANUAL_REFRESH_STORAGE_PREFIX = 'manual_refresh:'
 const ALARM_REFRESH_CURSOR_KEY = 'alarm_refresh_cursor'
 const PENDING_DELETION_KEY = 'pending_deletion'
 const MIGRATION_STATE_KEY = 'schema_migration'
-const USER_DO_MIGRATION_VERSION = 5
+const USER_DO_MIGRATION_VERSION = 6
 const FEEDS_UPDATED_AT_BUMP_KEY = 'feeds_updated_at_bump_for_last_pulled_at'
 const SYNC_PAGE_LIMIT = 500
 const FETCH_FULL_THROTTLE_PREFIX = 'fetch_full:'
@@ -113,8 +121,9 @@ const FEED_SYNC_COLUMNS = `
 const ITEM_COLUMNS = `
     items.id, items.feed_id, items.guid, items.title, items.link,
     items.description, items.content, items.author, items.pub_date,
-    items.thumbnail_url, items.is_read, items.is_starred, items.created_at,
-    items.updated_at,
+    items.thumbnail_url, items.og_image_url, items.blurhash,
+    items.image_width, items.image_height, items.is_read,
+    items.is_starred, items.created_at, items.updated_at,
     items.full_content, items.full_content_fetched_at,
     items.full_content_status
 `
@@ -390,6 +399,7 @@ export class UserDO extends DurableObject<Env> {
             this.migrateAddUpdatedAt()
             this.migrateAddFeedFailureColumns()
             this.migrateAddItemThumbnail()
+            this.migrateAddItemImageMetadata()
             this.migrateAddLastPulledAt()
             this.migrateAddItemFullContent()
             await this.ctx.storage.put(MIGRATION_STATE_KEY, {
@@ -415,6 +425,7 @@ export class UserDO extends DurableObject<Env> {
         this.sql.exec(INDEXES_SQL)
         this.sql.exec(TRIGGERS_SQL)
         this.sql.exec(DEAD_LETTER_OUTBOX_SQL)
+        this.sql.exec(USER_STATE_SQL)
     }
 
     /**
@@ -493,6 +504,27 @@ export class UserDO extends DurableObject<Env> {
             this.sql.exec(
                 'ALTER TABLE items ADD COLUMN full_content_status TEXT'
             )
+        }
+    }
+
+    private migrateAddItemImageMetadata () {
+        const cols = this.sql.exec('PRAGMA table_info(items)').toArray()
+        const has = (name:string) => cols.some(
+            (col:unknown) => (col as { name:string }).name === name
+        )
+        const columns = [
+            ['og_image_url', 'TEXT'],
+            ['blurhash', 'TEXT'],
+            ['image_width', 'INTEGER'],
+            ['image_height', 'INTEGER']
+        ]
+
+        for (const [name, type] of columns) {
+            if (!has(name)) {
+                this.sql.exec(
+                    `ALTER TABLE items ADD COLUMN ${name} ${type}`
+                )
+            }
         }
     }
 
@@ -582,6 +614,56 @@ export class UserDO extends DurableObject<Env> {
         // Health check
         app.get('/health', (c) => {
             return c.json({ status: 'ok', service: 'do' })
+        })
+
+        app.post('/internal/blurhash/items/:id', async (c) => {
+            const id = Number(c.req.param('id'))
+            const body = await c.req.json<{
+                blurhash?:unknown
+                image_width?:unknown
+                image_height?:unknown
+            }>()
+
+            if (!Number.isInteger(id) || id < 1) {
+                return c.json({ error: 'Invalid item id' }, 400)
+            }
+            if (
+                typeof body.blurhash !== 'string' ||
+                typeof body.image_width !== 'number' ||
+                typeof body.image_height !== 'number'
+            ) {
+                return c.json({ error: 'Invalid blurhash metadata' }, 400)
+            }
+
+            this.sql.exec(
+                `UPDATE items SET
+                    blurhash = ?,
+                    image_width = ?,
+                    image_height = ?
+                WHERE id = ?`,
+                body.blurhash,
+                body.image_width,
+                body.image_height,
+                id
+            )
+            this.bumpFeedVersion()
+
+            return new Response(null, { status: 204 })
+        })
+
+        app.get('/internal/feed-version', (c) => {
+            return c.json({ version: this.getFeedVersion() })
+        })
+
+        app.get('/internal/lazy-html-data', (c) => {
+            const version = this.getFeedVersion()
+            const items = this.sql.exec(
+                `SELECT ${ITEM_SYNC_COLUMNS} ` +
+                'FROM items JOIN feeds ON items.feed_id = feeds.id ' +
+                'ORDER BY items.pub_date DESC, items.id DESC LIMIT 50'
+            ).toArray()
+
+            return c.json({ version, items })
         })
 
         // Server-sent events stream. Broadcasts state-change
@@ -1576,6 +1658,8 @@ export class UserDO extends DurableObject<Env> {
             await this.updateNewItemThumbnails(newItems)
 
             if (newItems.length > 0) {
+                this.bumpFeedVersion()
+
                 // Send canonical pending count for the touched feed so
                 // the client is a passive renderer of state. Re-broadcast
                 // even when the feed was already in the unsynced set
@@ -1657,6 +1741,24 @@ export class UserDO extends DurableObject<Env> {
         return typeof rowsWritten === 'number' ? rowsWritten : 0
     }
 
+    private bumpFeedVersion ():number {
+        const row = this.sql.exec(`
+            UPDATE user_state SET feed_version = feed_version + 1
+            WHERE id = 1
+            RETURNING feed_version
+        `).one() as { feed_version:number } | null
+
+        return row?.feed_version ?? 0
+    }
+
+    private getFeedVersion ():number {
+        const row = this.sql.exec(`
+            SELECT feed_version FROM user_state WHERE id = 1
+        `).one() as { feed_version:number } | null
+
+        return row?.feed_version ?? 0
+    }
+
     private async updateNewItemThumbnails (
         items:NewFeedItem[]
     ):Promise<void> {
@@ -1678,7 +1780,7 @@ export class UserDO extends DurableObject<Env> {
                 nextItemIndex++
                 if (!item) return
 
-                await this.updateNewItemThumbnail(
+                await this.updateNewItemImage(
                     item,
                     deadline,
                     controller.signal
@@ -1691,41 +1793,81 @@ export class UserDO extends DurableObject<Env> {
 
         for (const result of results) {
             if (result.status === 'rejected') {
-                console.error('Error updating item thumbnail:', result.reason)
+                console.error('Error updating item image:', result.reason)
             }
         }
     }
 
-    private async updateNewItemThumbnail (
+    private async updateNewItemImage (
         item:NewFeedItem,
         deadline:number,
         signal:AbortSignal
     ):Promise<void> {
         try {
-            const thumbnailUrl = await this.resolveNewItemThumbnail(
+            const imageUrl = await this.resolveNewItemImage(
                 item,
                 deadline,
                 signal
             )
-            if (!thumbnailUrl) return
+            if (!imageUrl) return
 
             this.sql.exec(
-                `UPDATE items SET thumbnail_url = ?
-                WHERE id = ? AND thumbnail_url IS NULL`,
-                thumbnailUrl,
+                `UPDATE items SET
+                    thumbnail_url = COALESCE(thumbnail_url, ?),
+                    og_image_url = COALESCE(og_image_url, ?)
+                WHERE id = ?`,
+                imageUrl,
+                imageUrl,
                 item.id
             )
+            await this.updateBlurhashFromCacheOrQueue(item.id, imageUrl)
         } catch (err) {
-            console.error('Error updating item thumbnail:', err)
+            console.error('Error updating item image:', err)
         }
     }
 
-    private async resolveNewItemThumbnail (
+    private async updateBlurhashFromCacheOrQueue (
+        itemId:number,
+        imageUrl:string
+    ):Promise<void> {
+        const env:Env|undefined = this.env
+
+        if (!env?.BLURHASH_KV || !env.BLURHASH_QUEUE) return
+
+        const key = await blurhashCacheKey(imageUrl)
+        const cached = await env.BLURHASH_KV.get(key)
+        const entry = parseBlurhashCacheEntry(cached)
+
+        if (entry) {
+            this.sql.exec(
+                `UPDATE items SET
+                    blurhash = COALESCE(blurhash, ?),
+                    image_width = COALESCE(image_width, ?),
+                    image_height = COALESCE(image_height, ?)
+                WHERE id = ?`,
+                entry.blurhash,
+                entry.image_width,
+                entry.image_height,
+                itemId
+            )
+            this.bumpFeedVersion()
+            return
+        }
+
+        await env.BLURHASH_QUEUE.send({
+            imageUrl,
+            itemId,
+            objectId: this.ctx.id.toString()
+        } satisfies BlurhashJob)
+    }
+
+    private async resolveNewItemImage (
         item:NewFeedItem,
         deadline:number,
         signal:AbortSignal
     ):Promise<string | null> {
-        if (!item.link) return item.imageUrl
+        if (item.imageUrl) return item.imageUrl
+        if (!item.link) return null
 
         const ogImage = await this.fetchOgImageBeforeDeadline(
             item.link,
@@ -1733,7 +1875,7 @@ export class UserDO extends DurableObject<Env> {
             signal
         )
 
-        return ogImage || item.imageUrl
+        return ogImage
     }
 
     private async fetchOgImageBeforeDeadline (

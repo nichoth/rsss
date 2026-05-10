@@ -356,6 +356,52 @@ test('full sync stores item thumbnail_url', async (t) => {
     }
 })
 
+test('full sync stores item image metadata', async (t) => {
+    storeContent.value = true
+    const db = await openLocalDb('did:test:pull-image-metadata')
+    try {
+        const syncData = {
+            feeds: [FEED],
+            items: [{
+                ...ITEM,
+                og_image_url: 'https://cdn.example.com/og.jpg',
+                blurhash: 'LEHV6nWB2yk8pyo0adR*.7kCMdnj',
+                image_width: 1200,
+                image_height: 630
+            }],
+            syncedAt: '2026-01-02 00:00:00',
+            latestUpdatedAt: '2026-01-01 00:00:00',
+            isFullSync: true
+        }
+        await pullSync(db, makeFetch(syncData))
+
+        const item = queryOne<{
+            og_image_url:string|null
+            blurhash:string|null
+            image_width:number|null
+            image_height:number|null
+        }>(
+            db,
+            `SELECT og_image_url, blurhash, image_width, image_height
+             FROM items WHERE id = 10`
+        )
+        t.equal(
+            item?.og_image_url,
+            'https://cdn.example.com/og.jpg',
+            'og_image_url is stored locally'
+        )
+        t.equal(
+            item?.blurhash,
+            'LEHV6nWB2yk8pyo0adR*.7kCMdnj',
+            'blurhash is stored locally'
+        )
+        t.equal(item?.image_width, 1200, 'image_width is stored locally')
+        t.equal(item?.image_height, 630, 'image_height is stored locally')
+    } finally {
+        db.close()
+    }
+})
+
 test('content stripped when storeContent is false', async (t) => {
     storeContent.value = false
     const db = await openLocalDb('did:test:pull-nocontent')

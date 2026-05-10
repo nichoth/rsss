@@ -17,6 +17,12 @@ const requiredSuites = [
     'tab-coordination'
 ]
 
+const requiredScriptCommands = [
+    'test:initial-feed',
+    'test:lazy-html',
+    'test:lazy-html-handler'
+]
+
 const wasmSuites = [
     'bootstrap',
     'local-adapter',
@@ -36,6 +42,14 @@ for (const suite of requiredSuites) {
         runner,
         new RegExp(`test/${suite}\\.ts`),
         `npm test runs test/${suite}.ts`
+    )
+}
+
+for (const command of requiredScriptCommands) {
+    assert.match(
+        runner,
+        new RegExp(`npm run ${command}`),
+        `npm test runs ${command}`
     )
 }
 

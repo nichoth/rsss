@@ -1,6 +1,6 @@
 # rsss Development Guidelines
 
-Auto-generated from all feature plans. Last updated: 2026-05-09
+Auto-generated from all feature plans. Last updated: 2026-05-10
 
 ## Active Technologies
 - Per-user Durable Object SQLite (server-authoritative); local (002-full-article-fetch)
@@ -18,6 +18,8 @@ Auto-generated from all feature plans. Last updated: 2026-05-09
 - N/A. Client-side render-time state only. No SQLite schema, (012-updating-status-dot)
 - TypeScript (browser, ES2022 lib via Vite for + Preact + `@preact/signals`, `htm/preact`, (013-remove-sync-button)
 - TypeScript (browser, ES2022 lib via Vite for the + Preact + `@preact/signals`, `htm/preact` (014-sidebar-pending-count)
+- TypeScript (browser, ES2022 lib via Vite for + Vite 7 + lightningcss (CSS pipeline), (015-fix-fouc-on-refresh)
+- N/A. No SQLite schema change, no DO schema change, no (015-fix-fouc-on-refresh)
 
 - TypeScript (Cloudflare Workers runtime, ES2022 lib) + `hono`, `@cloudflare/workers-types`, `fast-xml-parser` (001-fix-og-image-redirects)
 
@@ -38,9 +40,9 @@ npm test && npm run lint
 TypeScript (Cloudflare Workers runtime, ES2022 lib): Follow standard conventions
 
 ## Recent Changes
+- 015-fix-fouc-on-refresh: Added TypeScript (browser, ES2022 lib via Vite for + Vite 7 + lightningcss (CSS pipeline),
 - 014-sidebar-pending-count: Added TypeScript (browser, ES2022 lib via Vite for the + Preact + `@preact/signals`, `htm/preact`
 - 013-remove-sync-button: Added TypeScript (browser, ES2022 lib via Vite for + Preact + `@preact/signals`, `htm/preact`,
-- 012-updating-status-dot: Added TypeScript (browser, ES2022 lib via Vite for the + Preact + `@preact/signals` (client state and
 
 
 <!-- MANUAL ADDITIONS START -->

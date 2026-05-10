@@ -28,7 +28,10 @@ import {
     sendPaymentFailed,
     sendAccountDeletionScheduled
 } from './email.js'
+import { handleBlurhashQueueBatch } from './blurhash-consumer.js'
+import { handleLazyHtmlRequest } from './lazy-html-handler.js'
 import type { Context, Next } from 'hono'
+import type * as BlurhashRuntime from './blurhash-runtime.js'
 
 // Re-export the Durable Object class for Wrangler
 export { UserDO }
@@ -36,6 +39,9 @@ export { UserDO }
 export interface Env {
     USER_DO:DurableObjectNamespace<UserDO>;
     SESSIONS:KVNamespace;
+    BLURHASH_KV:KVNamespace;
+    HTML_KV?:KVNamespace;
+    BLURHASH_QUEUE:Queue;
     ASSETS:Fetcher;
     SESSION_SECRET:string;
     OAUTH_CLIENT_ID?:string;
@@ -1464,7 +1470,35 @@ app.all('*', (c) => {
         return c.notFound()
     }
 
+    const session = c.get('session')
+    const did = session?.did
+
+    if (did && c.env.HTML_KV && c.env.USER_DO) {
+        return handleLazyHtmlRequest({
+            did,
+            kv: c.env.HTML_KV,
+            doStub: getUserDO(c.env, did),
+            assets: c.env.ASSETS,
+            request: c.req.raw
+        })
+    }
+
     return c.env.ASSETS.fetch(c.req.raw)
 })
 
-export default app
+const blurhashRuntimeModule = './blurhash-runtime.js'
+
+const worker = Object.assign(app, {
+    async queue (batch:MessageBatch<unknown>, env:Env):Promise<void> {
+        const runtime = await import(
+            blurhashRuntimeModule
+        ) as typeof BlurhashRuntime
+        await handleBlurhashQueueBatch(
+            batch,
+            env,
+            runtime.createBlurhashConsumerDeps()
+        )
+    }
+})
+
+export default worker

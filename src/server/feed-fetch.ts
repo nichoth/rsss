@@ -523,6 +523,7 @@ function isHtmlContentType (contentType:string):boolean {
 function findMetaImage (html:string):string|null {
     const keys = [
         { attr: 'property', value: 'og:image' },
+        { attr: 'name', value: 'og:image' },
         { attr: 'property', value: 'og:image:secure_url' },
         { attr: 'property', value: 'og:image:url' },
         { attr: 'name', value: 'twitter:image' }

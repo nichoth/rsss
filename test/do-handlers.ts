@@ -17,6 +17,31 @@ interface QueryResult {
     one:() => unknown | null
 }
 
+interface ItemRow {
+    id:number
+    feed_id:number
+    guid:string
+    title:string|null
+    link:string|null
+    description:string|null
+    content:string|null
+    author:string|null
+    pub_date:string|null
+    thumbnail_url:string|null
+    og_image_url:string|null
+    blurhash:string|null
+    image_width:number|null
+    image_height:number|null
+    is_read:number
+    is_starred:number
+    created_at:string
+    updated_at:string
+    full_content:string|null
+    full_content_fetched_at:string|null
+    full_content_status:string|null
+    feed_title:string|null
+}
+
 function result (rows:unknown[]):QueryResult {
     return {
         toArray () {
@@ -41,6 +66,38 @@ function feedRow (id:number, url:string, title:string|null):FeedRow {
     }
 }
 
+function itemRow (
+    id:number,
+    feedId:number,
+    title:string,
+    pubDate:string
+):ItemRow {
+    return {
+        id,
+        feed_id: feedId,
+        guid: `guid-${id}`,
+        title,
+        link: `https://example.com/items/${id}`,
+        description: null,
+        content: null,
+        author: null,
+        pub_date: pubDate,
+        thumbnail_url: null,
+        og_image_url: `https://example.com/images/${id}.jpg`,
+        blurhash: 'LEHV6nWB2yk8pyo0adR*.7kCMdnj',
+        image_width: 1200,
+        image_height: 630,
+        is_read: 0,
+        is_starred: 0,
+        created_at: '2026-04-26 00:00:00',
+        updated_at: '2026-04-26 00:00:00',
+        full_content: null,
+        full_content_fetched_at: null,
+        full_content_status: null,
+        feed_title: feedId === 1 ? 'Bravo' : 'Alpha'
+    }
+}
+
 interface PendingCountRow {
     id:number|string
     pending_count:number|string|null
@@ -48,21 +105,46 @@ interface PendingCountRow {
 
 function createSql (options:{
     feeds?:FeedRow[]
+    feedVersion?:number
+    items?:ItemRow[]
     pendingCountRows?:PendingCountRow[]
 } = {}) {
     const feeds:FeedRow[] = options.feeds ?? [
         feedRow(1, 'https://bravo.example/feed.xml', 'Bravo'),
         feedRow(2, 'https://alpha.example/feed.xml', 'Alpha')
     ]
+    const items:ItemRow[] = options.items ?? [
+        itemRow(3, 1, 'Later item', '2026-04-27 00:00:00'),
+        itemRow(2, 2, 'Earlier item', '2026-04-26 00:00:00')
+    ]
+    const feedVersion = options.feedVersion ?? 0
     let pendingCountRows:PendingCountRow[]|null =
         options.pendingCountRows ?? null
 
     return {
         feeds,
+        calls: [] as string[],
+        itemQueries: [] as string[],
+        blurhashUpdates: [] as unknown[][],
+        feedVersionBumps: 0,
         setPendingCountRows (rows:PendingCountRow[]) {
             pendingCountRows = rows
         },
         exec (query:string, ...params:unknown[]) {
+            if (query.includes('SELECT feed_version FROM user_state')) {
+                this.calls.push('version')
+                return result([{ feed_version: feedVersion }])
+            }
+
+            if (
+                query.includes('FROM items JOIN feeds') &&
+                query.includes('ORDER BY items.pub_date DESC')
+            ) {
+                this.calls.push('items')
+                this.itemQueries.push(query)
+                return result(items)
+            }
+
             if (query.includes('SELECT * FROM feeds ORDER BY title ASC')) {
                 return result([...feeds].sort((a, b) => {
                     return (a.title || '').localeCompare(b.title || '')
@@ -95,6 +177,17 @@ function createSql (options:{
                 return result([])
             }
 
+            if (query.includes('UPDATE items SET') &&
+                query.includes('blurhash = ?')) {
+                this.blurhashUpdates.push(params)
+                return result([])
+            }
+
+            if (query.includes('UPDATE user_state SET feed_version')) {
+                this.feedVersionBumps++
+                return result([{ feed_version: this.feedVersionBumps }])
+            }
+
             if (query.includes('pending_count')) {
                 if (pendingCountRows !== null) {
                     return result(pendingCountRows)
@@ -116,6 +209,8 @@ function createSql (options:{
 
 function createDoHarness (options:{
     feeds?:FeedRow[]
+    feedVersion?:number
+    items?:ItemRow[]
     pendingCountRows?:PendingCountRow[]
 } = {}) {
     const sql = createSql(options)
@@ -218,6 +313,99 @@ test('UserDO feed handlers list create and refresh feeds', async t => {
     t.equal(refreshBody.success, true, 'refresh reports success')
     t.deepEqual(refreshed, [3, 3], 'created feed is refreshed')
 })
+
+test('UserDO internal blurhash handler writes image metadata', async t => {
+    const { app, sql } = createDoHarness()
+
+    const response = await app.request('/internal/blurhash/items/77', {
+        method: 'POST',
+        body: JSON.stringify({
+            blurhash: 'LEHV6nWB2yk8pyo0adR*.7kCMdnj',
+            image_width: 1200,
+            image_height: 630
+        })
+    })
+
+    t.equal(response.status, 204, 'internal update returns 204')
+    t.deepEqual(sql.blurhashUpdates, [[
+        'LEHV6nWB2yk8pyo0adR*.7kCMdnj',
+        1200,
+        630,
+        77
+    ]], 'item row is updated with blurhash metadata')
+    t.equal(sql.feedVersionBumps, 1, 'blurhash metadata bumps version')
+})
+
+test(
+    'UserDO internal feed-version endpoint returns current version',
+    async t => {
+        const { app, sql } = createDoHarness({ feedVersion: 42 })
+
+        const response = await app.request('/internal/feed-version')
+        const body = response.status === 200 ?
+            await response.json() as { version:number } :
+            { version: -1 }
+
+        t.equal(response.status, 200, 'internal feed version returns 200')
+        t.equal(body.version, 42, 'current feed version is returned')
+        t.deepEqual(sql.calls, ['version'], 'endpoint only reads feed version')
+    }
+)
+
+test(
+    'UserDO internal lazy-html-data returns version and first page',
+    async t => {
+        const { app, sql } = createDoHarness({ feedVersion: 12 })
+
+        const response = await app.request('/internal/lazy-html-data')
+        const body = response.status === 200 ?
+            await response.json() as {
+                version:number
+                items:ItemRow[]
+            } :
+            {
+                version: -1,
+                items: []
+            }
+
+        t.equal(response.status, 200, 'lazy HTML data returns 200')
+        t.equal(body.version, 12, 'response includes the current version')
+        t.deepEqual(
+            body.items.map(item => item.title),
+            ['Later item', 'Earlier item'],
+            'response includes first-page items'
+        )
+        t.deepEqual(
+            sql.calls,
+            ['version', 'items'],
+            'version is read before querying items'
+        )
+        t.equal(sql.itemQueries.length, 1, 'items are read once')
+        const query = sql.itemQueries[0] ?? ''
+        t.ok(
+            query.includes('items.og_image_url') &&
+                query.includes('items.blurhash') &&
+                query.includes('items.image_width') &&
+                query.includes('items.image_height'),
+            'query selects image metadata columns'
+        )
+        t.ok(
+            query.includes('feeds.title AS feed_title'),
+            'query selects joined feed title'
+        )
+        t.ok(
+            query.includes(
+                'FROM items JOIN feeds ON items.feed_id = feeds.id'
+            ),
+            'query uses the same feed join shape as item listing'
+        )
+        t.ok(
+            query.includes('ORDER BY items.pub_date DESC, items.id DESC'),
+            'query uses deterministic lazy-html ordering'
+        )
+        t.ok(query.includes('LIMIT 50'), 'query limits to first page')
+    }
+)
 
 test('UserDO manual feed refresh is rate limited per feed', async t => {
     const { app, refreshed, storage } = createDoHarness()

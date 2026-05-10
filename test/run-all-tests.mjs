@@ -14,6 +14,7 @@ const commands = [
     'node test/local-first-opfs-persistence-static.mjs',
     'node test/local-first-docs.mjs',
     'node test/vite-build-inputs.mjs',
+    'node test/shell-html.mjs',
     'node test/vite-isolation-headers.mjs',
     'node test/isolation-headers-static.mjs',
     'node test/run-all-coverage.mjs',
@@ -91,6 +92,10 @@ const commands = [
         '--platform=node --format=esm',
         '| node --input-type=module | tap-spec'
     ].join(' '),
+    'npm run test:lazy-html',
+    'npm run test:lazy-html-handler',
+    'node test/run-lazy-html-routing.mjs',
+    'npm run test:initial-feed',
     [
         'esbuild ./test/index.ts --bundle',
         '--alias:cloudflare:workers=./test/cloudflare-workers-stub.ts',

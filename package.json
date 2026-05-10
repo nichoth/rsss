@@ -28,6 +28,10 @@
     "test:server-fk": "node test/run-server-foreign-keys.mjs",
     "test:tab-coordination": "esbuild test/tab-coordination.ts --bundle | tapout",
     "test:api-router": "esbuild test/api-router.ts --bundle --alias:cloudflare:workers=./test/cloudflare-workers-stub.ts | tapout",
+    "test:lazy-html": "esbuild ./test/lazy-html.ts --bundle | tapout",
+    "test:lazy-html-handler": "node test/run-lazy-html-handler.mjs",
+    "test:lazy-html-routing": "node test/run-lazy-html-routing.mjs",
+    "test:initial-feed": "esbuild ./test/initial-feed.ts --bundle | tapout",
     "test:signup:server": "esbuild ./test/signup.ts --bundle --platform=node --format=esm --alias:cloudflare:workers=./test/cloudflare-workers-stub.ts | node --input-type=module | tap-spec",
     "test:signup:ui": "esbuild ./test/signup-ui.ts --bundle --loader:.css=text | tapout",
     "test:signup": "npm run test:signup:server && npm run test:signup:ui",
@@ -42,6 +46,7 @@
     "db:reset": "rm -rf .wrangler/state"
   },
   "dependencies": {
+    "@cf-wasm/photon": "^0.3.5",
     "@preact/signals": "^2.5.1",
     "@sqlite.org/sqlite-wasm": "^3.53.0-build1",
     "@substrate-system/a11y": "^0.0.17",
@@ -58,6 +63,7 @@
     "@substrate-system/tool-tip": "^0.0.5",
     "@types/dompurify": "^3.0.5",
     "autumn-js": "^1.2.12",
+    "blurhash": "^2.0.5",
     "dompurify": "^3.4.1",
     "fast-xml-parser": "^5.7.2",
     "hono": "^4.11.3",

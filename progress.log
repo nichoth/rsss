@@ -1,5 +1,32 @@
 ## Codebase Patterns
 
+- First-page client bootstrap data is consumed through
+  `src/client/initial-feed.ts`. `consumeInitialFeed()` is single-use:
+  it reads and clears `window.__INITIAL_FEED__` first, then falls back to
+  the `#initial-feed` JSON script. `State.loadItems` should only skip the
+  adapter fetch when that payload contains items; empty or missing payloads
+  continue through the normal API/local adapter path.
+- Lazy HTML bootstrap data comes from internal Durable Object endpoints:
+  `/internal/feed-version` reads only `user_state.feed_version`, while
+  `/internal/lazy-html-data` reads that version first and then returns the
+  first 50 `ITEM_SYNC_COLUMNS` item rows ordered by
+  `items.pub_date DESC, items.id DESC`.
+- Feed version reads and increments live on `UserDO` private helpers near
+  `rowsWritten`. Use `getFeedVersion()` for the current `user_state`
+  counter and `bumpFeedVersion()` for atomic invalidation via
+  `UPDATE user_state SET feed_version = feed_version + 1 ... RETURNING`.
+- When adding Durable Object schema migrations, bump
+  `USER_DO_MIGRATION_VERSION` and update `test/do-migrations.ts` so local
+  DOs already stamped with the previous current version still rerun the new
+  column checks.
+- Feed item image rendering is driven by `og_image_url`. Render
+  `<blur-hash>` only when `blurhash`, `image_width`, and `image_height` are
+  all present; otherwise fall back to a plain lazy `<img>`. Do not render
+  legacy `thumbnail_url` as the feed-list image.
+- New feed item image enrichment is centralized in
+  `UserDO.updateNewItemThumbnails`: feed-provided image hints are preferred
+  over article fetches, and the resolved image should update both
+  `thumbnail_url` and `og_image_url` together.
 - Cache status header visibility is gated by both local-first settings:
   `syncSubscriptions` and `storeContent`. Component tests that expect the
   indicator to render must opt both signals in, alongside an entitled user
@@ -57,6 +84,488 @@
 - `State.loadFeeds` derives header feed sync status from canonical
   `feedUpdateCounts`; treat legacy `feedUpdateStatus` as compatibility data,
   not the client state hydration source.
+- Cloudflare deployment infrastructure is covered by
+  `test/deploy-config.mjs`. When `wrangler.jsonc` bindings change, update
+  that static test and rerun `npx wrangler types` so
+  `worker-configuration.d.ts` stays in sync.
+- BlurHash ingest KV values should be JSON metadata objects with
+  `blurhash`, `image_width`, and `image_height`. Poller KV hits need all
+  three fields so they can denormalize image placeholders without queueing.
+- BlurHash queue jobs must carry the source Durable Object id as
+  `objectId`, because `itemId` values are scoped to one user's Durable
+  Object. Queue consumers should route writes through the DO's internal
+  BlurHash endpoint instead of assuming a global item table.
+- BlurHash consumer permanent skips should return `null` from the encode
+  path so the queue message is acked without KV or DO writes. Keep 4xx
+  image fetches, oversize images, and decode failures in this path; KV
+  writes, DO writes, fetch 5xx/timeouts, and encode crashes should throw so
+  Cloudflare retries and eventually DLQs according to queue config.
+- Server-only Durable Object schema that must exist on every startup can be
+  applied idempotently in `UserDO.initDatabase()` after the shared indexes,
+  triggers, and auxiliary outbox tables, without bumping
+  `USER_DO_MIGRATION_VERSION` when it does not ALTER existing tables.
+- Feed HTML cache invalidation is version-based. Any Durable Object write
+  that changes feed-list contents or denormalized item image metadata should
+  call `bumpFeedVersion()` exactly once for that logical write path.
+- Lazy HTML bootstrap helpers live in `src/server/lazy-html.ts`. Tests for
+  injected bootstrap data should parse the `#initial-feed` script JSON
+  instead of comparing raw HTML string shapes.
+- New Cloudflare KV bindings should have static config coverage for the
+  binding name plus concrete `id` and `preview_id` fields, then regenerate
+  `worker-configuration.d.ts` with `npx wrangler types`.
+- Lazy HTML handler tests should assert observable cache orchestration:
+  feed-version reads, versioned KV keys, data endpoint skips on cache hits,
+  `/index.html` shell fetches on misses, and parsed bootstrap JSON.
+- Cookie-sensitive worker route tests must run in Node, not browser tapout,
+  because browser fetch strips `Cookie` request headers before Hono's
+  session middleware can read them.
+- New focused npm test scripts should be wired into
+  `test/run-all-tests.mjs` and added to `test/run-all-coverage.mjs` so
+  `npm test` cannot silently skip them later.
+- Lazy HTML bootstrap has two surfaces: the `#initial-feed` JSON script
+  feeds client state after the JS bundle runs, while the seeded `#root`
+  markup gives first-page thumbnails a paintable HTML surface before the
+  bundle finishes loading.
+
+## 2026-05-09 22:41 PDT - US-023
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Completed end-to-end lazy HTML pipeline sanity
+  coverage and first-paint bootstrap markup.
+  - Added handler coverage proving cache misses emit a pre-rendered
+    first-page `blur-hash.item-thumbnail` in `#root` alongside the
+    parseable `#initial-feed` JSON payload.
+  - Extended `injectInitialFeed()` to seed non-empty first-page payloads
+    into root markup while preserving cache-hit, anonymous, and non-HTML
+    bypass behavior.
+  - Marked US-023 passing in `specs/prd.json`.
+- Files changed:
+  - `src/server/lazy-html.ts`
+  - `test/lazy-html-handler.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Lazy HTML needs both JSON bootstrap data and server-rendered root
+    markup: JSON prevents an adapter fetch after bundle load, while root
+    markup provides the pre-bundle visual surface.
+  - Keep cache-hit tests strict: cached HTML should bypass the data
+    endpoint, shell fetch, and KV put entirely.
+---
+
+## 2026-05-09 22:32 PDT - US-022
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Registered the lazy HTML and initial-feed suites in
+  the full test runner.
+  - Added run-all coverage assertions for `test:lazy-html`,
+    `test:lazy-html-handler`, and `test:initial-feed`.
+  - Wired those three npm scripts into `test/run-all-tests.mjs` near the
+    existing lazy HTML routing suite.
+  - Marked US-022 passing in `specs/prd.json`.
+- Files changed:
+  - `test/run-all-coverage.mjs`
+  - `test/run-all-tests.mjs`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Browser tapout suites share a fixed local port and must run serially;
+    parallel verification can fail with `EADDRINUSE` even when the suites
+    pass individually.
+  - Runner coverage belongs in `test/run-all-coverage.mjs` whenever new
+    npm test scripts are intended to be included in `npm test`.
+---
+
+## 2026-05-09 22:27 PDT - US-021
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added first-paint initial-feed consumption.
+  - Created `src/client/initial-feed.ts` with DOM bootstrap parsing,
+    global `window.__INITIAL_FEED__` consumption, single-use guarding, and
+    a test reset hook.
+  - Wired `State.loadItems` to populate first-page items synchronously from
+    a non-empty bootstrap payload, clear loading state in a `batch()`, and
+    skip the adapter/API request on that path.
+  - Added focused `test:initial-feed` coverage for DOM parsing, invalid or
+    absent scripts, global read-and-clear behavior, DOM fallback, and the
+    `State.loadItems` no-fetch fast path.
+- Files changed:
+  - `src/client/initial-feed.ts`
+  - `src/client/state.ts`
+  - `test/initial-feed.ts`
+  - `package.json`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `State.loadItems` can safely use the embedded first page before
+    adapter resolution, but should keep empty bootstraps on the existing
+    remote/local adapter fallback path.
+  - Initial-feed tests can run as a browser tapout bundle and still assert
+    the no-fetch state path by stubbing `globalThis.fetch`.
+---
+
+## 2026-05-09 22:17 PDT - US-020
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Wired the lazy HTML handler into the worker
+  catch-all route.
+  - Authenticated requests with a verified `session.did`, `HTML_KV`, and
+    `USER_DO` now route through `handleLazyHtmlRequest()` using
+    `getUserDO(c.env, did)`.
+  - Anonymous requests still fall through to `ASSETS.fetch()` with no
+    Durable Object call.
+  - Non-HTML authenticated assets still use the handler's internal HTML
+    guard and are served by ASSETS.
+  - Added focused Node coverage for authenticated HTML bootstrap,
+    anonymous shell fallback, and authenticated asset fallback.
+- Files changed:
+  - `src/server/index.ts`
+  - `test/lazy-html-routing.ts`
+  - `test/run-lazy-html-routing.mjs`
+  - `test/run-all-tests.mjs`
+  - `package.json`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Cookie-sensitive worker route tests should use a Node runner; browser
+    tapout cannot reliably send synthetic `Cookie` headers.
+  - Lazy HTML worker routing should keep anonymous and asset fallbacks
+    observable by asserting DO/KV call counts, not only response bodies.
+---
+
+## 2026-05-09 21:47 PDT - US-019
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added the lazy HTML request handler.
+  - Created `handleLazyHtmlRequest()` with HTML GET detection, DO
+    feed-version reads, versioned `HTML_KV` lookup, cache-hit return, and
+    cache-miss shell generation through `injectInitialFeed()`.
+  - Cache misses now fetch `/internal/lazy-html-data`, load `/index.html`
+    from ASSETS, inject `{ version, items, has_more }`, write the generated
+    shell to KV with a 30-day TTL, and return HTML.
+  - Added focused browser tests for miss, hit, version invalidation, and
+    non-HTML asset bypass behavior.
+  - Added the `test:lazy-html-handler` npm script via a short runner.
+- Files changed:
+  - `src/server/lazy-html-handler.ts`
+  - `test/lazy-html-handler.ts`
+  - `test/run-lazy-html-handler.mjs`
+  - `package.json`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Keep lazy HTML routing orchestration observable in tests through KV
+    calls, DO fetch paths, and ASSETS fetches rather than raw HTML shapes.
+  - Use a small Node runner when a new package script would otherwise exceed
+    the project line-length agreement.
+---
+
+## 2026-05-09 21:26 PDT - US-018
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Provisioned the `HTML_KV` namespace binding.
+  - Created the production and preview `HTML_KV` namespaces with Wrangler.
+  - Added `HTML_KV` next to `BLURHASH_KV` in `wrangler.jsonc`.
+  - Regenerated `worker-configuration.d.ts` so `Env` includes
+    `HTML_KV: KVNamespace`.
+  - Extended `test/deploy-config.mjs` to assert the binding and both ids.
+- Files changed:
+  - `wrangler.jsonc`
+  - `worker-configuration.d.ts`
+  - `test/deploy-config.mjs`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Wrangler OAuth token refresh can fail transiently; `npx wrangler whoami`
+    can refresh and verify auth before retrying namespace commands.
+  - Keep KV namespace config tests focused on static deploy contract checks:
+    binding name, production id, and preview id.
+---
+
+## 2026-05-09 21:15 PDT - US-017
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added the pure lazy HTML helper foundation.
+  - `buildLazyHtmlCacheKey()` now builds deterministic
+    `html:{did}:{version}` KV keys.
+  - `serializeInitialFeed()` stringifies the bootstrap payload while
+    escaping `<` so script-tag breakout strings remain inert.
+  - `injectInitialFeed()` inserts a parseable `#initial-feed` JSON script
+    before `</head>` and leaves shells without `</head>` unchanged.
+  - Added the focused `test:lazy-html` script and coverage for cache keys,
+    JSON round-tripping, escaping, injection, and no-head fallback.
+- Files changed:
+  - `src/server/lazy-html.ts`
+  - `test/lazy-html.ts`
+  - `package.json`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Keep lazy HTML shell helpers pure and unit-tested before wiring them
+    into worker routing or KV/DO side effects.
+  - Browser tests can use `DOMParser` to extract the injected
+    `#initial-feed` script and assert on parsed JSON, avoiding brittle raw
+    HTML comparisons.
+---
+
+## 2026-05-09 21:08 PDT - US-016
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added internal Durable Object endpoints for the
+  lazy per-user HTML pipeline.
+  - `GET /internal/feed-version` returns the current `feed_version`.
+  - `GET /internal/lazy-html-data` returns the current version plus the
+    first 50 joined item rows in deterministic feed-list order.
+  - Added focused handler coverage for response shape, read ordering,
+    selected image metadata columns, join shape, ordering, and limit.
+- Files changed:
+  - `src/server/durable-objects/index.ts`
+  - `test/do-handlers.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Lazy HTML handlers should consume DO data through the internal
+    feed-version and lazy-html-data endpoints instead of duplicating DO SQL
+    in the worker.
+  - `test/do-handlers.ts` can assert SQL query shape through the harness'
+    recorded query strings when endpoint behavior depends on exact ordering
+    or selected columns.
+---
+
+## 2026-05-09 21:02 PDT - US-015
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Wired feed-version invalidation into the three
+  feed-content write paths.
+  - New item ingestion now bumps `feed_version` once when inserted items
+    exist.
+  - BlurHash cache hits now bump `feed_version` after denormalizing image
+    metadata onto the item row.
+  - The internal BlurHash metadata endpoint now bumps `feed_version` after
+    writing queue-produced metadata.
+- Files changed:
+  - `src/server/durable-objects/index.ts`
+  - `test/do-handlers.ts`
+  - `test/feed-parser.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Feed parser tests commonly stub SQL with explicit query allow-lists;
+    successful new-item paths now need to allow the `user_state`
+    `feed_version` update.
+  - Tapout browser tests share a fixed local port, so run focused browser
+    suites sequentially.
+---
+
+## 2026-05-09 20:56 PDT - US-014
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added Durable Object feed version helper methods.
+  - `getFeedVersion()` reads the single-row `user_state.feed_version`
+    counter and falls back to `0` when no row is returned.
+  - `bumpFeedVersion()` atomically increments `feed_version` with
+    `RETURNING feed_version` and falls back to `0` when no row is returned.
+  - Added focused DO helper coverage in the migration test file.
+- Files changed:
+  - `src/server/durable-objects/index.ts`
+  - `test/do-migrations.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Feed version invalidation should use the `UserDO` helper methods rather
+    than duplicating SQL at write sites.
+  - `test/do-migrations.ts` can exercise private DO helpers through
+    `Object.create(UserDO.prototype)` with a lightweight `sql.exec` stub.
+---
+
+## 2026-05-09 19:30 PDT - US-012
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Rendered feed-list item images from denormalized
+  BlurHash metadata.
+  - `ItemRow` now uses `og_image_url` as the render source.
+  - Rows with complete `blurhash`, `image_width`, and `image_height`
+    metadata render a `<blur-hash>` placeholder element.
+  - Rows with an OG image but incomplete hash metadata fall back to a plain
+    lazy `<img>`.
+  - Rows without `og_image_url` render no image element, even if legacy
+    `thumbnail_url` is present.
+  - Imported the BlurHash web-component CSS into the global client CSS.
+  - Bumped the Durable Object migration version to rerun the existing image
+    metadata column migration on DOs already marked at version 5.
+- Files changed:
+  - `src/client/components/item-row.ts`
+  - `src/client/style.css`
+  - `src/server/durable-objects/index.ts`
+  - `test/item-row.ts`
+  - `test/do-migrations.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `@substrate-system/blur-hash` requires a non-empty `alt`, so feed item
+    images use the item title, falling back to "Article image".
+  - Browser component coverage for `ItemRow` can assert the exact custom
+    element attributes without needing authenticated app state.
+  - Local dev exposed stale Durable Object state at migration version 5; new
+    DO schema migrations must bump `USER_DO_MIGRATION_VERSION`, not only add
+    an idempotent migration function.
+---
+
+## 2026-05-09 19:17 PDT - US-011
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added the BlurHash queue consumer failure-mode
+  policy.
+  - 4xx image fetches now return a permanent skip without reading the body.
+  - Decode failures now ack the message and skip KV/DO writes.
+  - 5xx fetches, fetch timeouts, KV write failures, DO write failures, and
+    encode-time Photon crashes continue to throw for queue retry.
+  - Added focused consumer coverage for the permanent skip and retry paths.
+- Files changed:
+  - `src/server/blurhash-consumer.ts`
+  - `test/blurhash-consumer.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `encodeBlurhashEntry` uses `null` as the permanent-skip signal; callers
+    ack and do not write KV or item metadata when it returns `null`.
+  - Decode failures are classified at the `decodeImage` boundary. Failures
+    after a successful decode, such as `encodePixels`, are retryable.
+  - The DLQ behavior remains configuration-driven in `wrangler.jsonc` and is
+    covered by `test/deploy-config.mjs`, not by runtime queue tests.
+---
+
+## 2026-05-09 19:12 PDT - US-010
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added the BlurHash queue consumer happy path.
+  - Re-checks `BLURHASH_KV` before fetching or encoding.
+  - On cache hits, writes cached hash metadata back to the owning user DO.
+  - On misses, fetches image bytes with a browser-like User-Agent, 10 second
+    timeout signal, and 5 MB header/body size caps.
+  - Decodes with Photon, resizes to 32x32 nearest-neighbor, encodes BlurHash
+    with 4x4 components, frees Photon images, writes KV with a 90-day TTL,
+    writes item metadata to the DO, and acks successful messages.
+  - Added an internal DO endpoint for queue-driven item metadata updates.
+  - Queue producer messages now include `objectId` so the consumer can route
+    per-user item updates correctly.
+- Files changed:
+  - `src/server/blurhash.ts`
+  - `src/server/blurhash-consumer.ts`
+  - `src/server/blurhash-runtime.ts`
+  - `src/server/index.ts`
+  - `src/server/durable-objects/index.ts`
+  - `test/blurhash-consumer.ts`
+  - `test/do-handlers.ts`
+  - `test/feed-parser.ts`
+  - `test/index.ts`
+  - `package.json`
+  - `package-lock.json`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Queue messages cannot identify a row with `itemId` alone because item
+    ids are local to each user's Durable Object; include `objectId` and use
+    `env.USER_DO.idFromString(objectId)` in the consumer.
+  - Keep Photon and BlurHash encoder imports isolated in
+    `src/server/blurhash-runtime.ts`; tests can import the consumer module
+    without bundling WASM by injecting `BlurhashConsumerDeps`.
+  - Browser tapout tests cannot observe a `User-Agent` header on a `Request`,
+    so consumer tests assert the injected UA string while runtime code still
+    sends it through fetch.
+---
+
+## 2026-05-09 18:37 PDT - US-009
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added BlurHash cache lookup and queue dispatch to
+  feed ingestion for newly resolved item images.
+  - Derived KV keys as `blurhash:<sha256(imageUrl).slice(0, 32)>`.
+  - On valid KV metadata hits, wrote `blurhash`, `image_width`, and
+    `image_height` directly to the item row.
+  - On cache misses, enqueued `{ imageUrl, itemId }` on `BLURHASH_QUEUE`
+    after preserving existing thumbnail and OG image writes.
+  - Added focused feed parser coverage for hit and miss paths.
+- Files changed:
+  - `src/server/durable-objects/index.ts`
+  - `test/feed-parser.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - BlurHash cache entries must include dimensions, not only the hash,
+    because both the poller hit path and future queue consumer hit path
+    need to write complete image metadata to item rows.
+  - `Object.create(UserDO.prototype)` tests should stub `env` only when
+    they exercise Cloudflare bindings; production code should guard binding
+    access in those isolated prototype tests.
+---
+
+## 2026-05-09 18:31 PDT - US-008
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Extracted and persisted OG image URLs during new
+  feed item ingestion.
+  - New item enrichment now prefers feed-provided media image hints and
+    skips article fetching when those hints exist.
+  - Article metadata fallback stores `og_image_url` and preserves the
+    existing thumbnail behavior.
+  - `fetchOgImage` now accepts `name="og:image"` in addition to the
+    existing property and Twitter image forms.
+  - Updated focused feed parser/enrichment tests for the new two-column
+    image update behavior.
+- Files changed:
+  - `src/server/durable-objects/index.ts`
+  - `src/server/feed-fetch.ts`
+  - `test/feed-parser.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Feed image enrichment should keep thumbnail and OG image columns in
+    sync until a later story splits thumbnail rendering from BlurHash image
+    metadata.
+  - `test/feed-parser.ts` uses `Object.create(UserDO.prototype)`, so tests
+    that call `fetchFeed` need a lightweight `ctx.storage` stub for poller
+    state reads and writes.
+---
+
+## 2026-05-09 18:23 PDT - US-007
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Provisioned BlurHash KV and queue infrastructure in
+  Wrangler configuration.
+  - Added the `BLURHASH_KV` namespace binding.
+  - Created the remote and preview `BLURHASH_KV` namespaces with Wrangler.
+  - Added `BLURHASH_QUEUE` as a producer for `blurhash-jobs`.
+  - Added the `blurhash-jobs` consumer with batch size 10, timeout 30,
+    retry count 3, and `blurhash-dlq` as the dead-letter queue.
+  - Regenerated `worker-configuration.d.ts` with `npx wrangler types`.
+  - Added static deploy-config coverage for the new bindings.
+- Files changed:
+  - `wrangler.jsonc`
+  - `worker-configuration.d.ts`
+  - `src/server/index.ts`
+  - `src/server/durable-objects/index.ts`
+  - `test/deploy-config.mjs`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - Queue and KV infrastructure should be guarded in
+    `test/deploy-config.mjs` because these bindings are easy to regress
+    without exercising runtime code.
+  - `wrangler types` now emits project runtime types into
+    `worker-configuration.d.ts` and should be rerun after binding changes.
+---
+
+## 2026-05-09 18:19 PDT - US-006
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added nullable item image metadata columns for OG
+  image URL, BlurHash, and intrinsic dimensions.
+  - Added `og_image_url`, `blurhash`, `image_width`, and `image_height` to
+    the shared fresh SQLite schema without adding indexes.
+  - Added a guarded Durable Object migration for existing `items` tables.
+  - Projected the new item fields through `ITEM_COLUMNS` /
+    `ITEM_SYNC_COLUMNS`.
+  - Mirrored the fields through local pull-sync and push-sync item upserts.
+- Files changed:
+  - `src/shared/schema.ts`
+  - `src/server/durable-objects/index.ts`
+  - `src/client/db/pull-sync.ts`
+  - `src/client/db/push-sync.ts`
+  - `src/client/db/types.ts`
+  - `test/do-migrations.ts`
+  - `test/pull-sync.ts`
+  - `test/push-sync.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - The browser OPFS sync paths need both pull-sync and push-sync conflict
+    reconciliation updated when server item payload columns are added.
+  - Browser tapout tests use a fixed local port, so run pull-sync and
+    push-sync focused tests sequentially.
+---
 
 ## 2026-05-09 16:43 PDT - US-005
 Thread: https://ampcode.com/threads/unknown
@@ -4010,4 +4519,28 @@ Thread: https://ampcode.com/threads/unknown
   - Browser Use's required Node REPL tool was not exposed in this session,
     and Computer Use was blocked by macOS Apple Events permission. Chromium
     component tests provided the browser-level verification path.
+---
+
+## 2026-05-09 20:53 PDT - US-013
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added the per-user Durable Object
+  `user_state.feed_version` schema foundation for lazy HTML cache
+  invalidation.
+  - Exported `USER_STATE_SQL` from the shared schema module.
+  - Created an idempotent single-row `user_state` table with
+    `feed_version` defaulting to `0`.
+  - Applied `USER_STATE_SQL` during `UserDO` initialization immediately
+    after the dead-letter outbox schema.
+  - Added focused migration coverage for the schema string and init order.
+- Files changed:
+  - `src/shared/schema.ts`
+  - `src/server/durable-objects/index.ts`
+  - `test/do-migrations.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `user_state` is a server-only Durable Object table, not part of the
+    client OPFS shared `SCHEMA_SQL`.
+  - Constructor-level DO migration tests can assert idempotent table setup
+    by recording `ctx.storage.sql.exec` statements and checking order.
 ---

@@ -298,10 +298,12 @@ async function upsertItemFromServer (
     await execDb(db, {
         sql: `INSERT INTO items
             (id, feed_id, guid, title, link, description, content,
-             author, pub_date, thumbnail_url, is_read, is_starred,
-             created_at, updated_at,
+             author, pub_date, thumbnail_url, og_image_url, blurhash,
+             image_width, image_height, is_read, is_starred, created_at,
+             updated_at,
              full_content, full_content_fetched_at, full_content_status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 feed_id = excluded.feed_id,
                 guid = excluded.guid,
@@ -312,6 +314,10 @@ async function upsertItemFromServer (
                 author = excluded.author,
                 pub_date = excluded.pub_date,
                 thumbnail_url = excluded.thumbnail_url,
+                og_image_url = excluded.og_image_url,
+                blurhash = excluded.blurhash,
+                image_width = excluded.image_width,
+                image_height = excluded.image_height,
                 is_read = excluded.is_read,
                 is_starred = excluded.is_starred,
                 updated_at = excluded.updated_at,
@@ -329,6 +335,10 @@ async function upsertItemFromServer (
             (item.author as string|null) ?? null,
             (item.pub_date as string|null) ?? null,
             (item.thumbnail_url as string|null) ?? null,
+            (item.og_image_url as string|null) ?? null,
+            (item.blurhash as string|null) ?? null,
+            (item.image_width as number|null) ?? null,
+            (item.image_height as number|null) ?? null,
             (item.is_read as number) ?? 0,
             (item.is_starred as number) ?? 0,
             item.created_at as string,

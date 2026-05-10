@@ -60,6 +60,10 @@ export const TABLES_SQL = `
         author TEXT,
         pub_date TEXT,
         thumbnail_url TEXT,
+        og_image_url TEXT,
+        blurhash TEXT,
+        image_width INTEGER,
+        image_height INTEGER,
         is_read INTEGER DEFAULT 0,
         is_starred INTEGER DEFAULT 0,
         created_at TEXT DEFAULT (datetime('now')),
@@ -110,6 +114,18 @@ export const DEAD_LETTER_OUTBOX_SQL = `
         attempts INTEGER NOT NULL DEFAULT 0,
         last_error TEXT
     );
+`
+
+/**
+ * Server-only table tracking per-user counters used by the lazy
+ * per-user HTML cache. Single-row table (id = 1).
+ */
+export const USER_STATE_SQL = `
+    CREATE TABLE IF NOT EXISTS user_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        feed_version INTEGER NOT NULL DEFAULT 0
+    );
+    INSERT OR IGNORE INTO user_state (id, feed_version) VALUES (1, 0);
 `
 
 /** Full schema: tables + indexes + triggers. Suitable for fresh databases. */

@@ -2,6 +2,7 @@
 @import url("@substrate-system/a11y");
 @import url("@substrate-system/check-box/css");
 @import url("@substrate-system/tool-tip/css");
+@import url("@substrate-system/blur-hash/css");
 @import url("@substrate-system/hamburger-two/css");
 @import url("@substrate-system/details-summary/css");
 @import url("./routes/feed-reader.css");
@@ -32,7 +33,12 @@ body {
 } */
 
 body {
-    font-family: 'Gill Sans', 'Gill Sans MT', Calibri, 'Trebuchet MS', sans-serif;
+    font-family:
+        'Gill Sans',
+        'Gill Sans MT',
+        Calibri,
+        'Trebuchet MS',
+        sans-serif;
     background-color: var(--color-bg);
     color: var(--color-text);
     line-height: 1.5;

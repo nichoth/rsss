@@ -72,6 +72,7 @@ import {
 } from './cache-status-state.js'
 import { cacheItemImages } from './db/image-cache.js'
 import { feedPolicies } from './db/feed-cache-policy.js'
+import { consumeInitialFeed } from './initial-feed.js'
 const debug = Debug('rsss:state')
 
 const CHECKOUT_EMAIL_KEY = 'rsss_checkout_email'
@@ -1492,6 +1493,17 @@ State.loadItems = async function (
     state:AppState
 ):Promise<void> {
     state.itemsLoading.value = true
+
+    const initialFeed = consumeInitialFeed()
+    if (initialFeed && initialFeed.items.length > 0) {
+        batch(() => {
+            state.items.value = initialFeed.items as Item[]
+            state.itemsTotal.value = initialFeed.items.length
+            state.itemsLoading.value = false
+        })
+        recomputeCacheStatus(state).catch(() => {})
+        return
+    }
 
     let data:ItemsResponse|null = null
     try {
