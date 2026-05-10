@@ -85,6 +85,10 @@
   image fetches, oversize images, and decode failures in this path; KV
   writes, DO writes, fetch 5xx/timeouts, and encode crashes should throw so
   Cloudflare retries and eventually DLQs according to queue config.
+- Server-only Durable Object schema that must exist on every startup can be
+  applied idempotently in `UserDO.initDatabase()` after the shared indexes,
+  triggers, and auxiliary outbox tables, without bumping
+  `USER_DO_MIGRATION_VERSION` when it does not ALTER existing tables.
 
 ## 2026-05-09 19:30 PDT - US-012
 Thread: https://ampcode.com/threads/unknown
@@ -4238,4 +4242,28 @@ Thread: https://ampcode.com/threads/unknown
   - Browser Use's required Node REPL tool was not exposed in this session,
     and Computer Use was blocked by macOS Apple Events permission. Chromium
     component tests provided the browser-level verification path.
+---
+
+## 2026-05-09 20:53 PDT - US-013
+Thread: https://ampcode.com/threads/unknown
+- What was implemented: Added the per-user Durable Object
+  `user_state.feed_version` schema foundation for lazy HTML cache
+  invalidation.
+  - Exported `USER_STATE_SQL` from the shared schema module.
+  - Created an idempotent single-row `user_state` table with
+    `feed_version` defaulting to `0`.
+  - Applied `USER_STATE_SQL` during `UserDO` initialization immediately
+    after the dead-letter outbox schema.
+  - Added focused migration coverage for the schema string and init order.
+- Files changed:
+  - `src/shared/schema.ts`
+  - `src/server/durable-objects/index.ts`
+  - `test/do-migrations.ts`
+  - `specs/prd.json`
+  - `progress.log`
+- **Learnings for future iterations:**
+  - `user_state` is a server-only Durable Object table, not part of the
+    client OPFS shared `SCHEMA_SQL`.
+  - Constructor-level DO migration tests can assert idempotent table setup
+    by recording `ctx.storage.sql.exec` statements and checking order.
 ---

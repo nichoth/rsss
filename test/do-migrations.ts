@@ -1,6 +1,10 @@
 import { test } from '@substrate-system/tapzero'
 import { UserDO } from '../src/server/durable-objects/index.js'
-import { INDEXES_SQL, TABLES_SQL } from '../src/shared/schema.js'
+import {
+    INDEXES_SQL,
+    TABLES_SQL,
+    USER_STATE_SQL
+} from '../src/shared/schema.js'
 
 interface QueryResult {
     toArray:() => unknown[]
@@ -182,6 +186,53 @@ test('image metadata columns do not have dedicated indexes', t => {
             `${column} is not indexed`
         )
     }
+})
+
+test('user state schema creates the feed version counter row', t => {
+    t.ok(
+        USER_STATE_SQL.includes('CREATE TABLE IF NOT EXISTS user_state'),
+        'user_state table is created idempotently'
+    )
+    t.ok(
+        USER_STATE_SQL.includes(
+            'id INTEGER PRIMARY KEY CHECK (id = 1)'
+        ),
+        'user_state table is constrained to one row'
+    )
+    t.ok(
+        USER_STATE_SQL.includes(
+            'feed_version INTEGER NOT NULL DEFAULT 0'
+        ),
+        'feed_version defaults to zero'
+    )
+    t.ok(
+        USER_STATE_SQL.includes(
+            'INSERT OR IGNORE INTO user_state (id, feed_version)'
+        ),
+        'initial user_state row is inserted idempotently'
+    )
+})
+
+test('UserDO applies user state schema after dead letter outbox', async t => {
+    const setup = createConstructorContext(6)
+
+    const userDo = new UserDO(setup.ctx, {} as never)
+    await setup.ready()
+
+    const deadLetterIndex = setup.statements.findIndex(query => {
+        return query.includes('CREATE TABLE IF NOT EXISTS dead_letter_outbox')
+    })
+    const userStateIndex = setup.statements.findIndex(query => {
+        return query.includes('CREATE TABLE IF NOT EXISTS user_state')
+    })
+
+    t.ok(userDo, 'Durable Object constructed successfully')
+    t.ok(deadLetterIndex >= 0, 'dead letter outbox schema is applied')
+    t.ok(userStateIndex >= 0, 'user state schema is applied')
+    t.ok(
+        userStateIndex > deadLetterIndex,
+        'user state schema runs after the dead letter outbox'
+    )
 })
 
 test('UserDO migrates missing item image metadata columns', async t => {

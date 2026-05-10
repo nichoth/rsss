@@ -7,6 +7,7 @@ import {
     INDEXES_SQL,
     TRIGGERS_SQL,
     DEAD_LETTER_OUTBOX_SQL,
+    USER_STATE_SQL,
     ALL_FULL_CONTENT_STATUSES,
     FETCH_FULL_MIN_INTERVAL_MS
 } from '../../shared/schema.js'
@@ -424,6 +425,7 @@ export class UserDO extends DurableObject<Env> {
         this.sql.exec(INDEXES_SQL)
         this.sql.exec(TRIGGERS_SQL)
         this.sql.exec(DEAD_LETTER_OUTBOX_SQL)
+        this.sql.exec(USER_STATE_SQL)
     }
 
     /**
