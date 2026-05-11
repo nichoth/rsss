@@ -77,6 +77,15 @@ async function waitFor (
     }
 }
 
+function createStorageStub () {
+    let alarm:number|null = null
+    return {
+        getAlarm: async () => alarm,
+        setAlarm: async (when:number) => { alarm = when },
+        deleteAlarm: async () => { alarm = null }
+    }
+}
+
 function createRouterForPostFeeds (
     waitUntil:(promise:Promise<unknown>) => void,
     fetchFeed:(feed:FeedRow) => Promise<void>
@@ -84,14 +93,17 @@ function createRouterForPostFeeds (
     const sql = createFeedSql()
     const userDo = Object.create(UserDO.prototype) as {
         sql:ReturnType<typeof createFeedSql>
-        ctx:{ waitUntil:(promise:Promise<unknown>) => void }
+        ctx:{
+            waitUntil:(promise:Promise<unknown>) => void
+            storage:ReturnType<typeof createStorageStub>
+        }
         fetchFeed:(feed:FeedRow) => Promise<void>
         createRouter:() => { request:(path:string, init:RequestInit) =>
             Promise<Response> }
     }
 
     userDo.sql = sql
-    userDo.ctx = { waitUntil }
+    userDo.ctx = { waitUntil, storage: createStorageStub() }
     userDo.fetchFeed = fetchFeed
 
     return {

@@ -263,6 +263,7 @@ function feedState ():AppState {
         user: signal(null),
         feeds: signal([]),
         feedsLoading: signal(false),
+        feedsError: signal<string|null>(null),
         refreshInProgress,
         feedSyncStatus,
         displayedFeedSyncStatus,

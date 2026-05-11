@@ -90,6 +90,18 @@ function createAlarmDo (
                 return result(batch)
             }
 
+            // sweepStuckResolvingFeeds (added in 018) runs an UPDATE
+            // against still-resolving feeds and then a SELECT for the
+            // just-marked rows. The alarm harness only models the
+            // happy-path refresh queue, so both are no-ops here.
+            if (query.includes('UPDATE feeds SET')) {
+                return result([])
+            }
+            if (query.includes('SELECT id FROM feeds') &&
+                query.includes('last_status = 504')) {
+                return result([])
+            }
+
             throw new Error(`Unexpected SQL: ${query}`)
         }
     }
@@ -117,6 +129,15 @@ function createResumeAlarmDo (
 
     userDo.sql = {
         exec (query:string, ...params:unknown[]) {
+            // sweepStuckResolvingFeeds (018) probes/updates rows
+            // outside this test's queue model; no-op for both.
+            if (query.includes('UPDATE feeds SET')) {
+                return result([])
+            }
+            if (query.includes('SELECT id FROM feeds') &&
+                query.includes('last_status = 504')) {
+                return result([])
+            }
             if (!query.includes('SELECT * FROM feeds')) {
                 throw new Error(`Unexpected SQL: ${query}`)
             }

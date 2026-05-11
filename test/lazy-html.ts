@@ -34,7 +34,7 @@ function payload (
             unread: 1,
             starred: 0,
             total: 1,
-            perFeed: { '2': 1 }
+            perFeed: { 2: 1 }
         },
         items: [{
             id: 1,

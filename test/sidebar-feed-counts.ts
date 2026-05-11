@@ -36,6 +36,7 @@ function stubState (opts:StubOpts = {}):AppState {
     return {
         feeds: signal<Feed[]>(opts.feeds ?? []),
         feedsLoading: signal(false),
+        feedsError: signal<string|null>(null),
         route: signal(opts.route ?? '/'),
         counts: signal({
             unread: opts.unread ?? 0,

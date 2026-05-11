@@ -6,7 +6,12 @@ const esbuild = spawn('esbuild', [
     '--platform=node',
     '--format=esm',
     '--external:./src/server/blurhash-runtime.js',
-    '--alias:cloudflare:workers=./test/cloudflare-workers-stub.ts'
+    '--alias:cloudflare:workers=./test/cloudflare-workers-stub.ts',
+    // Vite would substitute these at build time; under node-bundle
+    // tests we need to pin them so production code that branches on
+    // `import.meta.env.DEV` doesn't NPE.
+    '--define:import.meta.env.DEV=false',
+    '--define:import.meta.env.MODE="test"'
 ], {
     stdio: ['ignore', 'pipe', 'inherit']
 })

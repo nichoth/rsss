@@ -103,7 +103,22 @@ class UserDoStub {
                     created_at: '2026-05-09T00:00:00.000Z',
                     updated_at: '2026-05-09T00:00:00.000Z',
                     feed_title: 'Example Feed'
-                }]
+                }],
+                feeds: [{
+                    id: 2,
+                    url: 'https://example.com/feed.xml',
+                    title: 'Example Feed',
+                    description: null,
+                    site_url: 'https://example.com',
+                    last_fetched: '2026-05-09T00:00:00.000Z',
+                    last_error: null,
+                    last_status: 200,
+                    created_at: '2026-05-09T00:00:00.000Z',
+                    updated_at: '2026-05-09T00:00:00.000Z'
+                }],
+                counts: {
+                    unread: 1, starred: 0, total: 1, perFeed: { 2: 1 }
+                }
             })
         }
 
@@ -168,8 +183,8 @@ test('worker injects initial feed for authenticated HTML', async (t) => {
         '/internal/feed-version',
         '/internal/lazy-html-data'
     ])
-    t.deepEqual(htmlKv.gets, ['html:v2:did:plc:reader:9'])
-    t.deepEqual(htmlKv.puts, ['html:v2:did:plc:reader:9'])
+    t.deepEqual(htmlKv.gets, ['html:v3:did:plc:reader:9'])
+    t.deepEqual(htmlKv.puts, ['html:v3:did:plc:reader:9'])
 })
 
 test('worker serves anonymous HTML shell without lazy DO calls', async (t) => {

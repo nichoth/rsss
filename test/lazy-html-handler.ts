@@ -272,7 +272,7 @@ test('handler injects feeds and counts from DO', async t => {
         updated_at: '2026-05-09T00:00:00.000Z'
     }]
     const counts:CountsResponse = {
-        unread: 1, starred: 0, total: 1, perFeed: { '2': 1 }
+        unread: 1, starred: 0, total: 1, perFeed: { 2: 1 }
     }
     const kv = new KvStub()
     const doStub = new DoStub(7, [item()], feeds, counts)

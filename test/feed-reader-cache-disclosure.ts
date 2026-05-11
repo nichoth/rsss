@@ -55,6 +55,7 @@ function makeState ():AppState {
         authError: signal<string|null>(null),
         feeds: signal<Feed[]>([]),
         feedsLoading: signal(false),
+        feedsError: signal<string|null>(null),
         feedSyncStatus: signal<
             'inactive'|'updates'|'syncing'|'error'|'synced'
         >('inactive'),

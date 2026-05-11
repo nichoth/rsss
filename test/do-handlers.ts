@@ -171,6 +171,13 @@ function createSql (options:{
                 return result(feeds.filter(feed => feed.id === params[0]))
             }
 
+            // /feeds/:id/refresh selects with FEED_SYNC_COLUMNS for the
+            // post-refresh response; the harness returns the same row
+            // shape since it doesn't model per-column projection.
+            if (query.includes('FROM feeds WHERE id = ?')) {
+                return result(feeds.filter(feed => feed.id === params[0]))
+            }
+
             if (query.includes('DELETE FROM feeds WHERE id = ?')) {
                 const index = feeds.findIndex(feed => feed.id === params[0])
                 if (index >= 0) feeds.splice(index, 1)
@@ -202,6 +209,35 @@ function createSql (options:{
                 return result([])
             }
 
+            // /internal/lazy-html-data fans out into per-counts
+            // queries. The harness doesn't model item counters, so
+            // return a deterministic zero shape that satisfies the
+            // .one()/.toArray() consumers.
+            if (
+                query.includes('SELECT COUNT(*) as count FROM items')
+            ) {
+                return result([{ count: 0 }])
+            }
+            if (
+                query.includes(
+                    'SELECT feed_id, COUNT(*) as unread FROM items'
+                )
+            ) {
+                return result([])
+            }
+
+            // sweepStuckResolvingFeeds (018) probes still-resolving
+            // rows; no-op for harnesses that don't model the queue.
+            if (query.includes('UPDATE feeds SET')) {
+                return result([])
+            }
+            if (
+                query.includes('SELECT id FROM feeds') &&
+                query.includes('last_status = 504')
+            ) {
+                return result([])
+            }
+
             throw new Error(`Unexpected SQL: ${query}`)
         }
     }
@@ -217,6 +253,7 @@ function createDoHarness (options:{
     const refreshed:number[] = []
     const waitUntilPromises:Promise<unknown>[] = []
     const storage = new Map<string, unknown>()
+    let alarmAt:number|null = null
     const refreshFeedBatchesCalls:number[] = []
     const userDo = Object.create(UserDO.prototype) as {
         sql:ReturnType<typeof createSql>
@@ -225,6 +262,9 @@ function createDoHarness (options:{
                 get:<T>(key:string) => Promise<T|undefined>
                 put:(key:string, value:unknown) => Promise<void>
                 delete:(key:string) => Promise<void>
+                getAlarm:() => Promise<number|null>
+                setAlarm:(at:number) => Promise<void>
+                deleteAlarm:() => Promise<void>
             }
             waitUntil:(promise:Promise<unknown>) => void
         }
@@ -245,6 +285,15 @@ function createDoHarness (options:{
             },
             async delete (key:string) {
                 storage.delete(key)
+            },
+            async getAlarm () {
+                return alarmAt
+            },
+            async setAlarm (at:number) {
+                alarmAt = at
+            },
+            async deleteAlarm () {
+                alarmAt = null
             }
         },
         waitUntil (promise) {
@@ -307,10 +356,12 @@ test('UserDO feed handlers list create and refresh feeds', async t => {
     const refreshResponse = await app.request('/feeds/3/refresh', {
         method: 'POST'
     })
-    const refreshBody = await refreshResponse.json() as { success:boolean }
+    const refreshBody = await refreshResponse.json() as {
+        feed:FeedRow | null
+    }
 
     t.equal(refreshResponse.status, 200, 'refresh returns 200')
-    t.equal(refreshBody.success, true, 'refresh reports success')
+    t.ok(refreshBody.feed, 'refresh returns the refreshed feed row')
     t.deepEqual(refreshed, [3, 3], 'created feed is refreshed')
 })
 
@@ -412,10 +463,10 @@ test('UserDO manual feed refresh is rate limited per feed', async t => {
     const responses = await Promise.all(Array.from({ length: 100 }, () => {
         return app.request('/feeds/1/refresh', { method: 'POST' })
     }))
-    const body = await responses[0].json() as { success:boolean }
+    const body = await responses[0].json() as { feed:FeedRow | null }
 
     t.equal(responses[0].status, 200, 'first refresh returns 200')
-    t.equal(body.success, true, 'first refresh reports success')
+    t.ok(body.feed, 'first refresh returns the refreshed feed row')
     t.equal(refreshed.length, 1, 'rapid refreshes fetch the feed once')
     t.equal(refreshed[0], 1, 'the requested feed is refreshed')
     t.equal(storage.size, 1, 'manual refresh timestamp is stored')

@@ -119,6 +119,7 @@ function buildPartialState ():AppState {
         authError: signal<string|null>(null),
         feeds: signal([{ id: 1, url: 'a' }]),
         feedsLoading: signal(false),
+        feedsError: signal<string|null>(null),
         refreshInProgress,
         feedSyncStatus,
         displayedFeedSyncStatus,
