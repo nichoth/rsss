@@ -81,6 +81,12 @@ export const DEFAULT_PAGE_SIZE = 20
 const SYNC_AUTH_EXPIRED = 'Your session expired. Please log in again.'
 const SSE_REFRESH_DEBOUNCE_MS = 250
 const REFRESH_FEEDS_SAFETY_TIMEOUT_MS = 60_000
+// When the POST response reports `queued: 0`, the server has nothing to
+// fetch. Its `refresh-complete` broadcast races (and sometimes loses) the
+// POST ack in dev-mode SSE proxying, so we replace the long safety timer
+// with a short one. The pill still flashes 'updating' for at least one
+// paint (FR-012e), and back-to-back zero-feed refreshes cannot get stuck.
+const REFRESH_FEEDS_ZERO_FEED_SAFETY_MS = 1_000
 export const RESOLVE_WINDOW_MS = 30_000
 export const CLIENT_GRACE_MS = 5_000
 
@@ -1619,12 +1625,32 @@ State.refreshFeeds = async function (
     }, REFRESH_FEEDS_SAFETY_TIMEOUT_MS)
 
     try {
-        await api.post('feeds/refresh')
+        const response = await api.post('feeds/refresh')
         // Do NOT clear refreshInProgress here. The SSE
         // refresh-complete handler awaits refreshAfterSync and
         // settles the busy state once the visible result lands
         // (FR-001/FR-005, contracts/refresh-lifecycle.md "Forbidden
         // transitions").
+        //
+        // When the server reports `queued: 0`, shorten the safety
+        // timer so the lifecycle cannot get stuck if the SSE event
+        // is lost. The pill still flashes 'updating' for at least
+        // one paint (FR-012e); the short timer is the recovery
+        // path observed in dev mode.
+        const body = await response.json<{
+            success?:boolean
+            queued?:number
+        }>().catch(() => ({ queued: undefined }))
+        if (body.queued === 0) {
+            clearRefreshFeedsSafetyTimeout()
+            refreshFeedsSafetyTimeout = setTimeout(() => {
+                refreshFeedsSafetyTimeout = null
+                batch(() => {
+                    state.refreshInProgress.value = false
+                    state.feedsLoading.value = false
+                })
+            }, REFRESH_FEEDS_ZERO_FEED_SAFETY_MS)
+        }
     } catch (err) {
         clearRefreshFeedsSafetyTimeout()
         if (err instanceof HTTPError && err.response.status === 401) {

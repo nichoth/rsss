@@ -438,7 +438,10 @@ test('safety timer clears refreshInProgress when refresh-complete is lost',
                         input.toString() :
                         input.url
                 if (url.endsWith('/api/feeds/refresh')) {
-                    return jsonResponse({ success: true, queued: 0 })
+                    // queued > 0 exercises the 60s safety timer. The
+                    // zero-feed path has a separate short timer covered
+                    // by the 019 regression test below.
+                    return jsonResponse({ success: true, queued: 4 })
                 }
                 return jsonResponse({})
             }, async () => {
@@ -527,6 +530,79 @@ async t => {
         'zero-feed refresh produces no spurious error'
     )
 })
+
+// 019 regression: in dev mode the SSE `refresh-complete` event sometimes
+// fails to reach the client on back-to-back zero-feed refreshes, leaving
+// `refreshInProgress` stuck at true and the button spinning forever. The
+// POST response carries `queued: 0` whenever there is nothing to fetch,
+// so the client now arms a short safety timer in that case. The 'updating'
+// pill is still visible for at least one paint (FR-012e), and back-to-back
+// zero-feed refreshes recover even if no SSE event arrives.
+test('zero-feed refresh recovers via short safety timer without SSE',
+    async t => {
+        const state = buildPartialState()
+        state.feeds.value = []
+        state.feedSyncStatus.value = 'synced'
+
+        let refreshPostCount = 0
+        await withStubbedEventSource(async () => {
+            await withStubbedFetch(async (input) => {
+                const url = typeof input === 'string' ?
+                    input :
+                    input instanceof URL ?
+                        input.toString() :
+                        input.url
+                if (url.endsWith('/api/feeds/refresh')) {
+                    refreshPostCount += 1
+                    return jsonResponse({ success: true, queued: 0 })
+                }
+                return jsonResponse({})
+            }, async () => {
+                State.openEventStream(state)
+
+                await State.refreshFeeds(state)
+                t.equal(
+                    state.refreshInProgress.value,
+                    true,
+                    '1st click: pill flashes "updating" before short timer fires'
+                )
+
+                // Wait past the 1s zero-feed safety timer.
+                await new Promise<void>(resolve => setTimeout(resolve, 1100))
+
+                t.equal(
+                    state.refreshInProgress.value,
+                    false,
+                    '1st click: refreshInProgress clears via short safety ' +
+                'timer (no SSE)'
+                )
+
+                // Second back-to-back click must not get stuck either.
+                await State.refreshFeeds(state)
+                t.equal(
+                    state.refreshInProgress.value,
+                    true,
+                    '2nd click: pill flashes "updating" again'
+                )
+
+                await new Promise<void>(resolve => setTimeout(resolve, 1100))
+
+                t.equal(
+                    state.refreshInProgress.value,
+                    false,
+                    '2nd click: refreshInProgress clears via short safety ' +
+                'timer (019 fix)'
+                )
+            })
+        })
+        State.closeEventStream()
+
+        t.equal(
+            refreshPostCount,
+            2,
+            'both back-to-back clicks dispatched a POST'
+        )
+    })
 
 // 012-T011 (US2): failure-path displayed-status transition contract.
 // Asserts the displayed status transitions exactly through
