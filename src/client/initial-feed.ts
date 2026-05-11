@@ -1,9 +1,11 @@
-import type { Item } from './db/types.js'
+import type { CountsResponse, Feed, Item } from './db/types.js'
 
 export interface InitialFeedPayload {
     version:number
     items:Item[]
     has_more:boolean
+    feeds?:Feed[]
+    counts?:CountsResponse
 }
 
 declare global {
@@ -20,11 +22,24 @@ function isInitialFeedPayload (
     if (!value || typeof value !== 'object') return false
 
     const payload = value as Partial<InitialFeedPayload>
-    return (
-        typeof payload.version === 'number' &&
-        Array.isArray(payload.items) &&
-        typeof payload.has_more === 'boolean'
-    )
+    if (typeof payload.version !== 'number') return false
+    if (!Array.isArray(payload.items)) return false
+    if (typeof payload.has_more !== 'boolean') return false
+
+    if (
+        payload.feeds !== undefined &&
+        !Array.isArray(payload.feeds)
+    ) {
+        return false
+    }
+    if (
+        payload.counts !== undefined &&
+        (typeof payload.counts !== 'object' || payload.counts === null)
+    ) {
+        return false
+    }
+
+    return true
 }
 
 export function readInitialFeedFromDom ():InitialFeedPayload|null {

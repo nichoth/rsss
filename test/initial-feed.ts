@@ -7,7 +7,31 @@ import {
     type InitialFeedPayload
 } from '../src/client/initial-feed.js'
 import { State, type AppState } from '../src/client/state.js'
-import type { Item } from '../src/client/db/types.js'
+import type { CountsResponse, Feed, Item } from '../src/client/db/types.js'
+
+function feedFixture (id = 2):Feed {
+    return {
+        id,
+        url: 'https://example.com/feed.xml',
+        title: 'Example Feed',
+        description: null,
+        site_url: 'https://example.com',
+        last_fetched: '2026-05-09T00:00:00.000Z',
+        last_error: null,
+        last_status: 200,
+        created_at: '2026-05-09T00:00:00.000Z',
+        updated_at: '2026-05-09T00:00:00.000Z'
+    }
+}
+
+function countsFixture ():CountsResponse {
+    return {
+        unread: 1,
+        starred: 0,
+        total: 1,
+        perFeed: { '2': 1 }
+    }
+}
 
 function item (id = 1):Item {
     return {
@@ -37,7 +61,9 @@ function payload (items = [item()]):InitialFeedPayload {
     return {
         version: 9,
         items,
-        has_more: false
+        has_more: false,
+        feeds: [feedFixture()],
+        counts: countsFixture()
     }
 }
 
@@ -153,6 +179,42 @@ test('consumeInitialFeed falls through to DOM when global is missing',
                 null,
                 'second consume returns null'
             )
+        } finally {
+            resetBootstrap()
+        }
+    })
+
+test('isInitialFeedPayload accepts payloads with feeds and counts', t => {
+    resetBootstrap()
+    const expected = payload()
+    setBootstrapScript(JSON.stringify(expected))
+
+    try {
+        const parsed = readInitialFeedFromDom()
+        t.ok(parsed, 'returns a payload')
+        t.deepEqual(parsed?.feeds, expected.feeds, 'feeds parsed')
+        t.deepEqual(parsed?.counts, expected.counts, 'counts parsed')
+    } finally {
+        resetBootstrap()
+    }
+})
+
+test('isInitialFeedPayload accepts older payloads without feeds/counts',
+    t => {
+        resetBootstrap()
+        // back-compat: an HTML page cached under html:v2 may be served
+        // for one deploy window before the bump invalidates it.
+        setBootstrapScript(JSON.stringify({
+            version: 1,
+            items: [],
+            has_more: false
+        }))
+
+        try {
+            const parsed = readInitialFeedFromDom()
+            t.ok(parsed, 'older payload still parses')
+            t.equal(parsed?.feeds, undefined, 'feeds is absent')
+            t.equal(parsed?.counts, undefined, 'counts is absent')
         } finally {
             resetBootstrap()
         }
