@@ -1,6 +1,7 @@
 import { test } from '@substrate-system/tapzero'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { State, type AppState } from '../src/client/state.js'
 
 const ALLOWED_CALLERS = new Set([
     'src/client/components/sidebar-footer.ts',
@@ -46,5 +47,104 @@ test('no unauthorized State.refreshFeeds / State.refreshFeed call sites',
             'only sidebar-footer and updates.ts may call refreshFeeds/Feed' +
             (violations.length ? `\n  ${violations.join('\n  ')}` : '')
         )
+    }
+)
+
+test(
+    'reconcileAfterRefresh does not call loadFeeds',
+    async t => {
+        const calls:string[] = []
+        const fakeState = {
+            route: { value: '/' }
+        } as unknown as AppState
+
+        const original = {
+            loadFeeds: State.loadFeeds,
+            loadFeedStatus: State.loadFeedStatus,
+            loadItems: State.loadItems,
+            loadCounts: State.loadCounts,
+            loadItemByRoute: State.loadItemByRoute
+        }
+        State.loadFeeds = (async () => {
+            calls.push('loadFeeds')
+        }) as typeof State.loadFeeds
+        State.loadFeedStatus = (async () => {
+            calls.push('loadFeedStatus')
+        }) as typeof State.loadFeedStatus
+        State.loadItems = (async () => {
+            calls.push('loadItems')
+        }) as typeof State.loadItems
+        State.loadCounts = (async () => {
+            calls.push('loadCounts')
+        }) as typeof State.loadCounts
+        State.loadItemByRoute = (async () => null) as
+            typeof State.loadItemByRoute
+
+        try {
+            await State.reconcileAfterRefresh(fakeState)
+            t.equal(
+                calls.includes('loadFeeds'),
+                false,
+                'reconcile does NOT reload the feeds list'
+            )
+            t.equal(
+                calls.includes('loadFeedStatus'),
+                true,
+                'reconcile DOES reload the indicator'
+            )
+            t.equal(
+                calls.includes('loadItems'),
+                true,
+                'reconcile DOES reload items'
+            )
+            t.equal(
+                calls.includes('loadCounts'),
+                true,
+                'reconcile DOES reload per-feed counts'
+            )
+        } finally {
+            Object.assign(State, original)
+        }
+    }
+)
+
+test(
+    'loadInitialView calls loadFeeds',
+    async t => {
+        const calls:string[] = []
+        const fakeState = {
+            initialLoadComplete: { value: false },
+            route: { value: '/' }
+        } as unknown as AppState
+
+        const original = {
+            loadFeeds: State.loadFeeds,
+            loadFeedStatus: State.loadFeedStatus,
+            loadItems: State.loadItems,
+            loadCounts: State.loadCounts
+        }
+        State.loadFeeds = (async () => {
+            calls.push('loadFeeds')
+        }) as typeof State.loadFeeds
+        State.loadFeedStatus = (async () => {
+            calls.push('loadFeedStatus')
+        }) as typeof State.loadFeedStatus
+        State.loadItems = (async () => {
+            calls.push('loadItems')
+        }) as typeof State.loadItems
+        State.loadCounts = (async () => {
+            calls.push('loadCounts')
+        }) as typeof State.loadCounts
+
+        try {
+            await State.loadInitialView(fakeState)
+            t.equal(
+                calls.includes('loadFeeds'),
+                true,
+                'initial load fetches the feeds list'
+            )
+        } finally {
+            Object.assign(State, original)
+        }
     }
 )

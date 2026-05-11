@@ -672,8 +672,12 @@ State.handleSyncAuthError = function (
     return true
 }
 
-// local-first DB sync, NOT server feed pull -- safe to call automatically
-State.refreshAfterSync = async function (
+/**
+ * First post-auth load. Pulls feeds, indicator, items, counts, and
+ * the route item if applicable. Sets initialLoadComplete on the way
+ * out so the App shell can swap from skeleton to real UI.
+ */
+State.loadInitialView = async function (
     state:AppState
 ):Promise<void> {
     const route = state.route.value
@@ -701,6 +705,42 @@ State.refreshAfterSync = async function (
         }
     }
 }
+
+/**
+ * Reconcile state after a feed-refresh round-trip. Pulls items,
+ * per-feed unread counts, and the indicator -- but NOT the feeds
+ * list. The list of subscribed feeds only changes via add/delete
+ * (which already triggers loadFeeds inline) or via per-feed
+ * feed-updated SSE (which calls loadFeeds individually).
+ */
+State.reconcileAfterRefresh = async function (
+    state:AppState
+):Promise<void> {
+    const route = state.route.value
+
+    await Promise.all([
+        State.loadFeedStatus(state),
+        State.loadItems(state),
+        State.loadCounts(state)
+    ])
+
+    if (!isItemRoute(route)) return
+
+    const item = await State.loadItemByRoute(state, route)
+    if (state.route.value !== route) return
+
+    batch(() => {
+        state.routeItem.value = item
+        state.routeItemLoading.value = false
+    })
+}
+
+// Back-compat shim: external callers (online/offline handlers and the
+// bootstrap path) continue to call refreshAfterSync. Route them to the
+// initial-load path because they all run before initialLoadComplete is
+// set or as part of resuming sync after a network event -- both of
+// which legitimately want the feeds list re-fetched.
+State.refreshAfterSync = State.loadInitialView
 
 function buildItemOptions (state:AppState):{
     feedId?:number;
@@ -767,9 +807,10 @@ State.openEventStream = function (state:AppState):void {
         // Await the authoritative reconcile so the items list, pill,
         // and button transition land inside the same paint when we
         // batch-clear refreshInProgress below (FR-005, SC-002).
-        // loadFeedStatus inside refreshAfterSync is the single source
-        // of truth for feedSyncStatus and feedUpdateCounts.
-        State.refreshAfterSync(state).catch((err) => {
+        // reconcileAfterRefresh intentionally does NOT call loadFeeds:
+        // the subscribed-feeds list is only mutated via add/delete or
+        // per-feed SSE, never as a side effect of "Refresh Feeds".
+        State.reconcileAfterRefresh(state).catch((err) => {
             debug('refresh-complete reconcile error:', err)
         }).finally(() => {
             batch(() => {
@@ -876,8 +917,8 @@ State.openEventStream = function (state:AppState):void {
             if (state.refreshInProgress.value) {
                 clearRefreshFeedsSafetyTimeout()
                 needsReconcile = false
-                State.refreshAfterSync(state).catch((err) => {
-                    debug('reconnect refreshAfterSync error:', err)
+                State.reconcileAfterRefresh(state).catch((err) => {
+                    debug('reconnect reconcileAfterRefresh error:', err)
                 }).finally(() => {
                     batch(() => {
                         state.refreshInProgress.value = false

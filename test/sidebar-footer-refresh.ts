@@ -220,8 +220,8 @@ async t => {
     state.feedUpdateCounts.value = { 1: 4 }
     state.feedSyncStatus.value = 'updates'
 
-    const originalRefreshAfterSync = State.refreshAfterSync
-    State.refreshAfterSync = async () => {}
+    const originalReconcileAfterRefresh = State.reconcileAfterRefresh
+    State.reconcileAfterRefresh = async () => {}
 
     let postCalls = 0
     let resolvePost:((r:Response) => void)|null = null
@@ -293,7 +293,7 @@ async t => {
         })
     } finally {
         unmount(root)
-        State.refreshAfterSync = originalRefreshAfterSync
+        State.reconcileAfterRefresh = originalReconcileAfterRefresh
         State.closeEventStream()
     }
 })
@@ -308,8 +308,8 @@ async t => {
     state.feedUpdateCounts.value = { 1: 4 }
     state.feedSyncStatus.value = 'updates'
 
-    const originalRefreshAfterSync = State.refreshAfterSync
-    State.refreshAfterSync = async (s:AppState) => {
+    const originalReconcileAfterRefresh = State.reconcileAfterRefresh
+    State.reconcileAfterRefresh = async (s:AppState) => {
         batch(() => {
             s.feedUpdateCounts.value = { 1: 7 }
             s.feedSyncStatus.value = 'updates'
@@ -372,7 +372,7 @@ async t => {
         })
     } finally {
         unmount(root)
-        State.refreshAfterSync = originalRefreshAfterSync
+        State.reconcileAfterRefresh = originalReconcileAfterRefresh
         State.closeEventStream()
     }
 })
@@ -387,8 +387,8 @@ async t => {
     state.feedUpdateCounts.value = {}
     state.feedSyncStatus.value = 'synced'
 
-    const originalRefreshAfterSync = State.refreshAfterSync
-    State.refreshAfterSync = async (s:AppState) => {
+    const originalReconcileAfterRefresh = State.reconcileAfterRefresh
+    State.reconcileAfterRefresh = async (s:AppState) => {
         batch(() => {
             s.feedUpdateCounts.value = { 1: 1, 2: 1, 3: 1 }
             s.feedSyncStatus.value = 'updates'
@@ -466,7 +466,7 @@ async t => {
         })
     } finally {
         unmount(root)
-        State.refreshAfterSync = originalRefreshAfterSync
+        State.reconcileAfterRefresh = originalReconcileAfterRefresh
         State.closeEventStream()
     }
 })
@@ -480,8 +480,8 @@ async t => {
     state.feedUpdateCounts.value = {}
     state.feedSyncStatus.value = 'synced'
 
-    const originalRefreshAfterSync = State.refreshAfterSync
-    State.refreshAfterSync = async (s:AppState) => {
+    const originalReconcileAfterRefresh = State.reconcileAfterRefresh
+    State.reconcileAfterRefresh = async (s:AppState) => {
         batch(() => {
             s.feedUpdateCounts.value = {}
             s.feedSyncStatus.value = 'synced'
@@ -559,7 +559,7 @@ async t => {
         })
     } finally {
         unmount(root)
-        State.refreshAfterSync = originalRefreshAfterSync
+        State.reconcileAfterRefresh = originalReconcileAfterRefresh
         State.closeEventStream()
     }
 })
@@ -650,8 +650,8 @@ async t => {
     state.feedUpdateCounts.value = { 1: 1 }
     state.feedSyncStatus.value = 'updates'
 
-    const originalRefreshAfterSync = State.refreshAfterSync
-    State.refreshAfterSync = async () => {}
+    const originalReconcileAfterRefresh = State.reconcileAfterRefresh
+    State.reconcileAfterRefresh = async () => {}
 
     let postCalls = 0
     const root = mount(state)
@@ -704,7 +704,7 @@ async t => {
         })
     } finally {
         unmount(root)
-        State.refreshAfterSync = originalRefreshAfterSync
+        State.reconcileAfterRefresh = originalReconcileAfterRefresh
         State.closeEventStream()
     }
 })
@@ -718,8 +718,8 @@ async t => {
     state.feedUpdateCounts.value = { 1: 1 }
     state.feedSyncStatus.value = 'updates'
 
-    const originalRefreshAfterSync = State.refreshAfterSync
-    State.refreshAfterSync = async () => {}
+    const originalReconcileAfterRefresh = State.reconcileAfterRefresh
+    State.reconcileAfterRefresh = async () => {}
 
     let postCalls = 0
     const root = mount(state)
@@ -776,7 +776,7 @@ async t => {
         })
     } finally {
         unmount(root)
-        State.refreshAfterSync = originalRefreshAfterSync
+        State.reconcileAfterRefresh = originalReconcileAfterRefresh
         State.closeEventStream()
     }
 })

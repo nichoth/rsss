@@ -213,10 +213,10 @@ async t => {
     state.feedUpdateCounts.value = { 1: 4 }
     state.feedSyncStatus.value = 'updates'
 
-    const originalRefreshAfterSync = State.refreshAfterSync
-    let refreshAfterSyncCalls = 0
-    State.refreshAfterSync = async (s:AppState) => {
-        refreshAfterSyncCalls += 1
+    const originalReconcileAfterRefresh = State.reconcileAfterRefresh
+    let reconcileCalls = 0
+    State.reconcileAfterRefresh = async (s:AppState) => {
+        reconcileCalls += 1
         batch(() => {
             s.feedUpdateCounts.value = {}
             s.feedSyncStatus.value = 'synced'
@@ -268,15 +268,15 @@ async t => {
                     'syncing',
                     'displayedFeedSyncStatus is still syncing ' +
                     'synchronously after refresh-complete (before ' +
-                    'refreshAfterSync settles)'
+                    'reconcileAfterRefresh settles)'
                 )
 
                 await settle()
 
                 t.equal(
-                    refreshAfterSyncCalls,
+                    reconcileCalls,
                     1,
-                    'refresh-complete awaits refreshAfterSync once'
+                    'refresh-complete awaits reconcileAfterRefresh once'
                 )
                 t.equal(
                     state.refreshInProgress.value,
@@ -296,7 +296,7 @@ async t => {
             })
         })
     } finally {
-        State.refreshAfterSync = originalRefreshAfterSync
+        State.reconcileAfterRefresh = originalReconcileAfterRefresh
         State.closeEventStream()
     }
 
@@ -375,16 +375,16 @@ test('SSE feed-updated does NOT clear refreshInProgress (FR-011)',
     })
 
 // US1 - T009: SSE drop and reopen mid-refresh
-test('SSE reopen with refreshInProgress runs refreshAfterSync and ' +
+test('SSE reopen with refreshInProgress runs reconcileAfterRefresh and ' +
     'clears the busy state',
 async t => {
     const state = buildPartialState()
     state.refreshInProgress.value = true
     state.feedSyncStatus.value = 'syncing'
 
-    const originalRefreshAfterSync = State.refreshAfterSync
+    const originalReconcileAfterRefresh = State.reconcileAfterRefresh
     let calls = 0
-    State.refreshAfterSync = async () => {
+    State.reconcileAfterRefresh = async () => {
         calls += 1
     }
 
@@ -406,7 +406,7 @@ async t => {
             })
         })
     } finally {
-        State.refreshAfterSync = originalRefreshAfterSync
+        State.reconcileAfterRefresh = originalReconcileAfterRefresh
         State.closeEventStream()
     }
 
@@ -414,7 +414,7 @@ async t => {
         calls,
         1,
         'reopen with refreshInProgress=true runs the full ' +
-        'refreshAfterSync once'
+        'reconcileAfterRefresh once'
     )
     t.equal(
         state.refreshInProgress.value,
@@ -475,8 +475,8 @@ async t => {
     state.feeds.value = []
     state.feedSyncStatus.value = 'inactive'
 
-    const originalRefreshAfterSync = State.refreshAfterSync
-    State.refreshAfterSync = async (s:AppState) => {
+    const originalReconcileAfterRefresh = State.reconcileAfterRefresh
+    State.reconcileAfterRefresh = async (s:AppState) => {
         // No feeds means an empty server reconcile.
         batch(() => {
             s.feedUpdateCounts.value = {}
@@ -506,7 +506,7 @@ async t => {
             })
         })
     } finally {
-        State.refreshAfterSync = originalRefreshAfterSync
+        State.reconcileAfterRefresh = originalReconcileAfterRefresh
         State.closeEventStream()
     }
 

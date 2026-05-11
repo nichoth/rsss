@@ -217,8 +217,8 @@ async t => {
     state.feedUpdateCounts.value = {}
     state.feedSyncStatus.value = 'synced'
 
-    const originalRefreshAfterSync = State.refreshAfterSync
-    State.refreshAfterSync = async (s:AppState) => {
+    const originalReconcileAfterRefresh = State.reconcileAfterRefresh
+    State.reconcileAfterRefresh = async (s:AppState) => {
         batch(() => {
             s.feedUpdateCounts.value = { 1: 4 }
             s.feedSyncStatus.value = 'updates'
@@ -297,7 +297,7 @@ async t => {
         })
     } finally {
         unmount(root)
-        State.refreshAfterSync = originalRefreshAfterSync
+        State.reconcileAfterRefresh = originalReconcileAfterRefresh
         State.closeEventStream()
     }
 })
@@ -311,8 +311,8 @@ async t => {
     state.feedUpdateCounts.value = {}
     state.feedSyncStatus.value = 'synced'
 
-    const originalRefreshAfterSync = State.refreshAfterSync
-    State.refreshAfterSync = async (s:AppState) => {
+    const originalReconcileAfterRefresh = State.reconcileAfterRefresh
+    State.reconcileAfterRefresh = async (s:AppState) => {
         batch(() => {
             s.feedUpdateCounts.value = {}
             s.feedSyncStatus.value = 'synced'
@@ -376,7 +376,7 @@ async t => {
         })
     } finally {
         unmount(root)
-        State.refreshAfterSync = originalRefreshAfterSync
+        State.reconcileAfterRefresh = originalReconcileAfterRefresh
         State.closeEventStream()
     }
 })
@@ -460,10 +460,10 @@ async t => {
     state.feedUpdateCounts.value = { 1: 1 }
     state.feedSyncStatus.value = 'updates'
 
-    const originalRefreshAfterSync = State.refreshAfterSync
+    const originalReconcileAfterRefresh = State.reconcileAfterRefresh
     // Settle simulates the post-refresh authoritative reconcile that
     // sees the SSE-bumped count.
-    State.refreshAfterSync = async (s:AppState) => {
+    State.reconcileAfterRefresh = async (s:AppState) => {
         batch(() => {
             s.feedSyncStatus.value = 'updates'
         })
@@ -541,7 +541,7 @@ async t => {
         })
     } finally {
         unmount(root)
-        State.refreshAfterSync = originalRefreshAfterSync
+        State.reconcileAfterRefresh = originalReconcileAfterRefresh
         State.closeEventStream()
     }
 })
@@ -557,8 +557,8 @@ async t => {
     state.feedUpdateCounts.value = {}
     state.feedSyncStatus.value = 'synced'
 
-    const originalRefreshAfterSync = State.refreshAfterSync
-    State.refreshAfterSync = async (s:AppState) => {
+    const originalReconcileAfterRefresh = State.reconcileAfterRefresh
+    State.reconcileAfterRefresh = async (s:AppState) => {
         batch(() => {
             s.feedUpdateCounts.value = {}
             s.feedSyncStatus.value = 'synced'
@@ -619,7 +619,7 @@ async t => {
         })
     } finally {
         unmount(root)
-        State.refreshAfterSync = originalRefreshAfterSync
+        State.reconcileAfterRefresh = originalReconcileAfterRefresh
         State.closeEventStream()
     }
 })

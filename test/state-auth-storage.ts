@@ -619,18 +619,18 @@ test('refreshFeeds clears update counts and marks feed sync as synced',
         const originalFetch = globalThis.fetch
         const restoreTimeout = stubRefreshSafetyTimer()
         const restoreEventSource = stubEventSource()
-        const originalRefreshAfterSync = State.refreshAfterSync
+        const originalReconcileAfterRefresh = State.reconcileAfterRefresh
 
         try {
             globalThis.fetch = async () => new Response(JSON.stringify({
                 success: true
             }))
 
-            // Stub refreshAfterSync to mimic loadFeedStatus's
+            // Stub reconcileAfterRefresh to mimic loadFeedStatus's
             // post-refresh reconcile (counts cleared, status synced)
             // without exercising the full reload pipeline here. The
             // full pipeline is tested in test/refresh-lifecycle.ts.
-            State.refreshAfterSync = async (state:AppState) => {
+            State.reconcileAfterRefresh = async (state:AppState) => {
                 batch(() => {
                     state.feedUpdateCounts.value = {}
                     state.feedSyncStatus.value = 'synced'
@@ -665,12 +665,12 @@ test('refreshFeeds clears update counts and marks feed sync as synced',
             t.deepEqual(
                 state.feedUpdateCounts.value,
                 {},
-                'refreshAfterSync after refresh-complete clears counts'
+                'reconcileAfterRefresh after refresh-complete clears counts'
             )
             t.equal(
                 state.feedSyncStatus.value,
                 'synced',
-                'refreshAfterSync settles status to synced'
+                'reconcileAfterRefresh settles status to synced'
             )
             t.equal(
                 state.refreshInProgress.value,
@@ -678,7 +678,7 @@ test('refreshFeeds clears update counts and marks feed sync as synced',
                 'SSE refresh-complete clears the busy state (FR-005)'
             )
         } finally {
-            State.refreshAfterSync = originalRefreshAfterSync
+            State.reconcileAfterRefresh = originalReconcileAfterRefresh
             State.closeEventStream()
             globalThis.fetch = originalFetch
             restoreTimeout()
@@ -782,7 +782,7 @@ test('refreshFeeds retries from error state and recovers via SSE',
         const originalFetch = globalThis.fetch
         const restoreTimeout = stubRefreshSafetyTimer()
         const restoreEventSource = stubEventSource()
-        const originalRefreshAfterSync = State.refreshAfterSync
+        const originalReconcileAfterRefresh = State.reconcileAfterRefresh
         let resolveRefresh:(response:Response) => void = () => {}
 
         try {
@@ -790,7 +790,7 @@ test('refreshFeeds retries from error state and recovers via SSE',
                 resolveRefresh = resolve
             })
 
-            State.refreshAfterSync = async (state:AppState) => {
+            State.reconcileAfterRefresh = async (state:AppState) => {
                 batch(() => {
                     state.feedUpdateCounts.value = {}
                     state.feedSyncStatus.value = 'synced'
@@ -851,7 +851,7 @@ test('refreshFeeds retries from error state and recovers via SSE',
                 'SSE refresh-complete clears the busy state'
             )
         } finally {
-            State.refreshAfterSync = originalRefreshAfterSync
+            State.reconcileAfterRefresh = originalReconcileAfterRefresh
             State.closeEventStream()
             globalThis.fetch = originalFetch
             restoreTimeout()
