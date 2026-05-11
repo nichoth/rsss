@@ -22,6 +22,8 @@ Auto-generated from all feature plans. Last updated: 2026-05-10
 - N/A. No SQLite schema change, no DO schema change, no (015-fix-fouc-on-refresh)
 - TypeScript (browser, ES2022 lib via Vite for the + Vite 7 + `@cloudflare/vite-plugin` (build (016-fix-dev-server-fouc)
 - N/A. Client signals only; no DO SQLite changes, no local (016-fix-dev-server-fouc)
+- TypeScript (browser, ES2022 lib via Vite for the + Hono (worker router), `@cloudflare/durable-objects`, (018-fix-feed-resolving-stuck)
+- Per-user Durable Object SQLite (server-authoritative, (018-fix-feed-resolving-stuck)
 
 - TypeScript (Cloudflare Workers runtime, ES2022 lib) + `hono`, `@cloudflare/workers-types`, `fast-xml-parser` (001-fix-og-image-redirects)
 
@@ -42,9 +44,9 @@ npm test && npm run lint
 TypeScript (Cloudflare Workers runtime, ES2022 lib): Follow standard conventions
 
 ## Recent Changes
+- 018-fix-feed-resolving-stuck: Added TypeScript (browser, ES2022 lib via Vite for the + Hono (worker router), `@cloudflare/durable-objects`,
 - 016-fix-dev-server-fouc: Added TypeScript (browser, ES2022 lib via Vite for + Preact + `@preact/signals`, `htm/preact`,
 - 016-fix-dev-server-fouc: Added TypeScript (browser, ES2022 lib via Vite for the + Vite 7 + `@cloudflare/vite-plugin` (build
-- 015-fix-fouc-on-refresh: Added TypeScript (browser, ES2022 lib via Vite for + Vite 7 + lightningcss (CSS pipeline),
 
 
 <!-- MANUAL ADDITIONS START -->

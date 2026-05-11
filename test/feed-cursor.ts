@@ -139,12 +139,24 @@ function createCursorHarness (
                 return result([...feeds])
             }
             if (
+                query.includes('SELECT') &&
+                query.includes('FROM feeds') &&
+                query.includes('WHERE id = ?')
+            ) {
+                // FEED_SYNC_COLUMNS projection used by the refresh
+                // response (returns the post-fetch row).
+                return result(feeds.filter(f => f.id === params[0]))
+            }
+            if (
                 query.includes('COUNT(items.id)') &&
                 query.includes('GROUP BY feeds.id')
             ) {
                 return result([])
             }
-            if (query.includes('last_pulled_at')) {
+            if (
+                query.includes('UPDATE feeds') &&
+                query.includes('last_pulled_at')
+            ) {
                 cursorUpdates.push(params[params.length - 1] as number)
                 return result([])
             }
@@ -178,10 +190,10 @@ test('cursor advances after per-feed refresh', async t => {
     const { app, cursorUpdates } = createCursorHarness()
 
     const res = await app.request('/feeds/1/refresh', { method: 'POST' })
-    const body = await res.json() as { success:boolean }
+    const body = await res.json() as { feed?:{ id:number } }
 
     t.equal(res.status, 200, 'refresh returns 200')
-    t.equal(body.success, true, 'refresh reports success')
+    t.ok(body.feed, 'refresh response wraps the post-fetch row')
     t.equal(cursorUpdates.length, 1, 'cursor updated once')
     t.equal(cursorUpdates[0], 1, 'cursor updated for feed 1')
 })
@@ -203,10 +215,10 @@ test('feed-updates-cleared emitted after per-feed refresh catches feed up',
         const { app, broadcasts } = createCursorHarness([], () => [])
 
         const res = await app.request('/feeds/1/refresh', { method: 'POST' })
-        const body = await res.json() as { success:boolean }
+        const body = await res.json() as { feed?:{ id:number } }
 
         t.equal(res.status, 200, 'refresh returns 200')
-        t.equal(body.success, true, 'refresh reports success')
+        t.ok(body.feed, 'refresh response wraps the post-fetch row')
 
         const clearedBroadcasts = broadcasts.filter(
             b => b.event === 'feed-updates-cleared'

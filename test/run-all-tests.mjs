@@ -52,6 +52,12 @@ const commands = [
         '| tapout'
     ].join(' '),
     [
+        'esbuild ./test/feed-resolve-state.ts --bundle',
+        '--loader:.wasm=dataurl',
+        '--alias:cloudflare:workers=./test/cloudflare-workers-stub.ts',
+        '| tapout'
+    ].join(' '),
+    [
         'esbuild ./test/bootstrap.ts --bundle',
         '--loader:.wasm=dataurl',
         '| tapout'

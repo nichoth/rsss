@@ -41,7 +41,8 @@ import {
 import {
     getOutboxCount,
     PushSyncAuthError,
-    PushSyncBillingError
+    PushSyncBillingError,
+    upsertFeedFromServer
 } from './db/push-sync.js'
 import { runSync } from './db/sync.js'
 import {
@@ -80,6 +81,8 @@ export const DEFAULT_PAGE_SIZE = 20
 const SYNC_AUTH_EXPIRED = 'Your session expired. Please log in again.'
 const SSE_REFRESH_DEBOUNCE_MS = 250
 const REFRESH_FEEDS_SAFETY_TIMEOUT_MS = 60_000
+export const RESOLVE_WINDOW_MS = 30_000
+export const CLIENT_GRACE_MS = 5_000
 
 let refreshFeedsSafetyTimeout:ReturnType<typeof setTimeout>|null = null
 
@@ -88,6 +91,71 @@ function clearRefreshFeedsSafetyTimeout ():void {
         clearTimeout(refreshFeedsSafetyTimeout)
         refreshFeedsSafetyTimeout = null
     }
+}
+
+const resolveConvergenceTimers = new Map<
+    number,
+    ReturnType<typeof setTimeout>
+>()
+
+function clearResolveConvergenceTimer (feedId:number):void {
+    const existing = resolveConvergenceTimers.get(feedId)
+    if (existing !== undefined) {
+        clearTimeout(existing)
+        resolveConvergenceTimers.delete(feedId)
+    }
+}
+
+function isFeedStillResolving (state:AppState, feedId:number):boolean {
+    const row = state.feeds.value.find((f) => f.id === feedId)
+    if (!row) return false
+    return row.last_fetched === null && !row.last_error
+}
+
+export const _resolveConvergenceForTest = {
+    schedule (state:AppState, url:string):void {
+        scheduleResolveConvergence(state, url)
+    },
+    pendingTimerCount ():number {
+        return resolveConvergenceTimers.size
+    },
+    clearAll ():void {
+        for (const [feedId] of resolveConvergenceTimers) {
+            clearResolveConvergenceTimer(feedId)
+        }
+    }
+}
+
+/**
+ * Defense in depth (FR-006): if the just-added feed is still in the
+ * resolving state after RESOLVE_WINDOW_MS + CLIENT_GRACE_MS, fire a
+ * one-shot pull so the client converges on the server-side terminal
+ * state even when SSE never delivers a `feed-updated` for the row.
+ */
+function scheduleResolveConvergence (
+    state:AppState,
+    url:string
+):void {
+    const row = state.feeds.value.find((f) => f.url === url)
+    if (!row) return
+    const feedId = row.id
+    if (!isFeedStillResolving(state, feedId)) return
+
+    clearResolveConvergenceTimer(feedId)
+    const timer = setTimeout(() => {
+        resolveConvergenceTimers.delete(feedId)
+        if (!isFeedStillResolving(state, feedId)) return
+        const did = state.user.value?.did
+        const db = did ? getLocalDb(did) : null
+        if (!db) return
+        runSync(db).catch((err) => {
+            debug(
+                'resolve-convergence runSync failed',
+                err instanceof Error ? err.message : err
+            )
+        })
+    }, RESOLVE_WINDOW_MS + CLIENT_GRACE_MS)
+    resolveConvergenceTimers.set(feedId, timer)
 }
 
 let eventSource:EventSource|null = null
@@ -1410,6 +1478,7 @@ State.addFeed = async function (
         // emitted after the post-add background fetch.
         await State.loadFeeds(state)
         await State.loadCounts(state)
+        scheduleResolveConvergence(state, url)
     } catch (err) {
         if (
             err instanceof Error &&
@@ -1875,10 +1944,32 @@ State.refreshFeed = async function (
  * reloading the row.
  */
 State.retryResolveFeed = async function (
-    _state:AppState,
+    state:AppState,
     feedId:string
 ):Promise<void> {
-    await api.post(`feeds/${feedId}/refresh`)
+    const res = await api.post(`feeds/${feedId}/refresh`)
+    let body:{ feed?:Record<string, unknown> } | null = null
+    try {
+        body = await res.json<{ feed?:Record<string, unknown> }>()
+    } catch {
+        body = null
+    }
+    const feed = body?.feed
+    if (feed) {
+        const did = state.user.value?.did
+        const db = did ? getLocalDb(did) : null
+        if (db) {
+            try {
+                await upsertFeedFromServer(db, feed)
+            } catch (err) {
+                debug(
+                    'retryResolveFeed: failed to write back row',
+                    err instanceof Error ? err.message : err
+                )
+            }
+        }
+        await State.loadFeeds(state)
+    }
 }
 
 /**

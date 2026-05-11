@@ -21,6 +21,7 @@
     "test:adapter-factory": "esbuild ./test/adapter-factory.ts --bundle | tapout",
     "test:pull-sync": "esbuild ./test/pull-sync.ts --bundle --loader:.wasm=dataurl | tapout",
     "test:push-sync": "esbuild ./test/push-sync.ts --bundle --loader:.wasm=dataurl | tapout",
+    "test:feed-resolve-state": "esbuild ./test/feed-resolve-state.ts --bundle --loader:.wasm=dataurl --alias:cloudflare:workers=./test/cloudflare-workers-stub.ts | tapout",
     "test:bootstrap": "esbuild ./test/bootstrap.ts --bundle --loader:.wasm=dataurl | tapout",
     "test:cache-status": "node test/run-cache-status.mjs",
     "test:sqlite-worker": "esbuild test/sqlite-worker.ts --bundle | tapout",

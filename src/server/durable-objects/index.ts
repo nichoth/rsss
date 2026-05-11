@@ -114,6 +114,8 @@ const MAX_FEED_DESCRIPTION_LENGTH = 64 * 1024
 const MAX_FEED_CONTENT_LENGTH = 1024 * 1024
 const FEED_TOO_LARGE_ERROR = 'feed too large'
 const FEED_TOO_LARGE_STATUS = 413
+export const RESOLVE_WINDOW_MS = 30_000
+export const RESOLVE_TIMEOUT_ERROR = 'Initial fetch did not complete'
 const FEED_SYNC_COLUMNS = `
     id, url, title, description, site_url, last_fetched, last_pulled_at,
     last_error, last_status, created_at, updated_at
@@ -816,6 +818,16 @@ export class UserDO extends DurableObject<Env> {
                     JSON.stringify(feed)
                 )
 
+                // Pull the alarm forward so the sweep runs within
+                // RESOLVE_WINDOW_MS even if the waitUntil fetch is
+                // dropped (research Decision 4).
+                const targetAt = Date.now() + RESOLVE_WINDOW_MS
+                const existingAlarm = await this.ctx.storage.getAlarm()
+                const newAlarm = existingAlarm == null ?
+                    targetAt :
+                    Math.min(existingAlarm, targetAt)
+                await this.ctx.storage.setAlarm(newAlarm)
+
                 this.ctx.waitUntil(this.fetchFeed(feed as unknown as Feed))
 
                 return c.json(
@@ -945,7 +957,12 @@ export class UserDO extends DurableObject<Env> {
                     err.status as ContentfulStatusCode
                 )
             }
-            return c.json({ success: true })
+            const refreshed = this.sql.exec(
+                `SELECT ${FEED_SYNC_COLUMNS}
+                 FROM feeds WHERE id = ?`,
+                feed.id
+            ).one() as Record<string, unknown> | null
+            return c.json({ feed: refreshed })
         })
 
         // Refresh all feeds. Kick fetches off in waitUntil and
@@ -1529,6 +1546,14 @@ export class UserDO extends DurableObject<Env> {
                 // bookkeeping and reset the per-feed backoff. The
                 // `finally` block below still emits feed-updated so
                 // dashboards see a heartbeat.
+                this.sql.exec(
+                    `UPDATE feeds SET
+                        last_fetched = datetime('now'),
+                        last_error = NULL,
+                        last_status = NULL
+                    WHERE id = ?`,
+                    feed.id
+                )
                 await this.writePollerFeedState(feed.id, {
                     etag: priorState?.etag,
                     lastModified: priorState?.lastModified,
@@ -1553,23 +1578,24 @@ export class UserDO extends DurableObject<Env> {
                 parsedFeed.title
             )
 
-            // Update feed metadata
-            if (parsedFeed.title || parsedFeed.description || parsedFeed.link) {
-                this.sql.exec(
-                    `UPDATE feeds SET
-                        title = COALESCE(?, title),
-                        description = COALESCE(?, description),
-                        site_url = COALESCE(?, site_url),
-                        last_fetched = datetime('now'),
-                        last_error = NULL,
-                        last_status = NULL
-                    WHERE id = ?`,
-                    parsedFeed.title,
-                    parsedFeed.description,
-                    parsedFeed.link,
-                    feed.id
-                )
-            }
+            // Update feed metadata. Run on every parsed response so
+            // the row reaches RESOLVED even when title/description/link
+            // are all empty (FR-004). COALESCE keeps prior metadata
+            // sticky when fields are null.
+            this.sql.exec(
+                `UPDATE feeds SET
+                    title = COALESCE(?, title),
+                    description = COALESCE(?, description),
+                    site_url = COALESCE(?, site_url),
+                    last_fetched = datetime('now'),
+                    last_error = NULL,
+                    last_status = NULL
+                WHERE id = ?`,
+                parsedFeed.title,
+                parsedFeed.description,
+                parsedFeed.link,
+                feed.id
+            )
 
             // Persist the canonical URL when the server redirected us. Skip
             // when another row already owns the resolved URL (UNIQUE
@@ -1739,6 +1765,36 @@ export class UserDO extends DurableObject<Env> {
         const rowsWritten = (result as { rowsWritten?:unknown }).rowsWritten
 
         return typeof rowsWritten === 'number' ? rowsWritten : 0
+    }
+
+    /**
+     * Mark any feed that has been resolving longer than RESOLVE_WINDOW_MS
+     * as failed with a synthetic 504. Broadcasts feed-updated for each
+     * row swept so SSE-connected clients converge immediately. Idempotent:
+     * runs only against rows that are still in the resolving state.
+     */
+    private sweepStuckResolvingFeeds ():void {
+        const cutoffSeconds = Math.ceil(RESOLVE_WINDOW_MS / 1000)
+        this.sql.exec(
+            `UPDATE feeds SET
+                last_error = ?,
+                last_status = 504
+             WHERE last_fetched IS NULL
+               AND last_error IS NULL
+               AND created_at < datetime('now', ?)`,
+            RESOLVE_TIMEOUT_ERROR,
+            `-${cutoffSeconds} seconds`
+        )
+        const swept = this.sql.exec(
+            `SELECT id FROM feeds
+             WHERE last_status = 504
+               AND last_error = ?
+               AND updated_at >= datetime('now', '-2 seconds')`,
+            RESOLVE_TIMEOUT_ERROR
+        ).toArray() as Array<{ id:number }>
+        for (const row of swept) {
+            this.broadcast('feed-updated', { feedId: row.id })
+        }
     }
 
     private bumpFeedVersion ():number {
@@ -2455,6 +2511,8 @@ export class UserDO extends DurableObject<Env> {
             await this.executeAccountDeletion(pending.did)
             return
         }
+
+        this.sweepStuckResolvingFeeds()
 
         await this.scheduleNextFeedRefresh()
 

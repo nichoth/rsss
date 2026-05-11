@@ -1,5 +1,9 @@
 import type { Sqlite3Db } from './sqlite-init.js'
-import { execDb, queryDb } from './local-db.js'
+import {
+    execDb,
+    queryDb,
+    ensureFeedTerminalStateColumns
+} from './local-db.js'
 import {
     setSyncSyncing,
     setSyncDone,
@@ -128,21 +132,24 @@ async function recordPermanentFailure (
     await moveOutboxRowToDeadLetters(db, row, error)
 }
 
-async function upsertFeedFromServer (
+export async function upsertFeedFromServer (
     db:Sqlite3Db,
     feed:Record<string, unknown>
 ):Promise<void> {
+    await ensureFeedTerminalStateColumns(db)
     await execDb(db, {
         sql: `INSERT INTO feeds
             (id, url, title, description, site_url, last_fetched,
-             created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             last_error, last_status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 url = excluded.url,
                 title = excluded.title,
                 description = excluded.description,
                 site_url = excluded.site_url,
                 last_fetched = excluded.last_fetched,
+                last_error = excluded.last_error,
+                last_status = excluded.last_status,
                 updated_at = excluded.updated_at`,
         bind: [
             feed.id as number,
@@ -151,6 +158,8 @@ async function upsertFeedFromServer (
             (feed.description as string|null) ?? null,
             (feed.site_url as string|null) ?? null,
             (feed.last_fetched as string|null) ?? null,
+            (feed.last_error as string|null) ?? null,
+            (feed.last_status as number|null) ?? null,
             feed.created_at as string,
             feed.updated_at as string
         ]
