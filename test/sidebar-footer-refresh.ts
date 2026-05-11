@@ -499,7 +499,12 @@ async t => {
                         input.toString() :
                         input.url
                 if (url.endsWith('/api/feeds/refresh')) {
-                    return jsonResponse({ success: true, queued: 0 })
+                    // queued > 0 keeps the SSE-pending lifecycle so the
+                    // pill visibly transitions through 'updating'. The
+                    // no-new-items resolution comes from reconcile
+                    // returning {} above, not from queued === 0 (which
+                    // has its own eager-clear short-circuit).
+                    return jsonResponse({ success: true, queued: 3 })
                 }
                 return jsonResponse({})
             }, async () => {
