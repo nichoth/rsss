@@ -145,6 +145,25 @@ test('injectInitialFeed inserts parseable bootstrap before head close', t => {
     )
 })
 
+test('injectInitialFeed pre-renders the feeds list when seeded', t => {
+    const expected = payload()
+    const html = injectInitialFeed(
+        '<html><head></head><body><div id="root"></div></body></html>',
+        expected
+    )
+
+    t.equal(
+        html.includes('Example Feed'),
+        true,
+        'feed title appears in pre-rendered sidebar markup'
+    )
+    t.equal(
+        html.includes('class="sidebar"'),
+        true,
+        'sidebar shell is rendered server-side'
+    )
+})
+
 test('injectInitialFeed returns input unchanged without head close', t => {
     const html = '<!doctype html><html><body>RSSS</body></html>'
 

@@ -1,5 +1,22 @@
 import type { CountsResponse, Feed, Item } from '../client/db/types.js'
 
+function stripProtocolForHref (url:string):string {
+    return url.replace(/^https?:\/\//, '')
+}
+
+function renderInitialFeedsListItem (feed:Feed):string {
+    const title = feed.title ?
+        escapeHtml(feed.title) :
+        escapeHtml(feed.url)
+    const href = '/feed/' + escapeAttribute(stripProtocolForHref(feed.url))
+    return (
+        '<div class="sidebar-item feed-item">' +
+        '<span class="badge feed-unread-count">0</span>' +
+        `<a class="feed-select" href="${href}">${title}</a>` +
+        '</div>'
+    )
+}
+
 export interface InitialFeedPayload {
     version:number
     items:Item[]
@@ -56,7 +73,8 @@ function injectInitialFeedMarkup (
     const root = '<div id="root"></div>'
     const rootIndex = html.indexOf(root)
 
-    if (rootIndex === -1 || payload.items.length === 0) {
+    if (rootIndex === -1) return html
+    if (payload.items.length === 0 && payload.feeds.length === 0) {
         return html
     }
 
@@ -64,6 +82,13 @@ function injectInitialFeedMarkup (
         '<div id="root">' +
         '<div class="route feed-reader">' +
         '<div class="app-body">' +
+        '<aside class="sidebar">' +
+        '<div class="sidebar-section">' +
+        '<div class="feeds-list">' +
+        payload.feeds.map(renderInitialFeedsListItem).join('') +
+        '</div>' +
+        '</div>' +
+        '</aside>' +
         '<main class="content">' +
         '<ul class="items-list">' +
         payload.items.map(renderInitialFeedItem).join('') +
