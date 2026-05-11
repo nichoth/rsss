@@ -73,7 +73,7 @@ import {
 } from './cache-status-state.js'
 import { cacheItemImages } from './db/image-cache.js'
 import { feedPolicies } from './db/feed-cache-policy.js'
-import { consumeInitialFeed } from './initial-feed.js'
+import { consumeInitialFeed, peekInitialFeed } from './initial-feed.js'
 const debug = Debug('rsss:state')
 
 const CHECKOUT_EMAIL_KEY = 'rsss_checkout_email'
@@ -328,6 +328,17 @@ export function State ():AppState {
     // the user's persisted choices on every route, not just /settings.
     loadLocalFirstSettings()
 
+    // Seed signals synchronously from the SSR bootstrap payload so the
+    // first paint has the feeds list, items, and counts populated. The
+    // payload is only `peek`ed here — `loadItems()` still consumes it
+    // (and its single-shot semantics are preserved).
+    const seed = peekInitialFeed()
+    const seededFeeds:Feed[] = seed?.feeds ?? []
+    const seededCounts:CountsResponse = seed?.counts ?? {
+        unread: 0, starred: 0, total: 0, perFeed: {}
+    }
+    const seededItems:Item[] = (seed?.items as Item[]|undefined) ?? []
+
     const onRoute = Route()
 
     const state = {
@@ -342,7 +353,7 @@ export function State ():AppState {
         isAuthenticated: computed(
             () => state.user.value !== null
         ),
-        feeds: signal<Feed[]>([]),
+        feeds: signal<Feed[]>(seededFeeds),
         feedsLoading: signal<boolean>(false),
         refreshInProgress: signal<boolean>(false),
         feedSyncStatus: signal<
@@ -367,13 +378,11 @@ export function State ():AppState {
                 'syncing' :
                 state.feedSyncStatus.value
         )),
-        items: signal<Item[]>([]),
+        items: signal<Item[]>(seededItems),
         itemsLoading: signal(false),
-        itemsTotal: signal(0),
+        itemsTotal: signal(seededItems.length),
         itemsOffset: signal(0),
-        counts: signal<CountsResponse>(
-            { unread: 0, starred: 0, total: 0, perFeed: {} }
-        ),
+        counts: signal<CountsResponse>(seededCounts),
         showUnreadOnly: signal(false),
         showStarredOnly: signal(false),
         pageSize: signal(DEFAULT_PAGE_SIZE),

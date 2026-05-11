@@ -76,6 +76,22 @@ export function consumeInitialFeed ():InitialFeedPayload|null {
     return readInitialFeedFromDom()
 }
 
+/**
+ * Read the bootstrap payload without marking it consumed. Used by
+ * `State()` to seed feeds/counts synchronously while leaving the
+ * items consumption to `loadItems()` (which expects single-use).
+ */
+export function peekInitialFeed ():InitialFeedPayload|null {
+    if (typeof window === 'undefined') return readInitialFeedFromDom()
+
+    const globalPayload = window.__INITIAL_FEED__
+    if (isInitialFeedPayload(globalPayload)) {
+        return globalPayload
+    }
+
+    return readInitialFeedFromDom()
+}
+
 export function _resetConsumedForTests ():void {
     consumed = false
 }

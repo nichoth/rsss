@@ -220,6 +220,47 @@ test('isInitialFeedPayload accepts older payloads without feeds/counts',
         }
     })
 
+test(
+    'State() seeds feeds and counts from the bootstrap payload',
+    async t => {
+        resetBootstrap()
+        const expected = payload()
+        window.__INITIAL_FEED__ = expected
+        const originalFetch = globalThis.fetch
+        Object.defineProperty(globalThis, 'fetch', {
+            value: async () => new Response('{}', { status: 401 }),
+            configurable: true
+        })
+
+        try {
+            const state = State()
+
+            t.deepEqual(
+                state.feeds.value,
+                expected.feeds,
+                'feeds.value seeded from bootstrap'
+            )
+            t.deepEqual(
+                state.counts.value,
+                expected.counts,
+                'counts.value seeded from bootstrap'
+            )
+            t.equal(
+                state.feedsLoading.value,
+                false,
+                'feedsLoading is false (no async load needed)'
+            )
+            state.cleanup()
+        } finally {
+            Object.defineProperty(globalThis, 'fetch', {
+                value: originalFetch,
+                configurable: true
+            })
+            resetBootstrap()
+        }
+    }
+)
+
 test('State.loadItems renders non-empty bootstrap without fetching',
     async t => {
         resetBootstrap()
