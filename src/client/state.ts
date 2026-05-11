@@ -274,6 +274,7 @@ export type AppState = {
     oauthInFlight:Signal<boolean>,
     feeds:Signal<Feed[]>,
     feedsLoading:Signal<boolean>,
+    feedsError:Signal<string|null>,
     // Manual "Refresh Feeds" lifecycle. Held true from click until the
     // visible result lands (SSE refresh-complete + refreshAfterSync),
     // POST failure, 401, or 60s safety timeout. Distinct from
@@ -355,6 +356,7 @@ export function State ():AppState {
         ),
         feeds: signal<Feed[]>(seededFeeds),
         feedsLoading: signal<boolean>(false),
+        feedsError: signal<string|null>(null),
         refreshInProgress: signal<boolean>(false),
         feedSyncStatus: signal<
             'inactive'|'updates'|'syncing'|'error'|'synced'
@@ -1445,11 +1447,17 @@ State.loadFeeds = async function (
         const data = await adapter.getFeeds()
         batch(() => {
             state.feeds.value = data.feeds
+            state.feedsError.value = null
             state.feedsLoading.value = false
         })
     } catch (err) {
         debug('Error loading feeds:', err)
-        state.feedsLoading.value = false
+        batch(() => {
+            state.feedsError.value = err instanceof Error ?
+                err.message :
+                'Failed to load feeds'
+            state.feedsLoading.value = false
+        })
     }
 }
 

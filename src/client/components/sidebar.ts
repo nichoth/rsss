@@ -23,6 +23,7 @@ export const Sidebar:FunctionComponent<{
 }> = function ({ state }) {
     const {
         feedsLoading,
+        feedsError,
         feeds,
         route,
         counts,
@@ -243,7 +244,11 @@ export const Sidebar:FunctionComponent<{
                         feeds.value.length === 0) &&
                         html`
                             <div class="empty-state">
-                                No feeds yet${ELLIPSIS}
+                                ${feedsError.value ?
+                                    html`Couldn${'’'}t load feeds: ${
+                                        feedsError.value
+                                    }` :
+                                    html`No feeds yet${ELLIPSIS}`}
                             </div>
                         `)
 }

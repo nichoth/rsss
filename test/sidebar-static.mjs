@@ -14,3 +14,18 @@ test('sidebar add-feed input is read through namedItem', () => {
     )
     assert.doesNotMatch(source, /els\[['"]new-feed-url['"]\]/)
 })
+
+test('sidebar empty-state shows feedsError when set, ' +
+    'otherwise No feeds yet', () => {
+    // Error branch: when feedsError is set the empty state surfaces it.
+    assert.match(
+        source,
+        /feedsError\.value\s*\?[\s\S]+Couldn/
+    )
+    // Empty branch: when there's no error the original copy still wins.
+    assert.match(source, /No feeds yet/)
+})
+
+test('sidebar destructures feedsError from state', () => {
+    assert.match(source, /feedsError,/)
+})
