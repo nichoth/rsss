@@ -1,4 +1,8 @@
-import type { Item } from '../client/db/types.js'
+import type {
+    CountsResponse,
+    Feed,
+    Item
+} from '../client/db/types.js'
 import {
     buildLazyHtmlCacheKey,
     injectInitialFeed,
@@ -23,6 +27,8 @@ interface FeedVersionResponse {
 interface LazyHtmlDataResponse {
     version:number
     items:Item[]
+    feeds:Feed[]
+    counts:CountsResponse
 }
 
 export async function handleLazyHtmlRequest (
@@ -68,7 +74,9 @@ export async function handleLazyHtmlRequest (
     const payload:InitialFeedPayload = {
         version: data.version,
         items: data.items,
-        has_more: data.items.length >= 50
+        has_more: data.items.length >= 50,
+        feeds: data.feeds,
+        counts: data.counts
     }
     const html = injectInitialFeed(await shellResponse.text(), payload)
 

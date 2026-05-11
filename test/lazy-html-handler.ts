@@ -1,5 +1,9 @@
 import { test } from '@substrate-system/tapzero'
-import type { Item } from '../src/client/db/types.js'
+import type {
+    CountsResponse,
+    Feed,
+    Item
+} from '../src/client/db/types.js'
 import {
     handleLazyHtmlRequest,
     type LazyHtmlInput
@@ -47,13 +51,21 @@ class DoStub {
     paths:string[] = []
     version:number
     items:Item[]
+    feeds:Feed[]
+    counts:CountsResponse
 
     constructor (
         version:number,
-        items:Item[]
+        items:Item[],
+        feeds:Feed[] = [],
+        counts:CountsResponse = {
+            unread: 0, starred: 0, total: 0, perFeed: {}
+        }
     ) {
         this.version = version
         this.items = items
+        this.feeds = feeds
+        this.counts = counts
     }
 
     async fetch (input:RequestInfo | URL):Promise<Response> {
@@ -69,7 +81,9 @@ class DoStub {
         if (url.pathname === '/internal/lazy-html-data') {
             return Response.json({
                 version: this.version,
-                items: this.items
+                items: this.items,
+                feeds: this.feeds,
+                counts: this.counts
             })
         }
 
@@ -172,9 +186,9 @@ test('cache miss writes key and injects bootstrap payload', async t => {
     const html = await response.text()
 
     t.equal(response.status, 200, 'returns an HTML response')
-    t.equal(kv.gets[0], 'html:v2:did:plc:abc:3', 'checks versioned key')
+    t.equal(kv.gets[0], 'html:v3:did:plc:abc:3', 'checks versioned key')
     t.equal(kv.puts.length, 1, 'stores rendered HTML on miss')
-    t.equal(kv.puts[0].key, 'html:v2:did:plc:abc:3', 'writes miss key')
+    t.equal(kv.puts[0].key, 'html:v3:did:plc:abc:3', 'writes miss key')
     t.equal(kv.puts[0].options?.expirationTtl, 2592000, 'uses 30 day ttl')
     t.deepEqual(doStub.paths, [
         '/internal/feed-version',
@@ -183,7 +197,9 @@ test('cache miss writes key and injects bootstrap payload', async t => {
     t.deepEqual(bootstrapPayload(html), {
         version: 3,
         items: [item()],
-        has_more: false
+        has_more: false,
+        feeds: [],
+        counts: { unread: 0, starred: 0, total: 0, perFeed: {} }
     }, 'injects parseable bootstrap')
     const doc = new DOMParser().parseFromString(html, 'text/html')
     const thumbnail = doc.querySelector(
@@ -207,7 +223,7 @@ test('cache hit returns body and skips data endpoint and put', async t => {
         '<!doctype html><html><head></head>' +
         '<body>cached</body></html>'
     )
-    const kv = new KvStub(new Map([['html:v2:did:plc:abc:5', cached]]))
+    const kv = new KvStub(new Map([['html:v3:did:plc:abc:5', cached]]))
     const doStub = new DoStub(5, [item()])
     const assets = new AssetsStub()
     const response = await handleLazyHtmlRequest(input({
@@ -225,7 +241,7 @@ test('cache hit returns body and skips data endpoint and put', async t => {
 })
 
 test('version bump invalidates cache by writing the new key', async t => {
-    const kv = new KvStub(new Map([['html:v2:did:plc:abc:5', 'old']]))
+    const kv = new KvStub(new Map([['html:v3:did:plc:abc:5', 'old']]))
     const doStub = new DoStub(6, [item(2)])
     const response = await handleLazyHtmlRequest(input({
         kv,
@@ -234,12 +250,45 @@ test('version bump invalidates cache by writing the new key', async t => {
     }))
 
     t.ok((await response.text()).includes('initial-feed'), 'returns injected')
-    t.deepEqual(kv.gets, ['html:v2:did:plc:abc:6'], 'checks new key only')
-    t.equal(kv.puts[0].key, 'html:v2:did:plc:abc:6', 'writes new key')
+    t.deepEqual(kv.gets, ['html:v3:did:plc:abc:6'], 'checks new key only')
+    t.equal(kv.puts[0].key, 'html:v3:did:plc:abc:6', 'writes new key')
     t.deepEqual(doStub.paths, [
         '/internal/feed-version',
         '/internal/lazy-html-data'
     ], 'cache miss reads first-page data')
+})
+
+test('handler injects feeds and counts from DO', async t => {
+    const feeds:Feed[] = [{
+        id: 2,
+        url: 'https://example.com/feed.xml',
+        title: 'Example Feed',
+        description: null,
+        site_url: 'https://example.com',
+        last_fetched: '2026-05-09T00:00:00.000Z',
+        last_error: null,
+        last_status: 200,
+        created_at: '2026-05-09T00:00:00.000Z',
+        updated_at: '2026-05-09T00:00:00.000Z'
+    }]
+    const counts:CountsResponse = {
+        unread: 1, starred: 0, total: 1, perFeed: { '2': 1 }
+    }
+    const kv = new KvStub()
+    const doStub = new DoStub(7, [item()], feeds, counts)
+    const response = await handleLazyHtmlRequest(input({
+        kv,
+        doStub,
+        assets: new AssetsStub()
+    }))
+    const html = await response.text()
+    const parsed = bootstrapPayload(html) as {
+        feeds:Feed[]
+        counts:CountsResponse
+    }
+
+    t.deepEqual(parsed.feeds, feeds, 'feeds embedded in bootstrap')
+    t.deepEqual(parsed.counts, counts, 'counts embedded in bootstrap')
 })
 
 test('non-html requests bypass lazy logic', async t => {
