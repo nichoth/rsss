@@ -104,6 +104,27 @@ export async function queryOneDb<T> (
     return rows[0]
 }
 
+const feedTerminalStateColumnsReady = new WeakSet<Sqlite3Db>()
+
+export async function ensureFeedTerminalStateColumns (
+    db:Sqlite3Db
+):Promise<void> {
+    if (feedTerminalStateColumnsReady.has(db)) return
+
+    const cols = await queryDb<{ name:string }>(
+        db,
+        'PRAGMA table_info(feeds)'
+    )
+    const has = (name:string) => cols.some((col) => col.name === name)
+    if (!has('last_error')) {
+        await execDb(db, 'ALTER TABLE feeds ADD COLUMN last_error TEXT')
+    }
+    if (!has('last_status')) {
+        await execDb(db, 'ALTER TABLE feeds ADD COLUMN last_status INTEGER')
+    }
+    feedTerminalStateColumnsReady.add(db)
+}
+
 export async function closeDb (db:Sqlite3Db|null|undefined):Promise<void> {
     if (!db) return
 

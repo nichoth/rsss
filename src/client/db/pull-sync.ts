@@ -1,6 +1,11 @@
 import { describeLocalDbError } from './sqlite-init.js'
 import { storeContent } from '../local-first-settings.js'
-import { execDb, queryDb, queryOneDb } from './local-db.js'
+import {
+    execDb,
+    queryDb,
+    queryOneDb,
+    ensureFeedTerminalStateColumns
+} from './local-db.js'
 import {
     cacheItemImages,
     type FeedCachePolicyRow
@@ -147,11 +152,13 @@ async function upsertFeed (
     db:Sqlite3Db,
     feed:Record<string, unknown>
 ):Promise<void> {
+    await ensureFeedTerminalStateColumns(db)
     await execDb(db, {
         sql: `INSERT INTO feeds
             (id, url, title, description, site_url, last_fetched,
-             last_pulled_at, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             last_pulled_at, last_error, last_status,
+             created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 url = excluded.url,
                 title = excluded.title,
@@ -159,6 +166,8 @@ async function upsertFeed (
                 site_url = excluded.site_url,
                 last_fetched = excluded.last_fetched,
                 last_pulled_at = excluded.last_pulled_at,
+                last_error = excluded.last_error,
+                last_status = excluded.last_status,
                 updated_at = excluded.updated_at`,
         bind: [
             feed.id as number,
@@ -168,6 +177,8 @@ async function upsertFeed (
             (feed.site_url as string|null) ?? null,
             (feed.last_fetched as string|null) ?? null,
             (feed.last_pulled_at as string|null) ?? null,
+            (feed.last_error as string|null) ?? null,
+            (feed.last_status as number|null) ?? null,
             feed.created_at as string,
             feed.updated_at as string
         ]
