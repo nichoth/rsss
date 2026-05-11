@@ -665,7 +665,36 @@ export class UserDO extends DurableObject<Env> {
                 'ORDER BY items.pub_date DESC, items.id DESC LIMIT 50'
             ).toArray()
 
-            return c.json({ version, items })
+            const feeds = this.sql.exec(
+                'SELECT * FROM feeds ORDER BY title ASC'
+            ).toArray()
+
+            const unreadRow = this.sql.exec(
+                'SELECT COUNT(*) as count FROM items WHERE is_read = 0'
+            ).one() as { count:number }
+            const starredRow = this.sql.exec(
+                'SELECT COUNT(*) as count FROM items WHERE is_starred = 1'
+            ).one() as { count:number }
+            const totalRow = this.sql.exec(
+                'SELECT COUNT(*) as count FROM items'
+            ).one() as { count:number }
+            const perFeedRows = this.sql.exec(
+                'SELECT feed_id, COUNT(*) as unread FROM items' +
+                ' WHERE is_read = 0 GROUP BY feed_id'
+            ).toArray() as { feed_id:number; unread:number }[]
+            const perFeed:Record<string, number> = {}
+            for (const row of perFeedRows) {
+                perFeed[String(row.feed_id)] = row.unread
+            }
+
+            const counts = {
+                unread: unreadRow.count,
+                starred: starredRow.count,
+                total: totalRow.count,
+                perFeed
+            }
+
+            return c.json({ version, items, feeds, counts })
         })
 
         // Server-sent events stream. Broadcasts state-change
