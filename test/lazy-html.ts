@@ -6,6 +6,22 @@ import {
     shouldSkipLazyHtml,
     type InitialFeedPayload
 } from '../src/server/lazy-html.js'
+import type { Feed } from '../src/client/db/types.js'
+
+function feedFixture (id = 2):Feed {
+    return {
+        id,
+        url: 'https://example.com/feed.xml',
+        title: 'Example Feed',
+        description: null,
+        site_url: 'https://example.com',
+        last_fetched: '2026-05-09T00:00:00.000Z',
+        last_error: null,
+        last_status: 200,
+        created_at: '2026-05-09T00:00:00.000Z',
+        updated_at: '2026-05-09T00:00:00.000Z'
+    }
+}
 
 function payload (
     title = 'Title'
@@ -13,6 +29,13 @@ function payload (
     return {
         version: 7,
         has_more: false,
+        feeds: [feedFixture()],
+        counts: {
+            unread: 1,
+            starred: 0,
+            total: 1,
+            perFeed: { '2': 1 }
+        },
         items: [{
             id: 1,
             feed_id: 2,
@@ -51,23 +74,23 @@ function bootstrapJson (html:string):string {
 test('buildLazyHtmlCacheKey is deterministic and version-keyed', t => {
     t.equal(
         buildLazyHtmlCacheKey('did:plc:abc', 3),
-        'html:v2:did:plc:abc:3',
+        'html:v3:did:plc:abc:3',
         'cache key includes DID and version'
     )
     t.equal(
         buildLazyHtmlCacheKey('did:plc:abc', 4),
-        'html:v2:did:plc:abc:4',
+        'html:v3:did:plc:abc:4',
         'new versions get distinct keys'
     )
 })
 
-test('buildLazyHtmlCacheKey is prefixed with the v2 schema marker', t => {
+test('buildLazyHtmlCacheKey is prefixed with the v3 schema marker', t => {
     const key = buildLazyHtmlCacheKey('did:plc:test', 7)
 
     t.equal(
-        key.startsWith('html:v2:'),
+        key.startsWith('html:v3:'),
         true,
-        'cache key starts with html:v2:'
+        'cache key starts with html:v3: after schema bump'
     )
 })
 
@@ -80,6 +103,14 @@ test('serializeInitialFeed round-trips through JSON.parse', t => {
         expected,
         'serialized payload parses back to the same object'
     )
+})
+
+test('serializeInitialFeed round-trips feeds and counts', t => {
+    const expected = payload()
+    const parsed = JSON.parse(serializeInitialFeed(expected))
+
+    t.deepEqual(parsed.feeds, expected.feeds, 'feeds round-trip')
+    t.deepEqual(parsed.counts, expected.counts, 'counts round-trip')
 })
 
 test('serializeInitialFeed escapes less-than signs', t => {

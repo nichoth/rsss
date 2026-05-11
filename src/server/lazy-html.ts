@@ -1,9 +1,11 @@
-import type { Item } from '../client/db/types.js'
+import type { CountsResponse, Feed, Item } from '../client/db/types.js'
 
 export interface InitialFeedPayload {
     version:number
     items:Item[]
     has_more:boolean
+    feeds:Feed[]
+    counts:CountsResponse
 }
 
 export function shouldSkipLazyHtml (
@@ -16,7 +18,7 @@ export function buildLazyHtmlCacheKey (
     did:string,
     version:number
 ):string {
-    return `html:v2:${did}:${version}`
+    return `html:v3:${did}:${version}`
 }
 
 export function serializeInitialFeed (
