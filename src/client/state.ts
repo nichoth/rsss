@@ -154,12 +154,16 @@ function scheduleResolveConvergence (
         const did = state.user.value?.did
         const db = did ? getLocalDb(did) : null
         if (!db) return
-        runSync(db).catch((err) => {
-            debug(
-                'resolve-convergence runSync failed',
-                err instanceof Error ? err.message : err
-            )
-        })
+        runSync(db)
+            .then(() => {
+                State.refreshAfterSync(state)
+            })
+            .catch((err) => {
+                debug(
+                    'resolve-convergence runSync failed',
+                    err instanceof Error ? err.message : err
+                )
+            })
     }, RESOLVE_WINDOW_MS + CLIENT_GRACE_MS)
     resolveConvergenceTimers.set(feedId, timer)
 }
@@ -681,6 +685,23 @@ State.handleSyncAuthError = function (
 }
 
 /**
+ * Defense in depth (FR-006): schedule a convergence safety net for any
+ * feeds still in resolving state. Called after the initial feed load so
+ * the freshly-loaded `state.feeds.value` is the iteration source. If a
+ * page reload happens while a feed is resolving, the client needs to
+ * schedule its own ~35s convergence timer to ensure the UI eventually
+ * reaches terminal state.
+ */
+function scheduleConvergenceForResolvingFeeds (state:AppState):void {
+    if (!state.feeds?.value) return
+    for (const feed of state.feeds.value) {
+        if (feed.last_fetched === null && !feed.last_error) {
+            scheduleResolveConvergence(state, feed.url)
+        }
+    }
+}
+
+/**
  * First post-auth load. Pulls feeds, indicator, items, counts, and
  * the route item if applicable. Sets initialLoadComplete on the way
  * out so the App shell can swap from skeleton to real UI.
@@ -697,6 +718,10 @@ State.loadInitialView = async function (
             State.loadItems(state),
             State.loadCounts(state)
         ])
+
+        // Schedule convergence for any feeds that are still resolving after
+        // the initial load (FR-006, AC1.3: reload preserves terminal state)
+        scheduleConvergenceForResolvingFeeds(state)
 
         if (!isItemRoute(route)) return
 
@@ -2031,7 +2056,32 @@ State.retryResolveFeed = async function (
     state:AppState,
     feedId:string
 ):Promise<void> {
-    const res = await api.post(`feeds/${feedId}/refresh`)
+    const numericId = parseInt(feedId, 10)
+    const row = state.feeds.value.find((f) => f.id === numericId)
+    if (!row) return
+    const url = row.url
+
+    // Optimistically flip the row to resolving so the UI updates instantly.
+    // If the POST fails or returns no feed body, we'll schedule a
+    // convergence timer to eventually sync the true state.
+    state.feeds.value = state.feeds.value.map((f) => (
+        f.id === numericId ?
+            { ...f, last_fetched: null, last_error: null } :
+            f
+    ))
+
+    let res:Response | null = null
+    try {
+        res = await api.post(`feeds/${feedId}/refresh`)
+    } catch (err) {
+        debug(
+            'retryResolveFeed: POST failed, scheduling convergence',
+            err instanceof Error ? err.message : err
+        )
+        scheduleResolveConvergence(state, url)
+        return
+    }
+
     let body:{ feed?:Record<string, unknown> } | null = null
     try {
         body = await res.json<{ feed?:Record<string, unknown> }>()
@@ -2053,6 +2103,10 @@ State.retryResolveFeed = async function (
             }
         }
         await State.loadFeeds(state)
+    } else {
+        // POST succeeded but response has no feed body - schedule convergence
+        // to pull the server state when the response eventually arrives
+        scheduleResolveConvergence(state, url)
     }
 }
 
