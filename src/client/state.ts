@@ -156,7 +156,7 @@ function scheduleResolveConvergence (
         if (!db) return
         runSync(db)
             .then(() => {
-                State.refreshAfterSync(state)
+                return State.refreshAfterSync(state)
             })
             .catch((err) => {
                 debug(
@@ -712,16 +712,20 @@ State.loadInitialView = async function (
     const route = state.route.value
 
     try {
+        // Load feeds first so we have resolving feeds to schedule convergence
+        // for. Even if other loads fail, we still need to schedule.
+        await State.loadFeeds(state)
+
+        // Schedule convergence for any feeds that are still resolving after
+        // the initial load (FR-006, AC1.3: reload preserves terminal state).
+        // Do this before the other loads so it runs even if they fail.
+        scheduleConvergenceForResolvingFeeds(state)
+
         await Promise.all([
-            State.loadFeeds(state),
             State.loadFeedStatus(state),
             State.loadItems(state),
             State.loadCounts(state)
         ])
-
-        // Schedule convergence for any feeds that are still resolving after
-        // the initial load (FR-006, AC1.3: reload preserves terminal state)
-        scheduleConvergenceForResolvingFeeds(state)
 
         if (!isItemRoute(route)) return
 
