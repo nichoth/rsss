@@ -122,6 +122,9 @@ export const _resolveConvergenceForTest = {
     schedule (state:AppState, url:string):void {
         scheduleResolveConvergence(state, url)
     },
+    scheduleConvergenceForResolvingFeeds (state:AppState):void {
+        scheduleConvergenceForResolvingFeeds(state)
+    },
     pendingTimerCount ():number {
         return resolveConvergenceTimers.size
     },
@@ -712,16 +715,16 @@ State.loadInitialView = async function (
     const route = state.route.value
 
     try {
-        // Load feeds first so we have resolving feeds to schedule convergence
-        // for. Even if other loads fail, we still need to schedule.
-        await State.loadFeeds(state)
-
-        // Schedule convergence for any feeds that are still resolving after
-        // the initial load (FR-006, AC1.3: reload preserves terminal state).
-        // Do this before the other loads so it runs even if they fail.
-        scheduleConvergenceForResolvingFeeds(state)
+        // Load feeds and schedule convergence in parallel with other loads.
+        // Chain scheduling on the feeds promise to avoid serialization.
+        const feedsLoaded = State.loadFeeds(state).then(() => {
+            // Schedule convergence for any feeds that are still resolving after
+            // the initial load (FR-006, AC1.3: reload preserves terminal state).
+            scheduleConvergenceForResolvingFeeds(state)
+        })
 
         await Promise.all([
+            feedsLoaded,
             State.loadFeedStatus(state),
             State.loadItems(state),
             State.loadCounts(state)
@@ -2104,6 +2107,10 @@ State.retryResolveFeed = async function (
                     'retryResolveFeed: failed to write back row',
                     err instanceof Error ? err.message : err
                 )
+                // If DB write fails, schedule convergence as safety net
+                // so the row eventually syncs to the UI
+                scheduleResolveConvergence(state, url)
+                return
             }
         }
         await State.loadFeeds(state)
