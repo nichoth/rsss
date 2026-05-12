@@ -115,6 +115,7 @@ const MAX_FEED_CONTENT_LENGTH = 1024 * 1024
 const FEED_TOO_LARGE_ERROR = 'feed too large'
 const FEED_TOO_LARGE_STATUS = 413
 export const RESOLVE_WINDOW_MS = 30_000
+export const POST_HYBRID_WAIT_MS = 3000
 export const RESOLVE_TIMEOUT_ERROR = 'Initial fetch did not complete'
 const FEED_SYNC_COLUMNS = `
     id, url, title, description, site_url, last_fetched, last_pulled_at,
@@ -1528,6 +1529,37 @@ export class UserDO extends DurableObject<Env> {
             clearInterval(this.keepaliveInterval)
             this.keepaliveInterval = null
         }
+    }
+
+    private getFeedUnreadCount (feedId:number):number {
+        const row = this.sql.exec(
+            'SELECT COUNT(*) as unread FROM items ' +
+            'WHERE feed_id = ? AND is_read = 0',
+            feedId
+        ).one() as { unread:number } | null
+        return row?.unread ?? 0
+    }
+
+    private async awaitFetchOrTimeout (
+        fetchPromise:Promise<void>,
+        waitMs:number
+    ):Promise<'done'|'timeout'> {
+        let timeoutHandle:ReturnType<typeof setTimeout>|undefined
+        const winner = await Promise.race([
+            fetchPromise
+                .then(() => 'done' as const)
+                .catch(() => 'done' as const),
+            new Promise<'timeout'>((resolve) => {
+                timeoutHandle = setTimeout(
+                    () => resolve('timeout'),
+                    waitMs
+                )
+            })
+        ])
+        if (timeoutHandle !== undefined) {
+            clearTimeout(timeoutHandle)
+        }
+        return winner
     }
 
     protected async doFetchFeedText (
