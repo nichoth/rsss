@@ -858,12 +858,39 @@ export class UserDO extends DurableObject<Env> {
                     Math.min(existingAlarm, targetAt)
                 await this.ctx.storage.setAlarm(newAlarm)
 
-                this.ctx.waitUntil(this.fetchFeed(feed as unknown as Feed))
+                // Race fetch against a 3s window via the awaitFetchOrTimeout
+                // helper. Both outcomes converge on "re-read the row +
+                // compute unread + respond". On timeout we also push the in-
+                // flight promise to waitUntil so the fetch completes in the
+                // background.
 
-                return c.json(
-                    { feed },
-                    201
+                const fetchPromise = this.fetchFeed(feed as unknown as Feed)
+                const winner = await this.awaitFetchOrTimeout(
+                    fetchPromise,
+                    POST_HYBRID_WAIT_MS
                 )
+
+                let respondedFeed = feed
+                if (winner === 'done') {
+                    const updated = this.sql.exec(
+                        'SELECT * FROM feeds WHERE id = ?',
+                        (feed as { id:number }).id
+                    ).one()
+                    if (updated) {
+                        respondedFeed = updated
+                    }
+                } else {
+                    // 3s elapsed; let the fetch finish in the background so the
+                    // alarm + SSE + Phase 1 convergence pipeline can deliver
+                    // terminal state to the client.
+                    this.ctx.waitUntil(fetchPromise.catch(() => undefined))
+                }
+
+                const unread = this.getFeedUnreadCount(
+                    (respondedFeed as { id:number }).id
+                )
+
+                return c.json({ feed: respondedFeed, unread }, 201)
             } catch (_err) {
                 const err = _err as Error
                 console.error(
