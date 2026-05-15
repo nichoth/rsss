@@ -27,11 +27,11 @@ export default defineConfig(({ mode }) => {
             }),
             // Sentry plugin must be LAST so it sees the final bundle.
             // Active only when SENTRY_AUTH_TOKEN is set (CI/release builds).
-            process.env.SENTRY_AUTH_TOKEN && sentryVitePlugin({
+            ...(process.env.SENTRY_AUTH_TOKEN ? [sentryVitePlugin({
                 org: process.env.SENTRY_ORG,
                 project: process.env.SENTRY_PROJECT,
                 authToken: process.env.SENTRY_AUTH_TOKEN,
-            }),
+            })] : []),
         ],
         optimizeDeps: {
             // sqlite-wasm references its OPFS proxy with `?vfs=opfs`
