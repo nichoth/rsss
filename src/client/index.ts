@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { type FunctionComponent, render } from 'preact'
 import { useComputed } from '@preact/signals'
+import * as Sentry from '@sentry/browser'
 import { State, type AppState } from './state.js'
 import { isItemRoute } from './routing.js'
 import Router from './routes/index.js'
@@ -13,6 +14,15 @@ import '@substrate-system/details-summary'
 import './style.css'
 // import Debug from '@substrate-system/debug'
 // const debug = Debug('rsss:view:index')
+
+Sentry.onLoad(() => {
+    Sentry.init({
+        dsn: 'https://82d618eec50410dfa68b790d8a9c2e96@o4511016664694784.ingest.us.sentry.io/4511392179355648',
+        // Setting this option to true will send default PII data to Sentry.
+        // For example, automatic IP address collection on events
+        sendDefaultPii: false
+    })
+})
 
 const state = State()
 const router = Router(state)

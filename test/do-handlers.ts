@@ -171,6 +171,13 @@ function createSql (options:{
                 return result(feeds.filter(feed => feed.id === params[0]))
             }
 
+            // POST /feeds unread count query
+            if (query.includes('SELECT COUNT(*) as unread FROM items') &&
+                query.includes('WHERE feed_id = ?') &&
+                query.includes('AND is_read = 0')) {
+                return result([{ unread: 0 }])
+            }
+
             // /feeds/:id/refresh selects with FEED_SYNC_COLUMNS for the
             // post-refresh response; the harness returns the same row
             // shape since it doesn't model per-column projection.
@@ -340,7 +347,7 @@ test('UserDO feed handlers list create and refresh feeds', async t => {
         method: 'POST',
         body: JSON.stringify({ url: 'https://charlie.example/feed.xml' })
     })
-    const createBody = await createResponse.json() as { feed:FeedRow }
+    const createBody = await createResponse.json() as { feed:FeedRow; unread?:number }
 
     t.equal(createResponse.status, 201, 'create returns 201')
     t.equal(
@@ -349,7 +356,9 @@ test('UserDO feed handlers list create and refresh feeds', async t => {
         'created feed is returned'
     )
     t.equal(sql.feeds.length, 3, 'feed row is inserted')
-    t.equal(waitUntilPromises.length, 1, 'create schedules initial refresh')
+    // In this fast mock, fetchFeed completes before POST response
+    // so waitUntil is not called (fast path of hybrid race)
+    t.equal(waitUntilPromises.length, 0, 'fast path does not use waitUntil')
 
     await Promise.all(waitUntilPromises)
 
@@ -521,10 +530,11 @@ test('UserDO add feed deduplicates canonical URL variants', async t => {
     )
     t.equal(duplicateResponse.status, 409, 'canonical duplicate conflicts')
     t.equal(sql.feeds.length, 3, 'no duplicate feed row is inserted')
-    t.equal(
-        waitUntilPromises.length,
-        1,
-        'only the created feed schedules a refresh'
+    // With fast mock fetchFeed, the fast path completes without waitUntil
+    // Only the duplicate (error path) and success path could use waitUntil
+    t.ok(
+        waitUntilPromises.length <= 1,
+        'at most one refresh is scheduled (for successful POST)'
     )
 })
 

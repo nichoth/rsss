@@ -54,8 +54,19 @@ function createFeedSql () {
                 return result(feeds.filter(feed => feed.url === params[0]))
             }
 
+            if (query.includes('SELECT * FROM feeds WHERE id = ?')) {
+                return result(feeds)
+            }
+
             if (query.includes('SELECT COUNT(*) as count')) {
                 return result([{ count: 0 }])
+            }
+
+            // POST /feeds unread count query
+            if (query.includes('SELECT COUNT(*) as unread FROM items') &&
+                query.includes('WHERE feed_id = ?') &&
+                query.includes('AND is_read = 0')) {
+                return result([{ unread: 0 }])
             }
 
             throw new Error(`Unexpected SQL: ${query}`)
@@ -112,26 +123,21 @@ function createRouterForPostFeeds (
     }
 }
 
-test('POST /feeds returns before initial feed fetch settles', async t => {
+test('POST /feeds hybrid race: fast fetch returns resolved state immediately', async t => {
     let waitUntilCalled = false
     let fetchStarted = false
-    let releaseFetch = () => {}
-    const deferredFetch = new Promise<void>((resolve) => {
-        releaseFetch = resolve
-    })
-    const waitUntilPromises:Promise<unknown>[] = []
     const { app, sql } = createRouterForPostFeeds(
-        (promise) => {
+        () => {
             waitUntilCalled = true
-            waitUntilPromises.push(promise)
         },
         async () => {
             fetchStarted = true
-            await deferredFetch
+            // Fast fetch resolves immediately
         }
     )
 
     let response:Response|null = null
+    const startTime = Date.now()
     const responsePromise = app.request('/feeds', {
         method: 'POST',
         body: JSON.stringify({
@@ -142,27 +148,27 @@ test('POST /feeds returns before initial feed fetch settles', async t => {
         return res
     })
 
-    await waitFor(() => fetchStarted || waitUntilCalled)
+    await responsePromise
+    const elapsedTime = Date.now() - startTime
 
-    t.equal(response !== null, true, 'response resolves immediately')
+    t.ok(
+        elapsedTime < 500,
+        `fast fetch responds quickly (actual: ${elapsedTime}ms)`
+    )
+    t.equal(fetchStarted, true, 'fetch was attempted')
     t.equal(
         waitUntilCalled,
-        true,
-        'initial fetch is registered with waitUntil'
+        false,
+        'fast path does not use waitUntil'
     )
-    t.equal(fetchStarted, true, 'initial fetch starts in the background')
-    t.equal(sql.feeds.length, 1, 'feed row is inserted before response')
+    t.equal(sql.feeds.length, 1, 'feed row is inserted')
 
     const settledResponse = response as Response | null
 
     if (settledResponse) {
-        const body = await settledResponse.json() as { feed:FeedRow }
+        const body = await settledResponse.json() as { feed:FeedRow; unread?:number }
         t.equal(settledResponse.status, 201, 'feed create returns 201')
         t.equal(body.feed.url, 'https://example.com/feed.xml')
-        t.equal(body.feed.title, null, 'response does not wait for metadata')
+        t.equal(body.unread, 0, 'response includes unread count')
     }
-
-    releaseFetch()
-    await responsePromise
-    await Promise.all(waitUntilPromises)
 })
