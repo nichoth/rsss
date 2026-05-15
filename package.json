@@ -50,6 +50,7 @@
   "dependencies": {
     "@cf-wasm/photon": "^0.3.5",
     "@preact/signals": "^2.5.1",
+    "@sentry/browser": "^10.53.1",
     "@sqlite.org/sqlite-wasm": "^3.53.0-build1",
     "@substrate-system/a11y": "^0.0.17",
     "@substrate-system/blur-hash": "^0.0.35",

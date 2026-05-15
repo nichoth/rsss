@@ -115,6 +115,7 @@ const MAX_FEED_CONTENT_LENGTH = 1024 * 1024
 const FEED_TOO_LARGE_ERROR = 'feed too large'
 const FEED_TOO_LARGE_STATUS = 413
 export const RESOLVE_WINDOW_MS = 30_000
+export const POST_HYBRID_WAIT_MS = 3000
 export const RESOLVE_TIMEOUT_ERROR = 'Initial fetch did not complete'
 const FEED_SYNC_COLUMNS = `
     id, url, title, description, site_url, last_fetched, last_pulled_at,
@@ -857,12 +858,39 @@ export class UserDO extends DurableObject<Env> {
                     Math.min(existingAlarm, targetAt)
                 await this.ctx.storage.setAlarm(newAlarm)
 
-                this.ctx.waitUntil(this.fetchFeed(feed as unknown as Feed))
+                // Race fetch against a 3s window via the awaitFetchOrTimeout
+                // helper. Both outcomes converge on "re-read the row +
+                // compute unread + respond". On timeout we also push the in-
+                // flight promise to waitUntil so the fetch completes in the
+                // background.
 
-                return c.json(
-                    { feed },
-                    201
+                const fetchPromise = this.fetchFeed(feed as unknown as Feed)
+                const winner = await this.awaitFetchOrTimeout(
+                    fetchPromise,
+                    POST_HYBRID_WAIT_MS
                 )
+
+                let respondedFeed = feed
+                if (winner === 'done') {
+                    const updated = this.sql.exec(
+                        'SELECT * FROM feeds WHERE id = ?',
+                        (feed as { id:number }).id
+                    ).one()
+                    if (updated) {
+                        respondedFeed = updated
+                    }
+                } else {
+                    // 3s elapsed; let the fetch finish in the background so the
+                    // alarm + SSE + Phase 1 convergence pipeline can deliver
+                    // terminal state to the client.
+                    this.ctx.waitUntil(fetchPromise.catch(() => undefined))
+                }
+
+                const unread = this.getFeedUnreadCount(
+                    (respondedFeed as { id:number }).id
+                )
+
+                return c.json({ feed: respondedFeed, unread }, 201)
             } catch (_err) {
                 const err = _err as Error
                 console.error(
@@ -1528,6 +1556,37 @@ export class UserDO extends DurableObject<Env> {
             clearInterval(this.keepaliveInterval)
             this.keepaliveInterval = null
         }
+    }
+
+    private getFeedUnreadCount (feedId:number):number {
+        const row = this.sql.exec(
+            'SELECT COUNT(*) as unread FROM items ' +
+            'WHERE feed_id = ? AND is_read = 0',
+            feedId
+        ).one() as { unread:number } | null
+        return row?.unread ?? 0
+    }
+
+    private async awaitFetchOrTimeout (
+        fetchPromise:Promise<void>,
+        waitMs:number
+    ):Promise<'done'|'timeout'> {
+        let timeoutHandle:ReturnType<typeof setTimeout>|undefined
+        const winner = await Promise.race([
+            fetchPromise
+                .then(() => 'done' as const)
+                .catch(() => 'done' as const),
+            new Promise<'timeout'>((resolve) => {
+                timeoutHandle = setTimeout(
+                    () => resolve('timeout'),
+                    waitMs
+                )
+            })
+        ])
+        if (timeoutHandle !== undefined) {
+            clearTimeout(timeoutHandle)
+        }
+        return winner
     }
 
     protected async doFetchFeedText (
