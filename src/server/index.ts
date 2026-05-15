@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/cloudflare'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie'
@@ -10,7 +11,10 @@ import {
     type OAuthSession,
     type OAuthState
 } from './auth/oauth.js'
-import { UserDO } from './durable-objects/index.js'
+import {
+    UserDO as UserDOBase,
+    type Env as UserDOEnv
+} from './durable-objects/index.js'
 import { withIsolationHeaders } from './isolation-headers.js'
 import {
     BILLING_PLAN_IDS,
@@ -34,11 +38,8 @@ import { shouldSkipLazyHtml } from './lazy-html.js'
 import type { Context, Next } from 'hono'
 import type * as BlurhashRuntime from './blurhash-runtime.js'
 
-// Re-export the Durable Object class for Wrangler
-export { UserDO }
-
 export interface Env {
-    USER_DO:DurableObjectNamespace<UserDO>;
+    USER_DO:DurableObjectNamespace<UserDOBase>;
     SESSIONS:KVNamespace;
     BLURHASH_KV:KVNamespace;
     HTML_KV?:KVNamespace;
@@ -54,6 +55,7 @@ export interface Env {
     ADMIN_TOKEN?:string;
     APP_ORIGIN?:string;
     NODE_ENV:string;
+    SENTRY_DSN?:string;
 }
 
 interface CachedBilling {
@@ -757,7 +759,7 @@ const requireAdmin = async (c:Context<{
 function getUserDO (
     env:Env,
     did:string
-):DurableObjectStub<UserDO> {
+):DurableObjectStub<UserDOBase> {
     // Use the DID as the DO name for consistent routing
     const id = env.USER_DO.idFromName(did)
     return env.USER_DO.get(id)
@@ -1504,4 +1506,27 @@ const worker = Object.assign(app, {
     }
 })
 
-export default worker
+const getSentryOptions = (env:Env) => ({
+    dsn: env.SENTRY_DSN,
+    environment: env.NODE_ENV,
+    tracesSampleRate: env.NODE_ENV === 'production' ? 0.2 : 1.0,
+    sendDefaultPii: false,
+})
+
+// DO has its own narrower Env type; mirror the worker options for it.
+const getDOSentryOptions = (env:UserDOEnv) => ({
+    dsn: env.SENTRY_DSN,
+    environment: env.NODE_ENV,
+    tracesSampleRate: env.NODE_ENV === 'production' ? 0.2 : 1.0,
+    sendDefaultPii: false,
+})
+
+// Wrap UserDO so unhandled errors and storage/RPC spans flow to Sentry.
+// Wrangler resolves the class by export name — keep this named `UserDO`.
+export const UserDO = Sentry.instrumentDurableObjectWithSentry(
+    getDOSentryOptions,
+    UserDOBase
+)
+
+// Wrap the worker so fetch and queue handlers report to Sentry.
+export default Sentry.withSentry(getSentryOptions, worker)

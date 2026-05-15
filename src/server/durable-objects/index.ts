@@ -38,6 +38,7 @@ export interface Env {
     AUTUMN_SECRET_KEY?:string
     AUTUMN_DISABLED?:string
     NODE_ENV?:string
+    SENTRY_DSN?:string
 }
 
 interface Feed {
