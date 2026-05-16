@@ -58,8 +58,13 @@ test(
     'AC1.3: clicking button invokes onRefresh exactly once',
     async t => {
         let callCount = 0
+        let resolve:((v?:void) => void) | undefined
+        const p = new Promise<void>(_resolve => {
+            resolve = _resolve
+        })
         const onRefresh = async () => {
             callCount++
+            await p
         }
         const { root, cleanup } = renderComponent(1, onRefresh)
 
@@ -82,6 +87,10 @@ test(
                 're-entrancy guard: second click while busy does' +
                     ' not invoke onRefresh'
             )
+
+            if (resolve) resolve()
+            await p
+            await Promise.resolve()
         } finally {
             cleanup()
         }
@@ -166,9 +175,11 @@ test(
             resolve?.()
             await p
             await Promise.resolve()
+            await Promise.resolve()
 
+            const refreshedButton = root.querySelector('button')
             t.equal(
-                button?.disabled,
+                refreshedButton?.disabled,
                 false,
                 'button re-enabled after promise resolves'
             )
@@ -210,14 +221,15 @@ test(
             }
 
             await Promise.resolve()
+            await Promise.resolve()
 
+            const rejectedButton = root.querySelector('button')
             t.equal(
-                button?.disabled,
+                rejectedButton?.disabled,
                 false,
                 'button re-enabled after promise rejects'
             )
 
-            // Test re-entrancy guard still works after rejection
             let reject2:((e:Error) => void) | undefined
             const p2 = new Promise<void>((_resolve, _reject) => {
                 reject2 = _reject
@@ -247,9 +259,11 @@ test(
                 }
 
                 await Promise.resolve()
+                await Promise.resolve()
 
+                const retryButton2 = root2.querySelector('button')
                 t.equal(
-                    button2?.disabled,
+                    retryButton2?.disabled,
                     false,
                     're-entrancy guard still works after rejection'
                 )
