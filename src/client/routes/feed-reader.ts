@@ -47,11 +47,11 @@ export const FeedReader:FunctionComponent<{
     }, [feedUrl, feeds.value])
 
     const pendingCount = (() => {
-        const counts = state.feedUpdateCounts.value
+        const updateCounts = state.feedUpdateCounts.value
         if (state.selectedFeedId.value !== null) {
-            return counts[String(state.selectedFeedId.value)] ?? 0
+            return updateCounts[String(state.selectedFeedId.value)] ?? 0
         }
-        return Object.values(counts).reduce((a, b) => a + b, 0)
+        return Object.values(updateCounts).reduce((a, b) => a + b, 0)
     })()
 
     const handleRefreshPending = useCallback(

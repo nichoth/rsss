@@ -100,20 +100,28 @@ function nextTick ():Promise<void> {
     return new Promise(resolve => setTimeout(resolve, 0))
 }
 
-test('AC3.1 + AC3.3: Per-feed view with pending renders component ' +
-    'and calls refreshFeed', async (t) => {
+test('empty-state-pending-updates.AC3.1+AC3.3: Per-feed view with ' +
+    'pending renders component and calls refreshFeed', async (t) => {
     State.loadItems = noopLoadItems as typeof State.loadItems
     let refreshFeedCalled = false
-    let refreshFeedArgs: Array<unknown>|null = null
+    let refreshFeedArgsLen:number = 0
     State.refreshFeed = (async (
-        state:AppState,
-        feedId:string
+        _state:AppState,
+        _feedId:string
     ):Promise<void> => {
         refreshFeedCalled = true
-        refreshFeedArgs = [state, feedId]
+        refreshFeedArgsLen = 2
     }) as typeof State.refreshFeed
 
+    let refreshFeedsCalled = false
+    State.refreshFeeds = (async (
+        _state:AppState
+    ):Promise<void> => {
+        refreshFeedsCalled = true
+    }) as typeof State.refreshFeeds
+
     const state = makeState()
+    state.selectedFeedId.value = 1
     const feed = makeFeed({
         id: 1,
         url: 'https://example.com/feed.rss',
@@ -140,28 +148,42 @@ test('AC3.1 + AC3.3: Per-feed view with pending renders component ' +
 
         t.ok(refreshFeedCalled, 'State.refreshFeed was called')
         t.equal(
-            refreshFeedArgs?.[1],
-            '1',
-            'State.refreshFeed called with feedId as string'
+            refreshFeedArgsLen,
+            2,
+            'State.refreshFeed called with correct args'
+        )
+        t.equal(
+            refreshFeedsCalled,
+            false,
+            'State.refreshFeeds was NOT called'
         )
     } finally {
         unmount(root)
         State.loadItems = originalLoadItems
         State.refreshFeed = originalRefreshFeed
+        State.refreshFeeds = originalRefreshFeeds
     }
 })
 
-test('AC3.2 + AC3.4: All Items view with pending renders component ' +
-    'and calls refreshFeeds', async (t) => {
+test('empty-state-pending-updates.AC3.2+AC3.4: All Items view with ' +
+    'pending renders component and calls refreshFeeds', async (t) => {
     State.loadItems = noopLoadItems as typeof State.loadItems
     let refreshFeedsCalled = false
-    let refreshFeedsArgs: Array<unknown>|null = null
+    let refreshFeedsArgsLen:number = 0
     State.refreshFeeds = (async (
-        state:AppState
+        _state:AppState
     ):Promise<void> => {
         refreshFeedsCalled = true
-        refreshFeedsArgs = [state]
+        refreshFeedsArgsLen = 1
     }) as typeof State.refreshFeeds
+
+    let refreshFeedCalled = false
+    State.refreshFeed = (async (
+        _state:AppState,
+        _feedId:string
+    ):Promise<void> => {
+        refreshFeedCalled = true
+    }) as typeof State.refreshFeed
 
     const state = makeState()
     const feed1 = makeFeed({
@@ -198,53 +220,78 @@ test('AC3.2 + AC3.4: All Items view with pending renders component ' +
 
         t.ok(refreshFeedsCalled, 'State.refreshFeeds was called')
         t.equal(
-            refreshFeedsArgs?.length,
+            refreshFeedsArgsLen,
             1,
             'State.refreshFeeds called with just state'
+        )
+        t.equal(
+            refreshFeedCalled,
+            false,
+            'State.refreshFeed was NOT called'
         )
     } finally {
         unmount(root)
         State.loadItems = originalLoadItems
         State.refreshFeeds = originalRefreshFeeds
+        State.refreshFeed = originalRefreshFeed
     }
 })
 
-test('AC4.1: No feeds at all renders existing copy not component',
-    async (t) => {
-        State.loadItems = noopLoadItems as typeof State.loadItems
-
-        const state = makeState()
-        state.feeds.value = []
-        state.items.value = []
-        state.feedUpdateCounts.value = {
-            1: 5
-        }
-
-        const root = mount(state, [])
-        try {
-            await nextTick()
-
-            const component = root.querySelector(
-                '.pending-update-empty-state'
-            )
-            t.notOk(component,
-                '.pending-update-empty-state is NOT present')
-
-            const emptyState = root.querySelector('.empty-state')
-            t.ok(emptyState,
-                '.empty-state is present (existing copy)')
-        } finally {
-            unmount(root)
-            State.loadItems = originalLoadItems
-        }
-    }
-)
-
-test('AC4.2: Per-feed view with pending=0 renders existing copy ' +
-    'not component', async (t) => {
+test('empty-state-pending-updates.AC4.1: No feeds at all renders ' +
+    'existing copy not component', async (t) => {
     State.loadItems = noopLoadItems as typeof State.loadItems
+    State.refreshFeeds = (async (
+        _state:AppState
+    ):Promise<void> => {}) as typeof State.refreshFeeds
+    State.refreshFeed = (async (
+        _state:AppState,
+        _feedId:string
+    ):Promise<void> => {}) as typeof State.refreshFeed
 
     const state = makeState()
+    state.feeds.value = []
+    state.items.value = []
+    state.feedUpdateCounts.value = {
+        1: 5
+    }
+
+    const root = mount(state, [])
+    try {
+        await nextTick()
+
+        const component = root.querySelector(
+            '.pending-update-empty-state'
+        )
+        t.equal(
+            component,
+            null,
+            '.pending-update-empty-state is NOT present'
+        )
+
+        const emptyState = root.querySelector('.empty-state')
+        t.ok(emptyState,
+            '.empty-state is present (existing copy)')
+    } finally {
+        unmount(root)
+        State.loadItems = originalLoadItems
+        State.refreshFeeds = originalRefreshFeeds
+        State.refreshFeed = originalRefreshFeed
+    }
+})
+
+test('empty-state-pending-updates.AC4.2: Per-feed view with pending=0 ' +
+    'renders existing copy not component', async (t) => {
+    State.loadItems = noopLoadItems as typeof State.loadItems
+    State.refreshFeeds = (async (
+        _state:AppState
+    ):Promise<void> => {}) as typeof State.refreshFeeds
+    State.refreshFeed = (async (
+        _state:AppState,
+        _feedId:string
+    ):Promise<void> => {}) as typeof State.refreshFeed
+
+    const state = makeState()
+    state.selectedFeedId.value = null
     const feed = makeFeed({
         id: 1,
         url: 'https://example.com/feed.rss',
@@ -263,8 +310,11 @@ test('AC4.2: Per-feed view with pending=0 renders existing copy ' +
         const component = root.querySelector(
             '.pending-update-empty-state'
         )
-        t.notOk(component,
-            '.pending-update-empty-state is NOT present')
+        t.equal(
+            component,
+            null,
+            '.pending-update-empty-state is NOT present'
+        )
 
         const emptyState = root.querySelector('.empty-state')
         t.ok(emptyState,
@@ -272,12 +322,21 @@ test('AC4.2: Per-feed view with pending=0 renders existing copy ' +
     } finally {
         unmount(root)
         State.loadItems = originalLoadItems
+        State.refreshFeeds = originalRefreshFeeds
+        State.refreshFeed = originalRefreshFeed
     }
 })
 
-test('AC4.3: All Items view with pending sum=0 renders existing copy ' +
-    'not component', async (t) => {
+test('empty-state-pending-updates.AC4.3: All Items view with ' +
+    'pending sum=0 renders existing copy not component', async (t) => {
     State.loadItems = noopLoadItems as typeof State.loadItems
+    State.refreshFeeds = (async (
+        _state:AppState
+    ):Promise<void> => {}) as typeof State.refreshFeeds
+    State.refreshFeed = (async (
+        _state:AppState,
+        _feedId:string
+    ):Promise<void> => {}) as typeof State.refreshFeed
 
     const state = makeState()
     const feed1 = makeFeed({
@@ -301,8 +360,11 @@ test('AC4.3: All Items view with pending sum=0 renders existing copy ' +
         const component = root.querySelector(
             '.pending-update-empty-state'
         )
-        t.notOk(component,
-            '.pending-update-empty-state is NOT present')
+        t.equal(
+            component,
+            null,
+            '.pending-update-empty-state is NOT present'
+        )
 
         const emptyState = root.querySelector('.empty-state')
         t.ok(emptyState,
@@ -310,12 +372,21 @@ test('AC4.3: All Items view with pending sum=0 renders existing copy ' +
     } finally {
         unmount(root)
         State.loadItems = originalLoadItems
+        State.refreshFeeds = originalRefreshFeeds
+        State.refreshFeed = originalRefreshFeed
     }
 })
 
-test('AC4.4: itemsLoading=true renders neither component nor copy, ' +
-    'loading indicator is present', async (t) => {
+test('empty-state-pending-updates.AC4.4: itemsLoading=true renders ' +
+    'neither component nor copy, loading indicator is present', async (t) => {
     State.loadItems = noopLoadItems as typeof State.loadItems
+    State.refreshFeeds = (async (
+        _state:AppState
+    ):Promise<void> => {}) as typeof State.refreshFeeds
+    State.refreshFeed = (async (
+        _state:AppState,
+        _feedId:string
+    ):Promise<void> => {}) as typeof State.refreshFeed
 
     const state = makeState()
     const feed = makeFeed({
@@ -337,12 +408,18 @@ test('AC4.4: itemsLoading=true renders neither component nor copy, ' +
         const component = root.querySelector(
             '.pending-update-empty-state'
         )
-        t.notOk(component,
-            '.pending-update-empty-state is NOT present')
+        t.equal(
+            component,
+            null,
+            '.pending-update-empty-state is NOT present'
+        )
 
         const emptyState = root.querySelector('.empty-state')
-        t.notOk(emptyState,
-            '.empty-state is NOT present')
+        t.equal(
+            emptyState,
+            null,
+            '.empty-state is NOT present'
+        )
 
         const loadingIndicator = root.querySelector('.loading-text')
         t.ok(loadingIndicator,
@@ -350,5 +427,7 @@ test('AC4.4: itemsLoading=true renders neither component nor copy, ' +
     } finally {
         unmount(root)
         State.loadItems = originalLoadItems
+        State.refreshFeeds = originalRefreshFeeds
+        State.refreshFeed = originalRefreshFeed
     }
 })
