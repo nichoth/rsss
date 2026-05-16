@@ -175,11 +175,9 @@ test(
             resolve?.()
             await p
             await Promise.resolve()
-            await Promise.resolve()
 
-            const refreshedButton = root.querySelector('button')
             t.equal(
-                refreshedButton?.disabled,
+                button?.disabled,
                 false,
                 'button re-enabled after promise resolves'
             )
@@ -221,11 +219,9 @@ test(
             }
 
             await Promise.resolve()
-            await Promise.resolve()
 
-            const rejectedButton = root.querySelector('button')
             t.equal(
-                rejectedButton?.disabled,
+                button?.disabled,
                 false,
                 'button re-enabled after promise rejects'
             )
@@ -259,11 +255,9 @@ test(
                 }
 
                 await Promise.resolve()
-                await Promise.resolve()
 
-                const retryButton2 = root2.querySelector('button')
                 t.equal(
-                    retryButton2?.disabled,
+                    button2?.disabled,
                     false,
                     're-entrancy guard still works after rejection'
                 )
