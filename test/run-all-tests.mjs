@@ -113,6 +113,14 @@ const commands = [
     'node test/run-lazy-html-routing.mjs',
     'npm run test:initial-feed',
     [
+        'esbuild ./test/feed-reader-pending-updates.ts --bundle',
+        '--alias:cloudflare:workers=./test/cloudflare-workers-stub.ts',
+        '--alias:@sentry/cloudflare=./test/sentry-cloudflare-stub.ts',
+        '--loader:.css=text',
+        '--loader:.wasm=dataurl',
+        '| tapout'
+    ].join(' '),
+    [
         'esbuild ./test/index.ts --bundle',
         '--alias:cloudflare:workers=./test/cloudflare-workers-stub.ts',
         '--alias:@sentry/cloudflare=./test/sentry-cloudflare-stub.ts',

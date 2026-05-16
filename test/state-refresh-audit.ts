@@ -5,6 +5,7 @@ import { State, type AppState } from '../src/client/state.js'
 
 const ALLOWED_CALLERS = new Set([
     'src/client/components/sidebar-footer.ts',
+    'src/client/routes/feed-reader.ts',
     'src/client/routes/updates.ts'
 ])
 

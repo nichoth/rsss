@@ -11,6 +11,9 @@ import {
 import { ItemRow } from '../components/item-row.js'
 import { Sidebar } from '../components/sidebar.js'
 import { CacheSettings } from '../components/cache-settings.js'
+import {
+    PendingUpdateEmptyState
+} from '../components/pending-update-empty-state.js'
 import Debug from '@substrate-system/debug'
 const debug = Debug('rsss:view:feed-reader')
 
@@ -42,6 +45,26 @@ export const FeedReader:FunctionComponent<{
         if (!feedUrl) return null
         return feeds.value.find(f => stripProtocol(f.url) === feedUrl) || null
     }, [feedUrl, feeds.value])
+
+    const pendingCount = (() => {
+        const updateCounts = state.feedUpdateCounts.value
+        if (state.selectedFeedId.value !== null) {
+            return updateCounts[String(state.selectedFeedId.value)] ?? 0
+        }
+        return Object.values(updateCounts).reduce((a, b) => a + b, 0)
+    })()
+
+    const handleRefreshPending = useCallback(
+        async ():Promise<void> => {
+            const feedId = state.selectedFeedId.value
+            if (feedId !== null) {
+                await State.refreshFeed(state, String(feedId))
+            } else {
+                await State.refreshFeeds(state)
+            }
+        },
+        []
+    )
 
     // Sync selected feed into state so loadItems
     // filters at the query level
@@ -93,6 +116,28 @@ export const FeedReader:FunctionComponent<{
         state.itemsOffset.value = 0
         State.loadItems(state)
     }, [])
+
+    const renderEmptyState = ():unknown => {
+        if (feeds.value.length === 0) {
+            return html`<div class="empty-state">
+                Maybe add some feeds to start reading.
+            </div>`
+        }
+        if (pendingCount > 0) {
+            return html`<${PendingUpdateEmptyState}
+                count=${pendingCount}
+                onRefresh=${handleRefreshPending}
+            />`
+        }
+        if (selectedFeed) {
+            return html`<div class="empty-state">
+                No items in ${selectedFeed.title || selectedFeed.url}
+            </div>`
+        }
+        return html`<div class="empty-state">
+            No items to show.
+        </div>`
+    }
 
     const hasPrev = itemsOffset.value > 0
     const hasNext = itemsOffset.value + pageSize.value < itemsTotal.value
@@ -152,15 +197,8 @@ export const FeedReader:FunctionComponent<{
                             </li>
                         `)}
 
-                        ${!itemsLoading.value && items.value.length === 0 && html`
-                            <div class="empty-state">
-                                ${feeds.value.length === 0 ?
-                                    'Maybe add some feeds to start reading.' :
-                                    selectedFeed ?
-                                        `No items in ${selectedFeed.title || selectedFeed.url}` :
-                                        'No items to show.'}
-                            </div>
-                        `}
+                        ${!itemsLoading.value && items.value.length === 0 &&
+                            renderEmptyState()}
                     </ul>
 
                     ${itemsTotal.value > 0 && html`
