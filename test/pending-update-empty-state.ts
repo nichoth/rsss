@@ -174,7 +174,7 @@ test(
 
             resolve?.()
             await p
-            await Promise.resolve()
+            await new Promise(resolve => setTimeout(resolve, 0))
 
             t.equal(
                 button?.disabled,
@@ -218,7 +218,7 @@ test(
                 // propagated rejection is expected
             }
 
-            await Promise.resolve()
+            await new Promise(resolve => setTimeout(resolve, 0))
 
             t.equal(
                 button?.disabled,
@@ -254,7 +254,7 @@ test(
                     // expected
                 }
 
-                await Promise.resolve()
+                await new Promise(resolve => setTimeout(resolve, 0))
 
                 t.equal(
                     button2?.disabled,

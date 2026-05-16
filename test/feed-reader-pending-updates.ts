@@ -104,13 +104,15 @@ test('empty-state-pending-updates.AC3.1+AC3.3: Per-feed view with ' +
     'pending renders component and calls refreshFeed', async (t) => {
     State.loadItems = noopLoadItems as typeof State.loadItems
     let refreshFeedCalled = false
-    let refreshFeedArgsLen:number = 0
+    let capturedFeedArgState:AppState|null = null
+    let capturedFeedArgId:unknown = null
     State.refreshFeed = (async (
-        _state:AppState,
-        _feedId:string
+        s:AppState,
+        id:string
     ):Promise<void> => {
         refreshFeedCalled = true
-        refreshFeedArgsLen = 2
+        capturedFeedArgState = s
+        capturedFeedArgId = id
     }) as typeof State.refreshFeed
 
     let refreshFeedsCalled = false
@@ -148,9 +150,19 @@ test('empty-state-pending-updates.AC3.1+AC3.3: Per-feed view with ' +
 
         t.ok(refreshFeedCalled, 'State.refreshFeed was called')
         t.equal(
-            refreshFeedArgsLen,
-            2,
-            'State.refreshFeed called with correct args'
+            capturedFeedArgState,
+            state,
+            'State.refreshFeed received the test state'
+        )
+        t.equal(
+            capturedFeedArgId,
+            '1',
+            'feed id passed as string "1", not number'
+        )
+        t.equal(
+            typeof capturedFeedArgId,
+            'string',
+            'feed id is a string per State.refreshFeed contract'
         )
         t.equal(
             refreshFeedsCalled,
