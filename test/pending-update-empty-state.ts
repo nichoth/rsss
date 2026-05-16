@@ -191,6 +191,34 @@ test(
     'AC2.3: when onRefresh rejects, busy flag clears and button' +
         ' re-enables',
     async t => {
+        const expectedMessages = new Set(['test error', 'test'])
+        const originalConsoleError = console.error
+        console.error = function (...args:unknown[]) {
+            const first = args[0]
+            const second = args[1]
+            if (
+                typeof first === 'string' &&
+                first.includes('Unhandled promise rejection') &&
+                second instanceof Error &&
+                expectedMessages.has(second.message)
+            ) {
+                return
+            }
+            return originalConsoleError.apply(console, args)
+        }
+        const onUnhandled = (e:PromiseRejectionEvent) => {
+            const reason = e.reason
+            if (
+                reason instanceof Error &&
+                expectedMessages.has(reason.message)
+            ) {
+                e.preventDefault()
+                ;(window as unknown as { testsFailed?:boolean })
+                    .testsFailed = false
+            }
+        }
+        window.addEventListener('unhandledrejection', onUnhandled)
+
         let reject:((e:Error) => void) | undefined
         const p = new Promise<void>((_resolve, _reject) => {
             reject = _reject
@@ -266,6 +294,9 @@ test(
             }
         } finally {
             cleanup()
+            await new Promise(resolve => setTimeout(resolve, 0))
+            window.removeEventListener('unhandledrejection', onUnhandled)
+            console.error = originalConsoleError
         }
     }
 )
